@@ -22,7 +22,7 @@
 
 - 不编辑/删除 `lab/data/`、`lab/runs/`、`lab/models/` bytes、checkpoints、wandb、远端产物、`lab/infra/private/`，除非明确要求。
 - 不启动/kill/restart 长训练或远端作业。
-- 不开 PR / merge / release / 改远端基础设施，除非拿到 human 批准。`git push` 到已跟踪远端是 `ask`（每次确认）。
+- 不开 PR / merge / release / 改远端基础设施，除非拿到 human 批准。`git push`：topic/实验分支 `allow`，`main`/`master` 需 `CLAUDE_ALLOW_PUSH_MAIN=1` 显式放行。
 - 不无理由新增依赖。
 
 ## 验证

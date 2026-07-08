@@ -56,6 +56,9 @@ __pycache__/
 dist/
 build/
 
+# 自主窗口档：本机、临时、git-ignored（模板只提供 .example）
+.claude/settings.local.json
+
 # subagent 报告是过程产物，不进 Git（只留说明）
 .claude/agent-reports/*
 !.claude/agent-reports/README.md

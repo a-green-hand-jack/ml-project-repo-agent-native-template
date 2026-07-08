@@ -14,7 +14,9 @@
 | 新增依赖 | 影响可复现环境 | 说明必要性与最小集 |
 | promote 结果为 paper claim | 证据升级 | 附 run id/config/commit/metric + fresh verifier 结论 |
 
-> 例外：`git push` 到**已跟踪远端**（如 `origin/main`）不是完整 human-gate，而是 `ask`——agent 可触发，但每次由 human 确认。见 `.agent/action-boundary.md` 需问档。开 PR / merge / release 仍是完整门禁。
+> 例外（分支感知 push）：`git push` 到 **topic / 实验分支** 是 `allow`——agent 可做，不打断。
+> push 到 `main`/`master` 由 hook 地板拦，需 human 显式放行 `CLAUDE_ALLOW_PUSH_MAIN=1`（单次），
+> 见 `.agent/autonomous-window.md`。开 PR / merge / release / 建远端 repo 仍是完整门禁。
 
 ## 门禁形态
 

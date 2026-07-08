@@ -7,11 +7,12 @@
 - 编辑/删除数据与产物 bytes：`lab/data/**`、`lab/runs/**`、`lab/models/**` 权重、`checkpoints/**`、`wandb/**`。
 - 编辑私有 overlay 与密钥：`lab/infra/private/**`、`.env`。
 - 破坏性 shell：`rm -rf`、`sudo`、`curl ... | sh`。
+- push 到 `main`/`master`：hook 地板拦，除非命令显式带 `CLAUDE_ALLOW_PUSH_MAIN=1`（human 单次放行）。见 `autonomous-window.md`。
 - 派发无边界的 `general-purpose` 大 agent。
 
 ## 需问（ask，先说明意图与影响，等确认）
 
-- git 状态改变：`git commit`、`git checkout`、`git worktree remove`、`git push`（推到已跟踪远端，agent 可触发但每次确认）。
+- git 状态改变：`git commit`、`git checkout`、`git worktree remove`。
 - 依赖变更：`uv add`、`uv sync`、任何 install。
 - 计算副作用：`kill`、`sbatch`、`runai`、启动/重启训练。
 - 协作副作用：`gh pr create`、`gh pr merge`、release、改远端基础设施。
@@ -19,7 +20,8 @@
 
 ## 可做（allow，read-only 或低风险）
 
-- `git status` / `git diff*`、`pytest*`、`ruff*`、`mypy*`。
+- `git status` / `git diff*`、`git log*`、`pytest*`、`ruff*`、`mypy*`。
+- `git push` 到 **topic / 实验分支**（非 `main`/`master`）。
 - `tail` / `grep` / `rg` / glob / 只读探索。
 - 跑 repo validator：`python scripts/*.py`。
 
