@@ -20,13 +20,13 @@
       "Bash(rm -rf *)",
       "Bash(sudo *)",
       "Bash(curl *| sh)",
-      "Bash(git push *)",
       "Bash(pip install *)"
     ],
     "ask": [
       "Bash(git commit *)",
       "Bash(git checkout *)",
       "Bash(git worktree remove *)",
+      "Bash(git push *)",
       "Bash(uv add *)",
       "Bash(uv sync *)",
       "Bash(kill *)",

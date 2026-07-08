@@ -30,7 +30,8 @@ DANGEROUS_BASH = [
     (re.compile(r"\brm\s+-rf?\b"), "rm -rf 属破坏性删除，走人工确认"),
     (re.compile(r"\bsudo\b"), "sudo 提权禁止"),
     (re.compile(r"curl\b.*\|\s*(sudo\s+)?sh\b"), "curl | sh 远程执行禁止"),
-    (re.compile(r"\bgit\s+push\b"), "git push 是外部副作用，走 human gate（见 .agent/human-gates.md）"),
+    # 注：git push 不在此硬拦截。它是 `ask`（每次确认），不是 deny——见
+    # .agent/action-boundary.md 需问档、.agent/human-gates.md。PR/merge/release/远端基础设施仍走 human gate。
     (re.compile(r"\brm\b.*\b(lab/(data|runs|models)|checkpoints|wandb)\b"), "禁止删除数据/产物/checkpoint bytes"),
 ]
 

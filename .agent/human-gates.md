@@ -6,13 +6,15 @@
 
 | 动作 | 为什么 | agent 可做的准备 |
 | --- | --- | --- |
-| `git push` / 建远端 repo | 外发、可能被索引缓存 | 写好 commit、给出 diff 摘要 |
+| 建远端 repo / 首次推到新远端 / 改远端基础设施 | 外发、不可逆、可能被索引缓存 | 写好 commit、给出 diff 摘要 |
 | 开/合 PR、merge | 影响共享分支 | 起草 PR body（evidence + risks） |
 | release / 更新 deliverables 对外材料 | 影响导师/合作者可见 | 起草并标注 evidence 支持 |
 | 启动/kill/restart 训练或远端作业 | 真实计算成本 | 准备可复现 launch 命令 + checklist |
 | 删除/移动 data / checkpoint / run bytes | 不可逆、毁事实来源 | 生成归档提案，不执行 |
 | 新增依赖 | 影响可复现环境 | 说明必要性与最小集 |
 | promote 结果为 paper claim | 证据升级 | 附 run id/config/commit/metric + fresh verifier 结论 |
+
+> 例外：`git push` 到**已跟踪远端**（如 `origin/main`）不是完整 human-gate，而是 `ask`——agent 可触发，但每次由 human 确认。见 `.agent/action-boundary.md` 需问档。开 PR / merge / release 仍是完整门禁。
 
 ## 门禁形态
 

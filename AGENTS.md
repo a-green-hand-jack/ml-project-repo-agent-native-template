@@ -22,10 +22,10 @@
 
 - 编辑或删除 `lab/data/**`、`lab/runs/**`、`lab/models/**` bytes、`checkpoints/**`、`wandb/**`、`lab/infra/private/**`、`.env`。
 - 启动、kill、restart 长训练或远端作业。
-- `git push` / 开 PR / merge / release / 改远端基础设施。
+- 开 PR / merge / release / 改远端基础设施。
 - 未经理由地新增依赖。
 
-外部副作用一律走 human gate，见 `.agent/human-gates.md`。
+`git push` 到已跟踪远端是 `ask`（agent 可触发，每次确认），不在上面的禁止列表。其余外部副作用一律走 human gate，见 `.agent/human-gates.md`。
 
 ## 能力是 repo-local 的
 
