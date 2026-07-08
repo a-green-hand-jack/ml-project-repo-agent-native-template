@@ -26,10 +26,32 @@
 
 agent 从 `AGENTS.md` 开始读；Claude Code 从 `CLAUDE.md`（薄路由）开始。
 
-## 从模板派生一个新项目
+## 用这个模板开新项目（Use this template）
 
-1. 复制本 repo（或用作 GitHub template）。
-2. 填写 `PROJECT.md`：研究对象、active family、trunk、remote/worktree 策略。
+本仓库已设为 GitHub **template repository**，派生新 `ml-project-repo` 有三种方式：
+
+**A. 网页一键（推荐）** — 在仓库页点 **"Use this template" → Create a new repository**，填新项目名即可。
+
+**B. `gh` CLI**
+
+```bash
+gh repo create <new-project> \
+  --template a-green-hand-jack/ml-project-repo-agent-native-template \
+  --private --clone
+cd <new-project>
+```
+
+**C. 直接 clone 再改 remote**（不想保留派生关系时）
+
+```bash
+git clone git@github.com:a-green-hand-jack/ml-project-repo-agent-native-template.git <new-project>
+cd <new-project> && rm -rf .git && git init
+```
+
+### 派生后的落地步骤
+
+1. 填写 `PROJECT.md`：研究对象、active family、trunk、remote/worktree 策略。
+2. 把 `.github/CODEOWNERS` 里的 `@a-green-hand-jack` 换成该项目真实 owner。
 3. 删掉用不到的目录（模板是「一次建好，按需删减」，不是「一定全用」）。
 4. 跑 `python scripts/validate-governance.py` 确认 harness 仍然自洽。
 5. 在 `.reference-docs/` 里保留或更新你信奉的 doctrine 版本。
