@@ -12,6 +12,16 @@ repo-local lifecycle hooks（可执行，以本机权限运行——保持小而
 
 hook 从 stdin 读 JSON（`tool_name` / `tool_input` 等）。`pre_tool_guard` 以 exit code 2 + stderr 表示阻止；两者解析失败时保守放行。
 
+## `pre_tool_guard` 拦什么（地板层，bypass/自主窗口也拦）
+
+- 用 **shlex 真正解析命令**（非子串正则）：引号里的字面量（commit message、`echo "..."`）不误伤；引号里的真实路径/分支（`rm -rf "lab/data"`、`git push origin "main"`）仍识别。
+- 提权/远程执行：`sudo`、`curl|sh`、`wget|sh`。
+- 依赖：`pip install`、`python -m pip install`（用 `uv add`）。
+- `rm -r` **目标分级**：数据/产物 bytes、`.git`、绝对路径(非 `/tmp`)、`~`、仓库根、`..` → 拦；缓存/构建/临时目录（`__pycache__` 等）→ 放行。另有兜底正则拦 `find -exec rm ... lab/data` 类嵌套。
+- `mv`/`cp`/`rsync`/`dd` 触碰受保护路径 → 拦。
+- 受保护路径的 `Edit`/`Write` → 拦。
+- push 到 `main`/`master` → 拦，除非 `CLAUDE_ALLOW_PUSH_MAIN=1`。
+
 ## 注意
 
 - hook 与 `.claude/settings.json` 的 deny/ask、`.agent/action-boundary.md` 必须一致。

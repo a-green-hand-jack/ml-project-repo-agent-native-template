@@ -1,10 +1,9 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "_comment": "扩展示例：在 settings.json 基础上加入可选 hooks。按项目真实工具裁剪后复制进 settings.json。",
+  "_comment": "扩展示例：在 settings.json 基础上加入可选 hooks（Notification 等）。按项目真实工具裁剪后复制进 settings.json。注：rm -rf 不用 blanket deny——由 pre_tool_guard.py 按目标分级（缓存可删、数据/产物拦）。",
   "permissions": {
     "deny": [
-      "Agent(general-purpose)",
-      "Bash(rm -rf *)"
+      "Agent(general-purpose)"
     ],
     "ask": [
       "Bash(gh pr create *)",
