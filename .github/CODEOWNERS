@@ -1,0 +1,17 @@
+# CODEOWNERS —— 高风险控制面变更需 owner review。
+# 派生项目请把 @OWNER 替换成真实 GitHub 用户/团队。
+
+# 默认 owner
+*                       @OWNER
+
+# doctrine / 能力 / 门禁：改动影响所有 agent 行为，必须 owner review
+/.agent/                @OWNER
+/.claude/               @OWNER
+/scripts/               @OWNER
+/AGENTS.md              @OWNER
+/CLAUDE.md              @OWNER
+/ANATOMY.md             @OWNER
+
+# 研究事实与对外承诺：改动影响 claim/evidence 口径
+/lab/research/          @OWNER
+/deliverables/          @OWNER

@@ -1,0 +1,43 @@
+# ml-project-repo-agent-native-template
+
+> 面向 AI PhD 的「agent-native」ML 研究 repo 模板。所有未来的 `ml-project-repo` 都从这里派生。
+
+这个模板把 Claude Code 当作**实验仪器**而不是聊天窗口：短上下文做当前判断，repo 文件做长期控制面，subagent 做隔离任务，worktree 做并行边界，hook/permission 做硬约束，anatomy/ledger/validator 做防漂移，测试与实验记录做事实来源。
+
+设计精神与实践依据见 `.reference-docs/`（`claude_code_optimization_spirit_zh.md` 与 `claude_code_practice_for_ai_phd_zh.md`）。
+
+## 这个 repo 是什么
+
+- 一个可复制的**研究控制根**：一进 repo，human 和 agent 都能读到可信信息，并通过 repo 改变可信信息。
+- Chat 是临时控制台；repo 是共同可信平面。目标、批注、plan、结果、决策、反例都落到文件里。
+
+## 现在怎么看（human 入口）
+
+| 想知道 | 去哪里 |
+| --- | --- |
+| 项目研究对象、trunk、worktree 策略 | `PROJECT.md` |
+| 当前在做什么、下一步 | `memory/current-status.md` |
+| 有哪些 claim、哪些 evidence 支持 | `lab/research/claims.yaml` · `lab/research/evidence.yaml` |
+| 我该怎么和 agent 协作 | `human/README.md` |
+| repo 结构地图 | `ANATOMY.md` |
+| 采用了哪些 Claude Code 工作流 | `memory/current-practices.md` |
+
+## agent 入口
+
+agent 从 `AGENTS.md` 开始读；Claude Code 从 `CLAUDE.md`（薄路由）开始。
+
+## 从模板派生一个新项目
+
+1. 复制本 repo（或用作 GitHub template）。
+2. 填写 `PROJECT.md`：研究对象、active family、trunk、remote/worktree 策略。
+3. 删掉用不到的目录（模板是「一次建好，按需删减」，不是「一定全用」）。
+4. 跑 `python scripts/validate-governance.py` 确认 harness 仍然自洽。
+5. 在 `.reference-docs/` 里保留或更新你信奉的 doctrine 版本。
+
+## 快速门禁
+
+```bash
+python scripts/validate-governance.py     # 总门禁：harness + anatomy + 治理
+python scripts/check-agent-harness.py     # 结构/必需文件/根污染
+python scripts/check-anatomy-drift.py     # ANATOMY 引用与行号漂移
+```

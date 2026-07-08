@@ -1,0 +1,66 @@
+# === 大 bytes 不进 Git：只保留 manifest / index / summary ===
+# 见 .reference-docs 与 lab/infra/storage/
+lab/runs/**
+!lab/runs/.gitkeep
+!lab/runs/README.md
+lab/data/**
+!lab/data/
+!lab/data/README.md
+!lab/data/AGENTS.md
+!lab/data/CLAUDE.md
+!lab/data/ANATOMY.md
+!lab/data/manifests/
+!lab/data/manifests/**
+!lab/data/checksums/
+!lab/data/checksums/**
+!lab/data/task-sets/
+!lab/data/task-sets/**
+!lab/data/schemas/
+!lab/data/schemas/**
+!lab/data/**/.gitkeep
+
+# checkpoints / 模型权重 bytes（保留 index yaml）
+lab/models/**
+!lab/models/
+!lab/models/*.yaml
+!lab/models/README.md
+!lab/models/.gitkeep
+checkpoints/
+*.ckpt
+*.pt
+*.pth
+*.safetensors
+
+# 实验追踪
+wandb/
+mlruns/
+outputs/
+logs/
+
+# 私有 overlay（永不进 Git）
+lab/infra/private/**
+!lab/infra/private/.gitkeep
+!lab/infra/private/README.md
+.env
+.env.*
+!.env.example
+
+# Python / uv
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# 本地下载的参考文档（doctrine 快照，可选保留）
+# .reference-docs/
+
+# 编辑器 / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp

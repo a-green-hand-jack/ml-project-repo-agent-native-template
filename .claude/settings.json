@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "deny": [
+      "Edit(lab/data/**)",
+      "Write(lab/data/**)",
+      "Edit(lab/runs/**)",
+      "Write(lab/runs/**)",
+      "Edit(lab/models/**)",
+      "Write(lab/models/**)",
+      "Edit(lab/infra/private/**)",
+      "Write(lab/infra/private/**)",
+      "Edit(checkpoints/**)",
+      "Write(checkpoints/**)",
+      "Edit(wandb/**)",
+      "Write(wandb/**)",
+      "Edit(.env)",
+      "Write(.env)",
+      "Bash(rm -rf *)",
+      "Bash(sudo *)",
+      "Bash(curl *| sh)",
+      "Bash(git push *)"
+    ],
+    "ask": [
+      "Bash(git commit *)",
+      "Bash(git checkout *)",
+      "Bash(git worktree remove *)",
+      "Bash(uv add *)",
+      "Bash(uv sync *)",
+      "Bash(pip install *)",
+      "Bash(kill *)",
+      "Bash(sbatch *)",
+      "Bash(runai *)",
+      "Bash(gh pr create *)",
+      "Bash(gh pr merge *)"
+    ],
+    "allow": [
+      "Bash(git status)",
+      "Bash(git diff *)",
+      "Bash(git diff --check)",
+      "Bash(git log *)",
+      "Bash(git worktree list)",
+      "Bash(pytest *)",
+      "Bash(uv run pytest *)",
+      "Bash(ruff check *)",
+      "Bash(ruff format --check *)",
+      "Bash(mypy *)",
+      "Bash(tail *)",
+      "Bash(grep *)",
+      "Bash(rg *)",
+      "Bash(python scripts/check-agent-harness.py *)",
+      "Bash(python scripts/validate-governance.py *)",
+      "Bash(python scripts/check-anatomy-drift.py *)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .claude/hooks/pre_tool_guard.py"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .claude/hooks/pre_compact_memory_check.py"
+          }
+        ]
+      }
+    ]
+  }
+}
