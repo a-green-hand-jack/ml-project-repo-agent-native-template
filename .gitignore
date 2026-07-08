@@ -56,6 +56,11 @@ __pycache__/
 dist/
 build/
 
+# subagent 报告是过程产物，不进 Git（只留说明）
+.claude/agent-reports/*
+!.claude/agent-reports/README.md
+!.claude/agent-reports/.gitkeep
+
 # 本地下载的参考文档（doctrine 快照，可选保留）
 # .reference-docs/
 

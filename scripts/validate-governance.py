@@ -3,7 +3,7 @@
 
 治理规则：
 1. .gitignore 保护危险路径（data/runs/models bytes、checkpoints、wandb、private、.env）。
-2. lab/research/*.yaml 与 lab/artifacts/*.yaml 可解析（有 PyYAML 时深检，否则做轻量结构检查）。
+2. lab/{research,artifacts,data,models}/*.yaml 可解析（有 PyYAML 时深检，否则做轻量结构检查）。
 3. 大 bytes 未被误加进 Git（有 git 时检查 tracked 文件不含受保护 bytes 路径）。
 
 先跑子检查（作为独立进程，便于单独调用），再跑本文件治理规则。
@@ -50,8 +50,13 @@ def check_gitignore() -> None:
 
 
 def check_yaml() -> None:
-    yaml_files = list((REPO / "lab" / "research").glob("*.yaml")) + \
-        list((REPO / "lab" / "artifacts").glob("*.yaml"))
+    # 核心索引/ledger 目录（见 .agent/artifact-policy.md）。
+    yaml_files = (
+        list((REPO / "lab" / "research").glob("*.yaml"))
+        + list((REPO / "lab" / "artifacts").glob("*.yaml"))
+        + list((REPO / "lab" / "data").glob("*.yaml"))
+        + list((REPO / "lab" / "models").glob("*.yaml"))
+    )
     try:
         import yaml  # type: ignore
         loader = lambda t: yaml.safe_load(t)  # noqa: E731
