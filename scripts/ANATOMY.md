@@ -18,7 +18,7 @@ repo 的可运行门禁层。三个独立脚本，无第三方硬依赖，只读
 
 | 文件 | 角色 | 对应 doctrine |
 | --- | --- | --- |
-| `check-agent-harness.py` | 结构/必需文件/根污染/四件套/能力索引/settings 校验 | `.agent/repo-editing-guardrails.md` · `repo-documentation-topology.md` |
+| `check-agent-harness.py` | 结构/必需文件/根污染/四件套/能力索引/settings/DESIGN 清单 校验 | `.agent/repo-editing-guardrails.md` · `repo-documentation-topology.md` |
 | `check-anatomy-drift.py` | ANATOMY related_files 与 line citation 漂移 | `.agent/anatomy-protocol.md` |
 | `validate-governance.py` | 聚合上两者 + gitignore/YAML/tracked-bytes 治理规则 | `.agent/action-boundary.md` · `artifact-policy.md` |
 

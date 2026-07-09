@@ -1,6 +1,6 @@
 ---
 name: repo-doc-steward
-description: 维护重要目录的 README/AGENTS/CLAUDE/ANATOMY 导航四件套、在结构改动时同步 anatomy 时使用。
+description: 维护重要目录的 README/AGENTS/CLAUDE/ANATOMY 导航四件套、根级 DESIGN.md 能力清单、在结构改动时同步 anatomy 时使用。
 tools: Read, Write, Edit
 model: inherit
 ---
@@ -16,6 +16,7 @@ model: inherit
 - 每个重要目录具备一致的导航四件套：README（human 导向）、AGENTS（agent 导向）、CLAUDE（Claude Code 约定）、ANATOMY（结构地图）。
 - 避免两类失衡：repo 只对 agent 可读、或只对 human 友好。
 - 结构改动（新增/移动/删除目录）必须在同一 commit 内更新对应 anatomy。
+- 增删能力（subagent/skill/command/hook）时同步根级 `DESIGN.md` §10 清单表；`check-agent-harness.py` 会校验数量一致。
 
 ## 方法
 1. 对照 topology / anatomy 协议巡检目标目录，找出缺失或过期的文档。

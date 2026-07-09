@@ -149,6 +149,34 @@ def check_settings() -> None:
                     err(f"hook 脚本不存在：{m.group(0)}（{event}）")
 
 
+def check_design_inventory() -> None:
+    """若存在 DESIGN.md，校验其 §10 能力清单表里的数量与实际一致（防手记漂移）。
+    对应 doctrine：`.agent/repo-documentation-topology.md`。DESIGN.md 可选：不存在则跳过；
+    表格式变动导致匹配不到时也跳过（不误报）。"""
+    design = REPO / "DESIGN.md"
+    if not design.exists():
+        return
+    text = design.read_text(encoding="utf-8", errors="replace")
+    skills_dir = REPO / ".claude" / "skills"
+    actual = {
+        "agents": len(list((REPO / ".claude" / "agents").glob("*.md"))),
+        "skills": len([d for d in skills_dir.iterdir() if (d / "SKILL.md").exists()])
+        if skills_dir.is_dir() else 0,
+        "commands": len(list((REPO / ".claude" / "commands").glob("*.md"))),
+        "hooks": len(list((REPO / ".claude" / "hooks").glob("*.py"))),
+    }
+    for key in ("agents", "skills", "commands", "hooks"):
+        m = re.search(rf"\.claude/{key}/`?\s*\|\s*(\d+)", text)
+        if not m:
+            continue  # 表格式变了：跳过，不误报
+        stated = int(m.group(1))
+        if stated != actual[key]:
+            warn(
+                f"DESIGN.md 能力清单过时：{key} 写 {stated}，实际 {actual[key]}。"
+                "更新 DESIGN.md §10 清单表（repo-doc-steward 职责）。"
+            )
+
+
 def main() -> int:
     strict = "--strict" in sys.argv
     check_required_top()
@@ -156,6 +184,7 @@ def main() -> int:
     check_quartets()
     check_capabilities()
     check_settings()
+    check_design_inventory()
 
     for w in warnings:
         print(f"WARN  {w}")

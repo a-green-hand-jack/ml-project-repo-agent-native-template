@@ -4,7 +4,7 @@
 
 ```bash
 python scripts/validate-governance.py        # 总门禁（跑下面两个 + 治理规则）
-python scripts/check-agent-harness.py         # 结构 / 必需文件 / 根污染 / 能力索引 / settings
+python scripts/check-agent-harness.py         # 结构 / 必需文件 / 根污染 / 能力索引 / settings / DESIGN 清单
 python scripts/check-anatomy-drift.py         # ANATOMY 引用与行号漂移
 ```
 
