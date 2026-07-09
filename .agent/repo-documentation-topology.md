@@ -37,6 +37,28 @@ lab/infra/   lab/research/   lab/artifacts/   memory/   deliverables/   scripts/
 - 只有静态资源或简单 leaf helper 的目录，不要为整齐制造空文档。
 - 由 `repo-doc-steward` 维护，避免 repo 只对 agent 可读或只对 human 友好。
 
+## 为什么没有通用 `docs/`
+
+本模板**刻意不设**根级 `docs/`。文档按**角色**就近分布，而不是堆进一个 catch-all 目录：
+
+| 想放的文档 | 家 |
+| --- | --- |
+| 这里是什么 / 怎么上手（human） | 各级 `README.md` |
+| agent 能改什么 / 禁改 / 怎么验证 | 各级 `AGENTS.md` |
+| 结构地图：谁调用谁、状态在哪 | 各级 `ANATOMY.md` |
+| doctrine / 行为契约 / 规则 | `.agent/` |
+| 模板本身怎么设计 | 根 `DESIGN.md` |
+| 对外交付（paper/slides/release） | `deliverables/` |
+| 研究事实（claim/evidence/ledger） | `lab/research/` |
+| 计划正文 / human 批注 | `plans/` + `human/reviews/` |
+
+理由：一个通用 `docs/` 一进来就要回答「这份文档给 human 还是 agent？是规则还是地图？」——
+四件套 + `.agent/` + `DESIGN.md` 已在源头把这个归属问题拆开了。再设 `docs/` 会与它们**职责重叠**、
+制造「同一件事两处写」的漂移，也违背「别为整齐制造空文档」。`docs` 不在 harness 根白名单，
+根级 `docs/` 会触发根污染告警——这是有意排除。
+
+需要项目级长文档时，用**嵌套** `lab/docs/`（贴近它服务的代码），不要在根另起一套。
+
 ## 防止两种失衡
 
 - 只对 agent 可读、对 human 不可读 → 补 README。
