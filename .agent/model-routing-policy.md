@@ -27,7 +27,7 @@ human 说「开 subagent 做 X」
 
 「预算不是身份」要能在**执行层**成立，不能只写在文档里：
 
-- `.claude/agents/*.md` 的 frontmatter 一律 `model: inherit` 是**刻意的**——不给角色钉死模型档位，避免「repo-researcher 天生最贵」这类身份化。
+- `.claude/agents/*.md` 的 frontmatter 一律 `model: inherit` 是**刻意的**——不给角色钉死模型档位，避免「repo-researcher 天生最贵」这类身份化。Codex adapters（`.codex/agents/*.toml`）同样不写死 model，默认继承父 session。
 - 真正的档位在**派发时**决定：main 按 launch packet 的 `recommended model` / `recommended effort`，在启动 child 时逐次覆盖（Agent 调用的 per-call model/effort 参数）。tier→model 映射随 CC 版本与预算变化，由 main 在派发点决定具体 model id，不硬编码进 repo。
 - 因此 `inherit` 是「无固定身份、等派发时定预算」的默认，不是「永远继承 main 的最高档」。若某次派发不带覆盖，child 才回退到继承——这只应发生在 tier 与 main 同档的任务上。
 
@@ -38,6 +38,8 @@ human 说「开 subagent 做 X」
 - `.claude/agents/zh-review-gate.md` 的 frontmatter 显式锁定 `model: haiku`，不遵循上面"model: inherit，不写死"的默认原则。这是刻意的、经 human 明确要求的窄例外，不是遗漏。
 - 理由：`zh-review-gate` 是"文档默认中文"doctrine（见 `human/decisions/20260709-doc-language-default-chinese.md`）的翻译安全网，其存在价值恰恰在于成本要独立于主 session 当次用的模型——哪怕主 session 用最贵的模型，这个兜底检查也应该几乎零成本；若它 inherit 主 session 的模型，就失去了作为「低成本安全网」的意义。
 - 这是目前**唯一**的已知例外。以后若出现类似「职责决定必须用便宜模型、不能 inherit」的新 subagent，应在本节补充记录，而不是只散落在各 agent 自己的文件里、让本 policy 本身看不出该原则已有先例。
+- Codex 没有沿用 `haiku` 这个 Claude model 名；`zh-review-gate` 的 Codex adapter 会把它记录为低成本提示，
+  具体可用模型由派发方按当前 Codex 环境选择。
 
 ## 选 tier 的问题
 

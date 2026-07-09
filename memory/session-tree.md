@@ -5,29 +5,26 @@
 
 ## Parent objective
 
-整理 main / worktree / GitHub branch：清理已合入分支，把 `adopt-existing-repo` 功能合入 main，
-并保留两个 replay case 分支作为独立压测证据。
+让模板在保留 Claude Code 原生能力的同时，也能被 Codex 直接发现并使用同等 repo-local 能力。
 
 ## Current phase
 
-`worktree-adopt-existing-repo` 已合入 main；memory 文件冲突已按最新决策整理，最终 validator 已通过。
-feature worktree/branch cleanup 已完成。
+Codex adapter implementation 已完成：`.codex/`、`.agents/`、共享 hooks、生成器、validator 与文档已同步。
+治理验证已通过；当前没有派生子 session。
 
 ## Children
 
 | id | purpose | branch/worktree | plan doc | status | next prompt |
 | --- | --- | --- | --- | --- | --- |
-| feature | adopt-existing-repo workflow | merged into `main`; local feature worktree/branch removed | `plans/20260709-adopt-existing-repo.zh.md` | done | _none_ |
+| codex-adapters | Add Codex config/agents/skills/rules adapters | current `main` checkout | _none_ | done | _none_ |
 | case-agent-r1 | Agent-R1 adoption replay case | `worktree-case+agent-r1-adoption-replay` / `.claude/worktrees/case+agent-r1-adoption-replay` | `plans/20260709-adopt-existing-repo.zh.md` | keep | Keep as case branch; do not merge full external case into main. |
 | case-elf | ELF template replay case | `worktree-case+elf-template-replay` / `.claude/worktrees/case+elf-template-replay` | `memory/branches/case-elf-template-replay.md` | keep/archive | Keep as replay evidence; do not merge into main. |
 
 ## Merge / review order
 
-1. Reference coverage / live-status fix was committed locally on main as `cb89a6b`.
-2. Merged `worktree-adopt-existing-repo` into main.
-3. Ran final validation on merged main.
-4. Removed only the adopted feature worktree/branch after merge commit completed.
-5. Leave both replay case worktrees/branches in place unless human asks to archive/move them separately.
+1. Review the Codex adapter diff as one capability change.
+2. If accepted, commit together with synced `ANATOMY.md` files and `memory/change-control.yaml`.
+3. Do not push main unless human explicitly approves.
 
 ## Global forbidden paths
 
@@ -41,6 +38,7 @@ feature worktree/branch cleanup 已完成。
 
 ## Open risks
 
-- `main` will be ahead of `origin/main` after the local commits; do not push main without explicit human release/push approval.
+- `main` remains ahead of `origin/main`; do not push main without explicit human release/push approval.
 - `.claude/worktrees/**` appears as untracked from the main checkout because the worktrees live inside the repo directory.
 - The two case branches contain full replay evidence and should not be merged into main by default.
+- Codex hooks/config require project trust and hook trust review before they run in a fresh Codex session.

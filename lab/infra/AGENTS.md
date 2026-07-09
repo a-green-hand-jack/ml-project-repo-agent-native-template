@@ -10,7 +10,7 @@
 
 - 禁止读、写、提交 `private/` 的任何内容——**永不进 Git**。
 - 禁止自行执行 `launch/` 的启动命令：**启动是人类闸门**。
-- 禁止放宽 `.claude/settings.json` 的 deny/ask 而不在 `permissions/` 记录 owner + 理由 + 验证。
+- 禁止放宽 `.claude/settings.json` 或 `.codex/rules/default.rules` 的 deny/ask/prompt 而不在 `permissions/` 记录 owner + 理由 + 验证。
 
 ## 必须验证
 

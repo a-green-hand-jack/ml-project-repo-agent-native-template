@@ -1,6 +1,6 @@
 # .claude/
 
-Claude Code 项目能力层。项目专属能力放这里，**不装到 user 全局**。
+Claude Code 项目能力层，也是 Codex adapter 的 canonical source。项目专属能力放这里，**不装到 user 全局**。
 
 | 目录 | 内容 |
 | --- | --- |
@@ -13,3 +13,6 @@ Claude Code 项目能力层。项目专属能力放这里，**不装到 user 全
 | `agent-reports/` | subagent 写长报告的地方（主线程只接摘要） |
 
 能力必须有 manifest / owner / verification，见 `.agent/tool-skill-interface.md`。为什么这样限制在 `.agent/`；验证在 `scripts/`。
+
+Codex 读取的 `.codex/agents` 与 `.agents/skills` 由本目录生成；改完 agents / skills / commands 后运行
+`python scripts/sync-codex-adapters.py`。

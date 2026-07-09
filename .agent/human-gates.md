@@ -15,12 +15,14 @@
 | promote 结果为 paper claim | 证据升级 | 附 run id/config/commit/metric + fresh verifier 结论 |
 
 > 例外（分支感知 push）：`git push` 到 **topic / 实验分支** 是 `allow`——agent 可做，不打断。
-> push 到 `main`/`master` 由 hook 地板拦，需 human 显式放行 `CLAUDE_ALLOW_PUSH_MAIN=1`（单次），
-> 见 `.agent/autonomous-window.md`。开 PR / merge / release / 建远端 repo 仍是完整门禁。
+> push 到 `main`/`master` 由 hook 地板拦，需 human 显式放行 `CLAUDE_ALLOW_PUSH_MAIN=1`
+> 或 `CODEX_ALLOW_PUSH_MAIN=1`（单次），见 `.agent/autonomous-window.md`。开 PR / merge /
+> release / 建远端 repo 仍是完整门禁。
 
 ## 门禁形态
 
-- 机器层：`.claude/settings.json` 里对应 `ask` / `deny`；`PreToolUse(Bash|gh)` hook。
+- 机器层：`.claude/settings.json` 与 `.codex/rules/default.rules` 里对应 `ask` / `deny` / `prompt`；
+  `PreToolUse(Bash|Edit|Write|apply_patch)` hook。
 - 流程层：`.github/pull_request_template.md` + `CODEOWNERS` review。
 - 记录层：批准与理由落到 `human/decisions/`。
 

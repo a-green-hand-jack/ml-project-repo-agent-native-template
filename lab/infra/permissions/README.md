@@ -1,6 +1,6 @@
 # lab/infra/permissions/ — 权限理由
 
-解释根 `.claude/settings.json` 的 deny / ask / allow 列表**为什么这样设**。
+解释根 `.claude/settings.json` 与 `.codex/rules/default.rules` 的 deny / ask / allow / prompt 列表**为什么这样设**。
 
 每条高危能力应记录：
 

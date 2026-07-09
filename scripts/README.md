@@ -8,6 +8,7 @@ python scripts/validate-governance.py        # 总门禁（harness + anatomy + �
 python scripts/check-agent-harness.py         # 结构 / 必需文件 / 根污染 / 能力索引 / settings / DESIGN 清单
 python scripts/check-anatomy-drift.py         # ANATOMY 引用与行号漂移 + 120 行硬上限
 python scripts/check-same-commit.py --staged  # same-commit rule：结构改动 <-> ANATOMY 同变更集
+python scripts/sync-codex-adapters.py --check # Codex adapters 与 .claude canonical 能力是否同步
 python scripts/adopt-existing-repo.py <repo> --phase all  # 迁移已有 repo 到 template 形态
 python scripts/check-adoption-integrity.py <repo>         # 校验 adoption baseline bytes 仍存在
 ```

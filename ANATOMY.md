@@ -3,6 +3,8 @@ related_files:
   - human/ANATOMY.md
   - .agent/AGENTS.md
   - .claude/ANATOMY.md
+  - .codex/ANATOMY.md
+  - .agents/ANATOMY.md
   - lab/ANATOMY.md
   - memory/ANATOMY.md
   - deliverables/ANATOMY.md
@@ -27,7 +29,8 @@ maintenance: |
 | 入口层 | `AGENTS.md` `CLAUDE.md` `PROJECT.md` `DESIGN.md` | agent/human 入口、项目描述、模板设计说明 | — |
 | 交互层 | `human/` | brief / review / decision / inbox | `human/ANATOMY.md` |
 | doctrine 层 | `.agent/` | 行为契约、边界、政策、协议 | `.agent/AGENTS.md` |
-| 能力层 | `.claude/` | subagents / skills / commands / hooks / settings | `.claude/ANATOMY.md` |
+| Claude 能力层 | `.claude/` | canonical subagents / skills / commands / hooks / settings | `.claude/ANATOMY.md` |
+| Codex 适配层 | `.codex/` `.agents/` | Codex config / custom agents / repo skills adapters | `.codex/ANATOMY.md` · `.agents/ANATOMY.md` |
 | 研究控制面 | `lab/` | code / infra / research / data / artifacts / runs / recipes | `lab/ANATOMY.md` |
 | 活状态层 | `memory/` | current-status / session-tree / practices | `memory/ANATOMY.md` |
 | 对外承诺层 | `deliverables/` | paper / slides / release | `deliverables/ANATOMY.md` |
