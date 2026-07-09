@@ -181,6 +181,10 @@
           {
             "type": "command",
             "command": "ruff format \"$CLAUDE_FILE_PATHS\" 2>/dev/null || true"
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/zh_review_advisory.py\""
           }
         ]
       }

@@ -19,16 +19,17 @@
       {
         "matcher": "Bash|Edit|Write",
         "hooks": [
-          { "type": "command", "command": "python3 .claude/hooks/pre_tool_guard.py" }
+          { "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/pre_tool_guard.py\"" }
         ]
       }
     ],
     "PostToolUse": [
       {
         "matcher": "Edit|Write",
-        "_comment": "编辑 Python 后自动格式化。需要项目已装 ruff。",
+        "_comment": "编辑 Python 后自动格式化；再做一次便宜的中文审阅启发提醒（Track 0 方案 B，见 zh_review_advisory.py）。需要项目已装 ruff。",
         "hooks": [
-          { "type": "command", "command": "ruff format $CLAUDE_FILE_PATHS 2>/dev/null || true" }
+          { "type": "command", "command": "ruff format \"$CLAUDE_FILE_PATHS\" 2>/dev/null || true" },
+          { "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/zh_review_advisory.py\"" }
         ]
       }
     ],
@@ -36,7 +37,7 @@
       {
         "matcher": "*",
         "hooks": [
-          { "type": "command", "command": "python3 .claude/hooks/pre_compact_memory_check.py" }
+          { "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/pre_compact_memory_check.py\"" }
         ]
       }
     ],

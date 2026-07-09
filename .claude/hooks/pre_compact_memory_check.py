@@ -10,13 +10,18 @@ compact 前提醒：`memory/current-status.md` 是否最近更新过。
 import os
 import sys
 import time
+from pathlib import Path
 
-STATUS_FILE = "memory/current-status.md"
+# 锚定到仓库根，不假设 cwd == 仓库根（cwd 漂移进嵌套仓库时，裸相对路径会
+# 静默查不到文件而不报错——比原来 hook 自锁 bug 更隐蔽，见 .githooks/pre-commit
+# 同类修复的说明）。本文件在 `.claude/hooks/` 下，比 `scripts/*.py` 多一层，
+# 故 parent 链多取一级。
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+STATUS_FILE = str(REPO_ROOT / "memory" / "current-status.md")
 STALE_SECONDS = 30 * 60  # 30 分钟内更新过算「新鲜」
 
 
 def main() -> None:
-    # 尽量在 repo 根运行；hook 的 cwd 通常是项目根。
     if not os.path.exists(STATUS_FILE):
         print(
             f"[pre_compact] 提醒：未找到 {STATUS_FILE}。compact 前建议先落盘状态"
