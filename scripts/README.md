@@ -11,6 +11,12 @@ python scripts/check-same-commit.py --staged  # same-commit rule：结构改动 
 
 加 `--strict` 让 warning 也算失败（适合 CI）。脚本**无第三方依赖**（PyYAML 可选，用于 YAML 深度解析）。
 
+`validate-governance.py` 还包含 `check_release_gates()` / `check_regression_matrix()`：校验
+`lab/research/release-gates.yaml` / `regression-matrix.yaml` 的枚举字段合法，且一旦
+`gate_status` / `last_status` 离开占位默认值（`open` / `unknown`），对应的 `for_claim` /
+`guards_claim` 必须指向 `claims.yaml` 中真实存在的 claim（而非未填占位符或不存在的 id）。
+仍处于占位默认状态时跳过引用校验，模板 scaffold 天然通过。
+
 `check-same-commit.py` 不进 `validate-governance`（它需要 diff 上下文，干净 checkout 上会 no-op）。
 两处接入：**pre-commit hook**（`.githooks/pre-commit`，每 clone 一次性启用 `git config core.hooksPath .githooks`）+ **CI**（对 PR base / push before 跑 `--against <ref>`）。逃生 `SAME_COMMIT_SKIP=1` / `git commit --no-verify`。
 
