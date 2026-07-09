@@ -30,6 +30,12 @@ maintenance: |
 
 `models/`、`runs/`、`traces/human-cc/`、`recipes/claude-code/`、`evals/cc-workflow/`、`reports/cc-workflow/` 为 leaf/scaffold，只有 `README.md`，无独立 anatomy。
 
+`docs/` 是本次 case 分支（`case/elf-template-replay`）新增的第 6 个子目录：项目级长文
+（迁移自 ELF-template-case 的 `docs/`、`reference/`、`research-artifact/` 与旧
+`memory/boards/` 的叙事性部分），无独立 anatomy，同属 leaf 层。这类新增子目录不会被
+`scripts/check-same-commit.py` 强制要求同 commit 更新本文件（该检查只看直接父目录是否
+拥有 ANATOMY.md），本次是手动同步；详见迁移测试报告的发现记录。
+
 ## State（意图）
 
 | 路径 | 写入者 | 含义 |

@@ -4,19 +4,67 @@
 #
 # grade: log | metric | table | figure | paper-claim  （证据层级）
 # 每条 evidence 必须能回答：来自哪个 command/commit/run id/config/checkpoint/data split。
+#
+# 迁移说明：迁移自 ELF-template-case 的 memory/boards/evidence.yaml，四条证据 grade
+# 统一定为 log（clone/read/py_compile/依赖导入/前向 tensor 形状检查，均非性能指标）。
 
 evidence:
-  - id: ev-000
-    supports_claim: claim-000
-    grade: metric
-    summary: "<这条证据说明了什么>"
-    command: "<产生它的命令>"
-    commit: "<git sha>"
-    run_id: "<experiment-ledger 里的 run id>"
-    config: "<lab/code/configs/... 路径>"
-    checkpoint: "<checkpoint-index 里的逻辑 id，若适用>"
-    data_split: "<dataset-index 里的 split id>"
-    metric_source: "<wandb/mlflow run id 或 result-index 条目>"
-    caveats: "<已知限制>"
+  - id: ev-elf-readme-local
+    supports_claim: claim-elf-source-identity
+    grade: log
+    summary: "本地 ELF README 显示官方 JAX 实现、TPU 导向 setup，列出 checkpoint/数据/训练 config/推理命令"
+    command: "cat code/external/ELF/README.md（旧周期路径）"
+    commit: "5098bf28b5e9b52c329970a7e4e1cc28251c76e6"
+    run_id: null
+    config: null
+    checkpoint: null
+    data_split: null
+    metric_source: "lab/docs/audits/elf-template-case-report.md"
+    caveats: "仅文档引用，非执行证据"
     verified_by_fresh_reviewer: false
-    updated: "YYYY-MM-DD"
+    updated: "2026-07-08"
+
+  - id: ev-elf-remote-smoke
+    supports_claim: claim-elf-remote-smoke
+    grade: log
+    summary: "EPFL 远端 clone 到 commit 5098bf28...，对 train.py/eval.py/generation.py/train_step.py/config.py/train_utils.py 跑 py_compile 全部通过"
+    command: "remote-bash --upload epfl-haas .../llm/ELF-template-case -"
+    commit: "5098bf28b5e9b52c329970a7e4e1cc28251c76e6"
+    run_id: null
+    config: null
+    checkpoint: null
+    data_split: null
+    metric_source: "lab/docs/audits/elf-template-case-report.md"
+    caveats: "仅 clone/read + 语法编译检查，非依赖导入或模型执行"
+    verified_by_fresh_reviewer: false
+    updated: "2026-07-08"
+
+  - id: ev-elf-pytorch-smoke
+    supports_claim: claim-elf-pytorch-smoke
+    grade: log
+    summary: "本地+EPFL 切到 pytorch_elf commit b29d8833...；9 个源文件语法 smoke、7 个 YAML config 解析、scripts/launch.sh shell 语法检查全部通过；login Python 缺 torch/transformers/datasets"
+    command: "python3 -m py_compile ...; yaml.safe_load(...); bash -n scripts/launch.sh"
+    commit: "b29d8833609e9ab7f67cd9da39435ac5cea04837"
+    run_id: null
+    config: "lab/code/external/ELF/src/configs/training_configs/train_owt_ELF-B.yml（旧周期路径）"
+    checkpoint: null
+    data_split: null
+    metric_source: "lab/docs/audits/elf-template-case-report.md"
+    caveats: "无依赖安装、无 GPU、无 checkpoint 推理、无指标复现"
+    verified_by_fresh_reviewer: false
+    updated: "2026-07-08"
+
+  - id: ev-elf-pytorch-runtime-smoke
+    supports_claim: claim-elf-pytorch-runtime-smoke
+    grade: log
+    summary: "EPFL .venv-pytorch 持久环境下 torch 2.12.1+cu130/transformers 4.44.2/datasets 5.0.0/muon 等依赖导入通过；ELF config/model/train/eval/generation 模块导入通过；一次 tiny 合成 CPU 前向输出 shape (2,4,8)，decoder logits shape (2,4,32)"
+    command: "uv venv --python 3.10 ../.venv-pytorch; uv pip install -r requirements.txt; python - <<'PY' ... PY"
+    commit: "b29d8833609e9ab7f67cd9da39435ac5cea04837"
+    run_id: null
+    config: "lab/code/external/ELF/src/configs/training_configs/train_owt_ELF-B.yml（旧周期路径）"
+    checkpoint: null
+    data_split: null
+    metric_source: "lab/docs/audits/complete-template-verification-report.md"
+    caveats: "CPU only（torch.cuda.is_available() 为 false）；无数据集加载、无 checkpoint 推理、无训练/生成循环、无指标复现"
+    verified_by_fresh_reviewer: false
+    updated: "2026-07-08"

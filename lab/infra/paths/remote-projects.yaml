@@ -1,0 +1,23 @@
+{
+  "schema_version": "0.1.0",
+  "remotes": [
+    {
+      "name": "epfl-haas",
+      "ssh_alias": "epfl-haas",
+      "scheduler": "runai",
+      "remote_repo_root": "/mnt/cvlab/scratch/cvlab/home/hantzhan/code_jk/llm/ELF-template-case",
+      "remote_source_clone": "/mnt/cvlab/scratch/cvlab/home/hantzhan/code_jk/llm/ELF-template-case/ELF",
+      "source_repo": "https://github.com/lillian039/ELF",
+      "source_fork_repo": "https://github.com/a-green-hand-jack/ELF",
+      "source_branch": "pytorch_elf",
+      "source_commit": "b29d8833609e9ab7f67cd9da39435ac5cea04837",
+      "persistence": "PVC-backed",
+      "sync_strategy": "remote idempotent git clone/fetch of public ELF source",
+      "policies": {
+        "use_remote_cmd_or_remote_bash": true,
+        "no_gpu_training_for_case_smoke": true,
+        "no_secrets_in_repo": true
+      }
+    }
+  ]
+}

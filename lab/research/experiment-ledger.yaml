@@ -3,21 +3,58 @@
 #
 # status: planned | running | done | failed | superseded
 # promote: no | unclear | yes  （是否应升级为 evidence/paper claim；yes 走 human gate）
+#
+# 迁移说明：迁移自 ELF-template-case 的 memory/boards/experiments.yaml。三条 run 均为
+# 旧周期在另一台机器（EPFL 集群 + Mac）上完成的 smoke，本仓库无法复核，promote=no。
 
 experiments:
-  - id: run-000
-    question: "<这个 run 测试哪个 claim？>"
-    hypothesis: "<假设>"
-    status: planned
-    commit: "<git sha>"
-    config: "<lab/code/configs/... 路径>"
-    data_split: "<dataset-index split id>"
-    baseline: "<对比对象>"
-    launch_ref: "<lab/infra/launch/ 里的可复现命令>"
-    tracker: "<wandb/mlflow run id 或 name>"
-    expected_runtime: "<预计时长>"
-    success_metric: "<成功判据>"
+  - id: run-elf-remote-smoke
+    question: "EPFL PVC 路径能否 clone 公开 ELF 仓库并对核心源文件跑非破坏性语法 smoke？"
+    hypothesis: "clone + py_compile 在远端路径下可重复，不触发 GPU 训练"
+    status: done
+    commit: "5098bf28b5e9b52c329970a7e4e1cc28251c76e6"
+    config: null
+    data_split: null
+    baseline: null
+    launch_ref: "lab/infra/paths/remote-projects.yaml（旧周期 EPFL 路径记录）"
+    tracker: null
+    expected_runtime: "<5 分钟（clone + py_compile）"
+    success_metric: "py_compile 对 6 个核心文件全部 exit 0"
     failure_signals: [OOM, NaN, metric-stall, missing-checkpoint, data-mismatch]
-    run_summary: "<lab/code/experiments/<id>.md 或 run summary 路径>"
+    run_summary: "lab/docs/audits/elf-template-case-report.md"
     promote: no
-    updated: "YYYY-MM-DD"
+    updated: "2026-07-08"
+
+  - id: run-elf-pytorch-smoke
+    question: "切到 pytorch_elf 分支后，源码/配置/launch 脚本能否通过非破坏性检查？"
+    hypothesis: "语法/YAML/shell 检查在本地与 EPFL 一致通过"
+    status: done
+    commit: "b29d8833609e9ab7f67cd9da39435ac5cea04837"
+    config: "lab/code/external/ELF/src/configs/training_configs/train_owt_ELF-B.yml（旧周期路径，本仓库未 vendor 该 clone）"
+    data_split: null
+    baseline: null
+    launch_ref: "lab/infra/launch/submit/slurm/README.md"
+    tracker: null
+    expected_runtime: "<10 分钟"
+    success_metric: "9 个源文件语法 smoke + 7 个 YAML 解析 + launch.sh shell 语法全部通过"
+    failure_signals: [OOM, NaN, metric-stall, missing-checkpoint, data-mismatch]
+    run_summary: "lab/docs/audits/elf-template-case-report.md"
+    promote: no
+    updated: "2026-07-08"
+
+  - id: run-elf-pytorch-runtime-smoke
+    question: "持久化 uv 环境能否导入 PyTorch 版 ELF 运行时依赖并跑通一次 CPU 前向？"
+    hypothesis: "torch/transformers/datasets/muon 等依赖可导入；tiny ELF 模型 CPU 前向可产出预期 shape"
+    status: done
+    commit: "b29d8833609e9ab7f67cd9da39435ac5cea04837"
+    config: "lab/code/external/ELF/src/configs/training_configs/train_owt_ELF-B.yml（旧周期路径）"
+    data_split: null
+    baseline: null
+    launch_ref: "lab/infra/launch/envs/cluster.yaml.example"
+    tracker: null
+    expected_runtime: "~15-30 分钟（含依赖安装）"
+    success_metric: "依赖导入 0 失败；前向输出 shape (2,4,8)，logits shape (2,4,32)"
+    failure_signals: [OOM, NaN, metric-stall, missing-checkpoint, data-mismatch]
+    run_summary: "lab/docs/audits/complete-template-verification-report.md"
+    promote: no
+    updated: "2026-07-08"

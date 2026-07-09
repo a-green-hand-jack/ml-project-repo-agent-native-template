@@ -22,9 +22,11 @@ Children:
 | `permissions/` | 记录 `.claude/settings.json` deny/ask/allow 的 owner + 理由 + 验证 | README only |
 | `paths/` | 路径约定 | README only |
 | `storage/` | 存储后端与配额 | README only |
-| `launch/` | 可复现启动命令（人类闸门） | README only |
+| `launch/` | 可复现启动命令（人类闸门）；已迁入 ELF-template-case 的 `envs/{local,cluster.yaml.example}` 与 `submit/slurm/README.md` | README only |
 | `probes/` | 环境探针 | README only |
 | `private/` | 私密/密钥，永不进 Git | README only |
+
+`paths/remote-projects.yaml` 也已迁入（旧周期 EPFL 远端路径映射记录）。
 
 ## Connections（意图）
 

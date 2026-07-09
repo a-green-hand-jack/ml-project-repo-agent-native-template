@@ -59,6 +59,9 @@ build/
 # 自主窗口档：本机、临时、git-ignored（模板只提供 .example）
 .claude/settings.local.json
 
+# 外部 vendored 源码 clone（ELF-template-case 案例迁移）：不进 Git，provenance 见 lab/docs/reference/
+lab/code/external/
+
 # subagent 报告是过程产物，不进 Git（只留说明）
 .claude/agent-reports/*
 !.claude/agent-reports/README.md

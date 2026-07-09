@@ -4,30 +4,34 @@
 
 ## 研究对象（一句话）
 
-<这个 project 要回答/验证的核心研究问题是什么？>
+这不是一个真正的研究项目，而是 `ml-project-repo-agent-native-template` 自身的功能测试
+case：把 `ELF-template-case`（旧 `.harness`/`research-project-template` 世代的案例仓库，
+真实案例源是公开的 `lillian039/ELF` PyTorch/JAX 训练项目）迁移进本模板的结构，然后逐项
+验证 validators / hooks / skills / subagents / ANATOMY 防漂移是否如预期工作。
 
 ## 当前 active family
 
-<当前主攻的实验家族 / 论文 / 方向。多家族并行时列出每个 family 及其边界。>
+`case/elf-template-replay` —— 单一 family：模板功能压测 + ELF 案例迁移与 CPU-only smoke 复测。
 
 ## Trunk 与协作模式
 
-选择一种（见 `.reference-docs` §6）：
-
-- **单 trunk 模式（pairwise-diffusion 式）**：`issue -> branch off <trunk> -> fresh worktree -> PR -> owner review -> merge back`。
-  - trunk 分支：`<例如 main / jieke/dev>`
-- **branch-local mainline 模式（DOLoop 式）**：每个任务家族一条 `mainline/<domain>`，短分支回各自 mainline，禁止跨 mainline 泄漏 term/dataset/artifact/claim。
+- **单 trunk 模式**：本 case 是 `ml-project-repo-agent-native-template` 主仓的一个 worktree 分支
+  （`worktree-case+elf-template-replay`，位于 `.claude/worktrees/case+elf-template-replay/`），
+  from `main`。不打算合回 `main`——它是一个用完即弃/长期保留的 case 分支，供人类 review diff。
+  - trunk 分支：`main`（模板自身）
 
 ## Remote / worktree 策略
 
-- 远端：`<git remote，默认不推送，push 需 human gate>`
-- worktree 约定：`Non-trivial edit = fresh worktree`；一个 worktree = 一个 branch purpose = 一个 issue/PR。
-- worktree 状态记录：`memory/worktree-status.md` + `memory/branches/<slug>.md`。
+- 远端：`git@github.com:a-green-hand-jack/ml-project-repo-agent-native-template.git`；本轮测试全程本地，push 与否由 human 事后决定。
+- 本 case 本身就是一个 fresh worktree；不再嵌套新建 worktree。
+- 旧案例源仓库：`~/Projects/ELF-template-case`（clone 自 GitHub，只读参考，未改动）。
 
 ## 计算与存储
 
-- GPU / 集群：`<本地 / vast.ai / 集群，见 lab/infra/launch/>`
-- 大 bytes（data / checkpoint / runs / wandb）不进 Git，只留 index，见 `lab/infra/storage/`。
+- 本机（Linux，CPU only，无 GPU / 无 EPFL 集群访问）：`lab/infra/launch/envs/local.yaml`。
+  `lab/infra/launch/envs/cluster.yaml.example` 是旧周期 EPFL 记录，仅供参考，本机不可执行。
+- 大 bytes（data / checkpoint / runs / wandb）不进 Git，只留 index；vendored 的 `lillian039/ELF`
+  clone 放 `lab/code/external/`（gitignore）。
 
 ## 是否包含「内层 release agent」
 
