@@ -14,8 +14,13 @@ import datetime
 import json
 import os
 import sys
+from pathlib import Path
 
-REPORTS_DIR = os.path.join(".claude", "agent-reports")
+# 锚定到仓库根，不假设 cwd == 仓库根（cwd 漂移进嵌套仓库时，裸相对路径会在
+# 错误位置创建目录/写文件）。本文件在 `.claude/hooks/` 下，parent 链需比
+# `scripts/*.py` 的锚定多取一级。
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+REPORTS_DIR = str(REPO_ROOT / ".claude" / "agent-reports")
 INDEX_FILE = os.path.join(REPORTS_DIR, "index.md")
 HEADER = (
     "# agent-reports 索引\n\n"

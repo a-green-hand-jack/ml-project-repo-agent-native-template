@@ -19,7 +19,7 @@
       {
         "matcher": "Bash|Edit|Write",
         "hooks": [
-          { "type": "command", "command": "python3 .claude/hooks/pre_tool_guard.py" }
+          { "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/pre_tool_guard.py\"" }
         ]
       }
     ],
@@ -28,7 +28,7 @@
         "matcher": "Edit|Write",
         "_comment": "编辑 Python 后自动格式化。需要项目已装 ruff。",
         "hooks": [
-          { "type": "command", "command": "ruff format $CLAUDE_FILE_PATHS 2>/dev/null || true" }
+          { "type": "command", "command": "ruff format \"$CLAUDE_FILE_PATHS\" 2>/dev/null || true" }
         ]
       }
     ],
@@ -36,7 +36,7 @@
       {
         "matcher": "*",
         "hooks": [
-          { "type": "command", "command": "python3 .claude/hooks/pre_compact_memory_check.py" }
+          { "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/pre_compact_memory_check.py\"" }
         ]
       }
     ],
