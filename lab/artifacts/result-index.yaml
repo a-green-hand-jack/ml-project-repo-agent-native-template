@@ -14,3 +14,35 @@ results:
     missing_metadata: []
     archive_recommendation: "<何时可归档>"
     updated: "YYYY-MM-DD"
+
+  - id: result-001
+    summary: "Fresh CPU-only smoke replay of ELF pytorch_elf runtime (this machine, worktree case+elf-template-replay, 2026-07-09): disposable uv env dependency install/import all OK (torch==2.13.0+cpu, transformers==4.44.2, datasets==2.19.1, einops==0.8.2, huggingface-hub==0.36.2, sacrebleu==2.6.0, rouge-score==0.1.2, wandb==0.28.0, muon-optimizer==0.1.0), torch.cuda.is_available()=False; train_owt_ELF-B.yml config load + override smoke OK; tiny synthetic CPU forward pass reproduced output shape (2,4,8) and decoder logits shape (2,4,32), matching lab/docs/audits/complete-template-verification-report.md (different machine, torch 2.12.1+cu130, datasets 5.0.0). No dataset loading, no checkpoint loading, no GPU, no training/generation loop, no metric reproduction."
+    storage_path: "no persisted log file (bytes not produced); commands + captured output exist only in this conversation's task message, 2026-07-09. Vendored source: lab/code/external/ELF (gitignored, not in git). Disposable env: lab/code/external/.venv-elf-cpu (gitignored)."
+    how_to_inspect: "Recreate: uv pip install --python lab/code/external/.venv-elf-cpu/bin/python --extra-index-url https://download.pytorch.org/whl/cpu -r lab/code/external/ELF/requirements.txt; then from lab/code/external/ELF with PYTHONPATH=$PWD/src run configs.config.load_config_from_yaml('src/configs/training_configs/train_owt_ELF-B.yml') and the tiny modules.model.ELF(...) forward described in the summary."
+    commit: "b29d8833609e9ab7f67cd9da39435ac5cea04837 (vendored ELF clone, branch pytorch_elf, gitignored -- not a commit of this repo); this repo's own HEAD at replay time: fdfa51976eaf51d1b6d825459a95d6eb5111d66c (worktree case+elf-template-replay)"
+    config: "lab/code/external/ELF/src/configs/training_configs/train_owt_ELF-B.yml (inside vendored clone, gitignored, not tracked by this repo's git)"
+    run_id: "run-elf-pytorch-runtime-smoke-replay-claude"
+    supports: "claim-elf-pytorch-runtime-smoke (lab/research/claims.yaml), via ev-elf-pytorch-runtime-smoke-replay-claude (lab/research/evidence.yaml, grade=log, added 2026-07-09) -- corroborating independent replay on a new machine/torch version"
+    status: active
+    missing_metadata:
+      - "RESOLVED 2026-07-09: run_id assigned (run-elf-pytorch-runtime-smoke-replay-claude added to lab/research/experiment-ledger.yaml) and ev-elf-pytorch-runtime-smoke-replay-claude added to lab/research/evidence.yaml, linked from claim-elf-pytorch-runtime-smoke"
+      - "no persisted output log (conversation-only record); not re-inspectable as a file"
+      - "environment is fully ephemeral/gitignored (.venv-elf-cpu) -- re-verification depends on requirements.txt + pinned commit, not a frozen lockfile"
+    archive_recommendation: "not applicable yet -- fresh entry, nothing to archive; revisit once a real GPU/dataset run supersedes this smoke-level replay"
+    updated: "2026-07-09"
+
+  - id: result-002
+    summary: "Non-destructive check of the migrated ELF scaffold at lab/code/ (this repo's tracked code, distinct from the vendored external clone), run in this session on 2026-07-09: 'python3 -m compileall -q src eval experiments scripts tests' exited 0; 'uv run --no-project --with pytest --python 3.11 python -m pytest -q tests' reported 2 passed."
+    storage_path: "no persisted log file; commands + output exist only in this conversation's task message, 2026-07-09, run against lab/code/ (tracked in this repo's git)"
+    how_to_inspect: "From lab/code/: python3 -m compileall -q src eval experiments scripts tests; uv run --no-project --with pytest --python 3.11 python -m pytest -q tests"
+    commit: "fdfa51976eaf51d1b6d825459a95d6eb5111d66c (this worktree's HEAD, branch worktree-case+elf-template-replay, at replay time)"
+    config: null
+    run_id: "run-elf-pytorch-runtime-smoke-replay-claude"
+    supports: "bundled into run-elf-pytorch-runtime-smoke-replay-claude's success_metric (lab/research/experiment-ledger.yaml) as a supplementary check, but still no claim id in lab/research/claims.yaml covers migrated-scaffold (lab/code/) compile/test integrity as its own research claim -- deliberate decision (2026-07-09): this is scaffold/infra self-test, not a research claim about ELF reproduction, so no new claim was created; revisit only if a human wants scaffold integrity tracked as a first-class claim"
+    status: active
+    missing_metadata:
+      - "RESOLVED 2026-07-09: run_id assigned via run-elf-pytorch-runtime-smoke-replay-claude (lab/research/experiment-ledger.yaml), which documents this compileall/pytest check alongside the ELF runtime replay"
+      - "no claim in lab/research/claims.yaml currently maps to this scaffold-only check (see supports note -- open by decision, not oversight)"
+      - "no persisted output log (conversation-only record)"
+    archive_recommendation: "not applicable yet -- fresh entry, nothing to archive"
+    updated: "2026-07-09"

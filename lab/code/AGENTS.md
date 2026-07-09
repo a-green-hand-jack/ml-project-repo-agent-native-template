@@ -3,6 +3,7 @@
 ## 允许
 
 - 在 `src/` 实现与重构模块；在 `configs/` 增改配置；在 `scripts/` 写脚本；在 `experiments/` 建实验。
+- 在 `eval/` 实现评测 / baseline / 指标代码。
 - 增删测试，保持 `tests/` 与被测代码同步。
 
 ## 禁止
@@ -10,6 +11,7 @@
 - 禁止在代码里硬编码密钥/私密路径——那些属于 `../infra/private/`。
 - 禁止把数据 bytes、checkpoint 写进本目录并提交 Git。
 - 禁止自行触发训练/评测作业（人类闸门在 `../infra/launch/`）。
+- 禁止把 `external/` 下 vendored 的第三方代码提交进 Git（已 gitignore，只登记 provenance，不 vendor 源码本体）。
 
 ## 必须验证
 
@@ -20,3 +22,4 @@
 ## 禁止路径
 
 - 不在本目录持久化任何 gitignore 的 bytes。
+- `external/**`（vendored 第三方源码，gitignore，不进 Git）。

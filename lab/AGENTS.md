@@ -8,6 +8,7 @@
 - 向 `research/` 的 YAML 追加 claim / evidence / ledger 条目（遵守证据分层）。
 - 向 `data/`、`artifacts/`、`models/` 追加 **index / manifest / checksum**（不是 bytes）。
 - 在 `traces/`、`recipes/`、`evals/`、`reports/` 下按 recipe 政策记录与产出。
+- 在 `docs/` 下记录项目级长文档（audits/designs/experiments/timelines/updates/reference/research-narrative/code）；这是嵌套项目文档区，非 `research/*.yaml` 那样的治理校验对象。
 
 ## 禁止
 

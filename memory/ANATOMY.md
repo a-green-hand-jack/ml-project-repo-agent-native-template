@@ -8,14 +8,19 @@
 memory/
 ├── current-status.md        活状态单一真相源（single source of truth）
 ├── session-tree.md          父/子 session 拓扑 + 合并顺序 + 禁改路径
+├── worktree-status.md       所有 active branch/worktree 的总览（由 branch-reporter 维护）
 ├── current-practices.md     采用中的 CC recipe 索引（→ lab/recipes/claude-code/）
 ├── deprecated-practices.md  失效技巧账
 ├── phase-dashboard.yaml     phase 看板（结构化，validator 可读）
 ├── change-control.yaml      变更登记账（结构化，validator 可读）
 ├── gc/                      过期状态/handoff 归档区
-├── branches/                <slug>.md 单分支状态
+├── branches/                <slug>.md 单分支状态（由 branch-reporter 维护）
 └── handoffs/                <YYYYMMDD>-<slug>.md 交接文档
 ```
+
+`worktree-status.md`、`branches/<slug>.md` 由 `.claude/agents/branch-reporter.md` 的
+契约产出；本文件之前未登记 `worktree-status.md`，属于一条迁移测试期间发现的
+「agent 声明输出路径 与 目录自身 ANATOMY 组件表不同步」的小 gap，随本次改动一并补上。
 
 ## 状态流
 

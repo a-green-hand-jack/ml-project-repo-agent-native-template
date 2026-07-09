@@ -68,3 +68,18 @@ evidence:
     caveats: "CPU only（torch.cuda.is_available() 为 false）；无数据集加载、无 checkpoint 推理、无训练/生成循环、无指标复现"
     verified_by_fresh_reviewer: false
     updated: "2026-07-08"
+
+  - id: ev-elf-pytorch-runtime-smoke-replay-claude
+    supports_claim: claim-elf-pytorch-runtime-smoke
+    grade: log
+    summary: "本机（无 EPFL/GPU）全新独立 CPU-only 环境 lab/code/external/.venv-elf-cpu 下，独立 clone lillian039/ELF pytorch_elf 分支到同一 commit b29d8833...；torch 2.13.0+cpu / transformers 4.44.2 / datasets 2.19.1 / einops 0.8.2 / huggingface-hub 0.36.2 / sacrebleu 2.6.0 / rouge-score 0.1.2 / wandb 0.28.0 / muon-optimizer 0.1.0（import 名 muon）依赖导入通过；train_owt_ELF-B.yml 经 configs.config.load_config_from_yaml 加载 + apply_config_overrides(batch_size=2, max_length=4) 通过；modules.model.ELF tiny 合成前向（decoder_step_active=True）CPU 输出 shape (2,4,8)，decoder logits shape (2,4,32)。另附：对本 case 迁移落地的 lab/code/ scaffold 跑 `python3 -m compileall -q src eval experiments scripts tests`（exit 0）与 `uv run --no-project --with pytest --python 3.11 python -m pytest -q tests`（2 passed）——这部分验证的是迁移 scaffold 自身，不属于任何现有 claim 的 scope，仅作补充记录"
+    command: "uv pip install --python lab/code/external/.venv-elf-cpu/bin/python --extra-index-url https://download.pytorch.org/whl/cpu -r lab/code/external/ELF/requirements.txt; (cwd=lab/code/external/ELF, PYTHONPATH=$PWD/src) python3 -c 'import torch, transformers, datasets; from configs.config import load_config_from_yaml, apply_config_overrides; from modules.model import ELF; ...'; python3 -m compileall -q src eval experiments scripts tests; uv run --no-project --with pytest --python 3.11 python -m pytest -q tests"
+    commit: "b29d8833609e9ab7f67cd9da39435ac5cea04837"
+    run_id: "run-elf-pytorch-runtime-smoke-replay-claude"
+    config: "lab/code/external/ELF/src/configs/training_configs/train_owt_ELF-B.yml"
+    checkpoint: null
+    data_split: null
+    metric_source: "memory/current-status.md"
+    caveats: "CPU only（torch.cuda.is_available() 为 false）；无数据集加载、无 checkpoint 推理、无训练/生成循环、无指标复现；依赖版本与 2026-07-08 EPFL 记录不同（本机 torch 2.13.0+cpu/datasets 2.19.1 CPU-only wheel index，EPFL 记录 torch 2.12.1+cu130/datasets 5.0.0），版本已漂移但结论一致；本次由单一 agent pass 完成，非正式 fresh-reviewer session-boundary 复核，故 verified_by_fresh_reviewer 仍记为 false"
+    verified_by_fresh_reviewer: false
+    updated: "2026-07-09"

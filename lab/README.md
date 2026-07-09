@@ -11,6 +11,7 @@
 | `research/` | 研究事实层：claims / evidence / ledger / gates | 记录一条结论、核对证据链 |
 | `data/` | 数据索引层：manifest / checksum / schema / task-set | 找数据集、登记新数据 |
 | `artifacts/` | 产物索引层：result / model / trace / table / figure 的 index | 定位某次产物、引用结果 |
+| `docs/` | 项目级长文档：audits / designs / experiment plans / timelines / updates / reference / research-narrative | 写不适合塞进 README/AGENTS/ANATOMY 的阶段性长文、审计报告、设计文档 |
 | `models/` | 模型 checkpoint 索引（bytes 不进 Git） | 找某个训练权重 |
 | `runs/` | 单次运行的 summary（bytes 不进 Git） | 回看一次实验跑了什么 |
 | `traces/` | 人机协作轨迹（Claude Code 会话记录） | 复盘一次 agent 会话 |

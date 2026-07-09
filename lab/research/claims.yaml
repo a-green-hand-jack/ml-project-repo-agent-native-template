@@ -55,9 +55,9 @@ claims:
     status: partial
     hypothesis: "在 .venv-pytorch 持久环境下，依赖导入、config 加载与一次 tiny CPU 前向可重复出预期 tensor 形状"
     scope: "仅 EPFL 持久环境的 CPU 运行时 smoke；不含数据集加载、checkpoint 推理、GPU 训练、生成、指标或 paper 级 claim"
-    evidence: [ev-elf-pytorch-runtime-smoke]
+    evidence: [ev-elf-pytorch-runtime-smoke, ev-elf-pytorch-runtime-smoke-replay-claude]
     depends_on: [claim-elf-pytorch-smoke]
     deliverable_refs: []
     verified_by_fresh_reviewer: false
-    owner: "codex（旧周期）→ 迁移: claude"
-    updated: "2026-07-08"
+    owner: "codex（旧周期）→ 迁移: claude；独立 replay: claude（本机，2026-07-09）"
+    updated: "2026-07-09"

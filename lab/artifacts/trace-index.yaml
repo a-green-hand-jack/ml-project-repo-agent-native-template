@@ -10,3 +10,21 @@ traces:
     linked_recipe: "<lab/recipes/claude-code/<id>，若已提炼>"
     status: unknown        # active | superseded | archived | unknown
     updated: "YYYY-MM-DD"
+
+  - id: trace-001
+    kind: agent
+    path: "no persisted trace file; recorded only in this conversation session (artifact-librarian subagent task, worktree case+elf-template-replay, 2026-07-09) -- see task message for exact commands"
+    summary: "Fresh CPU-only replay smoke on vendored ELF clone (lab/code/external/ELF, branch pytorch_elf @ b29d8833609e9ab7f67cd9da39435ac5cea04837, gitignored). Steps: uv-installed disposable env lab/code/external/.venv-elf-cpu (uv pip install --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt); imported torch==2.13.0+cpu, transformers==4.44.2, datasets==2.19.1, einops==0.8.2, huggingface-hub==0.36.2, sacrebleu==2.6.0, rouge-score==0.1.2, wandb==0.28.0, muon-optimizer==0.1.0 (import name muon), all OK, torch.cuda.is_available()=False; config load via configs.config.load_config_from_yaml('src/configs/training_configs/train_owt_ELF-B.yml') + apply_config_overrides(['batch_size=2','max_length=4']) OK; tiny synthetic ELF(text_encoder_dim=8, max_length=4, hidden_size=16, depth=1, num_heads=2, vocab_size=32) CPU forward with x=randn(2,4,8), t=rand(2) produced output shape (2,4,8) and decoder logits shape (2,4,32), matching lab/docs/audits/complete-template-verification-report.md despite that audit running on a different machine with torch 2.12.1+cu130 / datasets 5.0.0."
+    linked_run: "run-elf-pytorch-runtime-smoke-replay-claude (lab/research/experiment-ledger.yaml, added 2026-07-09; supported by ev-elf-pytorch-runtime-smoke-replay-claude in evidence.yaml, linked from claim-elf-pytorch-runtime-smoke). Precedent: run-elf-pytorch-runtime-smoke (same ELF commit, different machine: EPFL cluster, torch 2.12.1+cu130, datasets 5.0.0)"
+    linked_recipe: "<none>"
+    status: active
+    updated: "2026-07-09"
+
+  - id: trace-002
+    kind: agent
+    path: "no persisted trace file; recorded only in this conversation session (artifact-librarian subagent task, worktree case+elf-template-replay, 2026-07-09)"
+    summary: "Non-destructive check of the migrated ELF scaffold under lab/code/ (this repo's tracked code, NOT the vendored external clone): 'python3 -m compileall -q src eval experiments scripts tests' from lab/code/ exited 0; 'uv run --no-project --with pytest --python 3.11 python -m pytest -q tests' from lab/code/ reported 2 passed. No GPU, no dataset, no checkpoint, no training/generation loop was exercised."
+    linked_run: "run-elf-pytorch-runtime-smoke-replay-claude (lab/research/experiment-ledger.yaml, added 2026-07-09) -- bundled as a supplementary success_metric on the same ledger entry; still no dedicated claim covers scaffold-only integrity (deliberate, see lab/artifacts/result-index.yaml result-002)"
+    linked_recipe: "<none>"
+    status: active
+    updated: "2026-07-09"

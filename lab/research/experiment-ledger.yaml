@@ -58,3 +58,20 @@ experiments:
     run_summary: "lab/docs/audits/complete-template-verification-report.md"
     promote: no
     updated: "2026-07-08"
+
+  - id: run-elf-pytorch-runtime-smoke-replay-claude
+    question: "在本机（无 EPFL 集群 / GPU）用全新独立 CPU-only 环境重新 clone lillian039/ELF（pytorch_elf 分支）后，能否独立复现依赖导入 / config 加载 / tiny CPU 前向；同时本 case 迁移落地的 lab/code/ scaffold 自身能否通过 compileall 与 pytest？"
+    hypothesis: "独立 clone 同一 commit b29d8833... + 全新 uv venv（lab/code/external/.venv-elf-cpu）下，依赖导入 / config 加载 / tiny CPU 前向可复现出与 2026-07-08 EPFL 记录一致的 tensor 形状；lab/code/ 迁移 scaffold 的 compileall 与 pytest 保持通过"
+    status: done
+    commit: "b29d8833609e9ab7f67cd9da39435ac5cea04837"
+    config: "lab/code/external/ELF/src/configs/training_configs/train_owt_ELF-B.yml（本次真实 clone 到本仓库 gitignore 路径，非旧周期路径引用）"
+    data_split: null
+    baseline: null
+    launch_ref: "本地 shell，非 lab/infra/launch 提交作业：uv pip install --python lab/code/external/.venv-elf-cpu/bin/python --extra-index-url https://download.pytorch.org/whl/cpu -r lab/code/external/ELF/requirements.txt"
+    tracker: null
+    expected_runtime: "~10-20 分钟（含依赖安装）"
+    success_metric: "依赖导入 0 失败（torch/transformers/datasets/einops/huggingface-hub/sacrebleu/rouge-score/wandb/muon）；config 加载 + overrides 0 失败；tiny 合成前向输出 shape (2,4,8)，decoder logits shape (2,4,32)；lab/code/ `python3 -m compileall -q src eval experiments scripts tests` exit 0；`pytest -q tests` 2 passed"
+    failure_signals: [OOM, NaN, metric-stall, missing-checkpoint, data-mismatch]
+    run_summary: "memory/current-status.md（Commands + results 表，2026-07-09 行）"
+    promote: no
+    updated: "2026-07-09"
