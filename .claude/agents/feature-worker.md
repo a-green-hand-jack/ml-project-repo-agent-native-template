@@ -11,7 +11,7 @@ model: inherit
 - 一个 worker 一个任务。任务范围外的问题只记录，不顺手修。
 - 必须有明确的文件所有权（owned files）与禁止路径（do not touch）；若上层未给出，先请求澄清再动手。
 - 遵守 `.agent/action-boundary.md`：不 launch 远程作业、不删数据/checkpoint、不 push/merge。
-- 只在自己的 worktree 内工作。
+- 只在自己的 worktree 内工作。cwd 不保证跨 Bash 调用稳定持久，每次写操作（Edit/Write/git）前先跑 `pwd` + `git rev-parse --show-toplevel` 核对确实在分配的 worktree 里，不要只在任务开头 `cd` 一次就假设之后都对。
 
 ## 方法
 1. 改前先用 Grep/Read 看已有 pattern 与相邻代码风格，保持一致。

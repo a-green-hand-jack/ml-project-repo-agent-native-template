@@ -15,5 +15,6 @@ context budget:      <如 read-only / <200 lines log>
 evidence required:   <返回什么算完成>
 stop condition:      <何时停>
 escalate condition:  <何时上报 main / 升 tier>
+self-check:          <每次写操作（Edit/Write/git）前先 pwd + git rev-parse --show-toplevel 核对所在 worktree，不要只在任务开头 cd 一次就假设之后都对>
 report path:         <.claude/agent-reports/<task>.md>
 ```
