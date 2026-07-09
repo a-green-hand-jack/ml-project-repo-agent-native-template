@@ -15,5 +15,6 @@
 | 日期 | 决策 | 状态 | 文件 |
 | --- | --- | --- | --- |
 | YYYY-MM-DD | 采用本模板作为项目控制根 | accepted | `human/decisions/00000000-adopt-template.md` |
+| 2026-07-09 | 书面文档默认使用中文 | accepted | `human/decisions/20260709-doc-language-default-chinese.md` |
 
 状态取值：`proposed` · `accepted` · `superseded` · `rejected`。
