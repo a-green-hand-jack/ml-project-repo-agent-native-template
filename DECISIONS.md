@@ -16,5 +16,6 @@
 | --- | --- | --- | --- |
 | YYYY-MM-DD | 采用本模板作为项目控制根 | accepted | `human/decisions/00000000-adopt-template.md` |
 | 2026-07-09 | 书面文档默认使用中文 | accepted | `human/decisions/20260709-doc-language-default-chinese.md` |
+| 2026-07-09 | `lab/docs/` 下 reference / research-narrative 平面与外部 vendor 代码位置 | accepted | `human/decisions/20260709-lab-docs-reference-and-external-vendor-placement.md` |
 
 状态取值：`proposed` · `accepted` · `superseded` · `rejected`。

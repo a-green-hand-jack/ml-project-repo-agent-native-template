@@ -35,7 +35,7 @@ description: 当要落地一处代码改动时，用来走 issue→branch→work
 2. branch on correct base：按模式选 base——
    - 单 trunk（pairwise-diffusion 式）：`git worktree add ../wt-<slug> -b <slug> <trunk>`。
    - branch-local mainline（DOLoop 式）：base 为 `mainline/<domain>`，如 `git worktree add ../wt-<slug> -b <domain>/<slug> mainline/<domain>`。
-3. fresh worktree：在隔离 worktree 内实现，避免污染主工作区。
+3. fresh worktree：在隔离 worktree 内实现，避免污染主工作区。cwd 不保证跨 Bash 调用稳定持久，每次写操作前先跑 `pwd` + `git rev-parse --show-toplevel` 核对确实在分配的 worktree 里，不要只在任务开头 `cd` 一次就假设之后都对。
 4. 实现 + 同 commit 更新 anatomy/ledger（见 anatomy-drift-control）。
 5. 定向测试 + validator：只跑相关测试，跑 validator。
 6. PR：写清 evidence（跑了什么、结果）与 risks；**human gate**。
