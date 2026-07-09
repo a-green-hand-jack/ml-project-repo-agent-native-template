@@ -15,6 +15,7 @@
 
 | 想知道 | 去哪里 |
 | --- | --- |
+| 模板本身怎么设计、怎么实现 | `DESIGN.md` |
 | 项目研究对象、trunk、worktree 策略 | `PROJECT.md` |
 | 当前在做什么、下一步 | `memory/current-status.md` |
 | 有哪些 claim、哪些 evidence 支持 | `lab/research/claims.yaml` · `lab/research/evidence.yaml` |

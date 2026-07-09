@@ -29,7 +29,7 @@ REQUIRED_TOP = [
 
 # 根目录白名单（其余视为潜在污染 -> warning）。
 ROOT_WHITELIST = {
-    "README.md", "PROJECT.md", "DECISIONS.md", "AGENTS.md", "CLAUDE.md",
+    "README.md", "PROJECT.md", "DECISIONS.md", "DESIGN.md", "AGENTS.md", "CLAUDE.md",
     "ANATOMY.md", ".gitignore", ".github", ".agent", ".claude", "human",
     "lab", "memory", "deliverables", "scripts", "plans", ".reference-docs",
     # 常见工程文件（允许存在，不算污染）

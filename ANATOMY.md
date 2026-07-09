@@ -24,7 +24,7 @@ maintenance: |
 
 | 平面 | 目录 | 作用 | 子地图 |
 | --- | --- | --- | --- |
-| 入口层 | `AGENTS.md` `CLAUDE.md` `PROJECT.md` | agent/human 入口、项目描述 | — |
+| 入口层 | `AGENTS.md` `CLAUDE.md` `PROJECT.md` `DESIGN.md` | agent/human 入口、项目描述、模板设计说明 | — |
 | 交互层 | `human/` | brief / review / decision / inbox | `human/ANATOMY.md` |
 | doctrine 层 | `.agent/` | 行为契约、边界、政策、协议 | `.agent/AGENTS.md` |
 | 能力层 | `.claude/` | subagents / skills / commands / hooks / settings | `.claude/ANATOMY.md` |
