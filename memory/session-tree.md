@@ -9,13 +9,14 @@
 
 ## Current phase
 
-Phase 7：Agent-R1 真实 repo replay 已通过并登记；正在做最终验证。
+Phase 7 complete：Agent-R1 真实 repo replay 已通过、登记并固化为独立 case branch。
 
 ## Children
 
 | id | purpose | branch/worktree | plan doc | status | next prompt |
 | --- | --- | --- | --- | --- | --- |
-| main | implement adopt-existing-repo | `worktree-adopt-existing-repo` / `.claude/worktrees/adopt-existing-repo` | `plans/20260709-adopt-existing-repo.zh.md` | active | Run final validators after Agent-R1 replay report and ledger updates. |
+| feature | adopt-existing-repo workflow | `worktree-adopt-existing-repo` / `.claude/worktrees/adopt-existing-repo` | `plans/20260709-adopt-existing-repo.zh.md` | done | Review/push feature branch if desired. |
+| case-agent-r1 | Agent-R1 adoption replay case | `worktree-case+agent-r1-adoption-replay` / `.claude/worktrees/case+agent-r1-adoption-replay` | `plans/20260709-adopt-existing-repo.zh.md` | done | Keep as case branch; do not merge full external case into main by default. |
 
 ## Merge / review order
 

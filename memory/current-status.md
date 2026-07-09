@@ -78,6 +78,9 @@
 | `git commit -m "feat: add existing repo adoption workflow"` | 功能分支提交成功：`93fabae`。 |
 | `git worktree add .../case+agent-r1-adoption-replay -b worktree-case+agent-r1-adoption-replay 93fabae` | 创建 Agent-R1 case branch/worktree。 |
 | `git commit -m "test: add Agent-R1 adoption replay case"` | case branch 提交成功：`5c8850f`。 |
+| `git commit -m "docs: record Agent-R1 case branch"` | 功能分支审计记录回填提交成功：`77a977f`。 |
+| feature branch final matrix | `py_compile`、`run-adoption-smoke.py`、`validate-governance --strict`、`git diff --check` 全通过；worktree clean。 |
+| case branch final matrix | `check-adoption-integrity.py .`、`run-adoption-smoke.py`、`validate-governance --strict`、`git diff --check` 全通过；case branch HEAD 后续更新为 `a83b870`。 |
 
 ## Subagent reports
 
@@ -94,9 +97,11 @@
 
 ## Exact next steps
 
-1. 提交 feature branch 的审计记录回填（case branch/commit metadata）。
-2. 跑最终压力测试矩阵：feature branch + case branch validators / smoke / integrity。
-3. 若要增强 v2，优先补 protected root path policy、semantic normalize policy 和更多 fixture。
+1. 如需远端保存，push `worktree-adopt-existing-repo` 与 `worktree-case+agent-r1-adoption-replay`
+   topic branches（非 main；仍按 human gate）。
+2. 若要增强 v2，优先补 protected root path policy、semantic normalize policy 和更多 fixture。
+3. 如果要把功能合入 main，只合 `worktree-adopt-existing-repo`；Agent-R1 case branch 默认作为
+   压测分支保留，不把完整外部 case 内容合回 main。
 
 ## Do-not-forget
 
