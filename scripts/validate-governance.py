@@ -6,6 +6,9 @@
 2. lab/{research,artifacts,data,models}/*.yaml 可解析（有 PyYAML 时深检，否则做轻量结构检查）。
 3. 大 bytes 未被误加进 Git（有 git 时检查 tracked 文件不含受保护 bytes 路径）。
 4. 证据链一致：claims↔evidence 引用可解析，且 claim 强度 ≤ 最强证据（overclaim 拦截）。
+5. 发布闸门 / 回归矩阵一致：release-gates.yaml 与 regression-matrix.yaml 的枚举字段合法，
+   且一旦离开占位默认状态（gate_status/last_status 不再是 open/unknown），其 claim 引用
+   必须指向 claims.yaml 中真实存在的 claim（防止「已判定放行/已判定回归通过」却引用空主张）。
 
 先跑子检查（作为独立进程，便于单独调用），再跑本文件治理规则。
 无第三方依赖（PyYAML 可选）。退出码 0 = 全通过，非 0 = 有失败。
@@ -138,6 +141,118 @@ def check_evidence_chain() -> None:
                 )
 
 
+def _load_claim_ids(research: Path):
+    """读 lab/research/claims.yaml，返回真实 claim id 集合；解析失败返回 None。"""
+    import yaml  # type: ignore
+
+    claims_f = research / "claims.yaml"
+    if not claims_f.exists():
+        return set()
+    try:
+        claims = (yaml.safe_load(claims_f.read_text(encoding="utf-8")) or {}).get("claims") or []
+    except Exception:  # noqa: BLE001
+        return None
+    return {c.get("id") for c in claims if isinstance(c, dict)}
+
+
+def _is_placeholder(value) -> bool:
+    return isinstance(value, str) and value.strip().startswith("<")
+
+
+def check_release_gates() -> None:
+    """发布闸门一致性（见 lab/research/ANATOMY.md）。
+
+    只在有 PyYAML 时运行；否则跳过并告警。
+    规则：
+    - gate_status 必须 ∈ {open, passed, blocked}。
+    - 只有 gate_status != open 时才校验 for_claim：占位符（`<...>`）或引用未知 claim 均报错。
+    模板占位（gate_status=open、for_claim=claim-000 未必真实存在）天然通过，不误伤。
+    """
+    research = REPO / "lab" / "research"
+    gates_f = research / "release-gates.yaml"
+    if not gates_f.exists():
+        return
+    try:
+        import yaml  # type: ignore
+    except ImportError:
+        warnings.append("未安装 PyYAML：跳过发布闸门一致性检查")
+        return
+    try:
+        gates = (yaml.safe_load(gates_f.read_text(encoding="utf-8")) or {}).get("gates") or []
+    except Exception as e:  # noqa: BLE001
+        errors.append(f"release-gates.yaml 解析失败：{e}")
+        return
+    claim_ids = _load_claim_ids(research)
+    if claim_ids is None:
+        errors.append("claims.yaml 解析失败，无法校验 release-gates.yaml 的 for_claim 引用")
+        return
+
+    valid_status = {"open", "passed", "blocked"}
+    for g in gates:
+        if not isinstance(g, dict):
+            continue
+        gid, status = g.get("id"), g.get("gate_status")
+        if status not in valid_status:
+            errors.append(f"gate {gid} 的 gate_status 非法：{status}")
+            continue
+        if status == "open":
+            continue
+        for_claim = g.get("for_claim")
+        if _is_placeholder(for_claim):
+            errors.append(f"gate {gid} 状态为 {status} 但 for_claim 仍是未填占位符")
+        elif for_claim not in claim_ids:
+            errors.append(f"gate {gid} 的 for_claim 引用未知 claim：{for_claim}")
+
+
+def check_regression_matrix() -> None:
+    """回归矩阵一致性（见 lab/research/ANATOMY.md）。
+
+    只在有 PyYAML 时运行；否则跳过并告警。
+    规则：
+    - check_kind 必须 ∈ {test, smoke, metric-threshold, numerical-equivalence}。
+    - last_status 必须 ∈ {unknown, pass, fail}。
+    - 只有 last_status != unknown 时才校验 guards_claim：占位符或引用未知 claim 均报错。
+    模板占位（last_status=unknown、guards_claim=claim-000 未必真实存在）天然通过，不误伤。
+    """
+    research = REPO / "lab" / "research"
+    reg_f = research / "regression-matrix.yaml"
+    if not reg_f.exists():
+        return
+    try:
+        import yaml  # type: ignore
+    except ImportError:
+        warnings.append("未安装 PyYAML：跳过回归矩阵一致性检查")
+        return
+    try:
+        regs = (yaml.safe_load(reg_f.read_text(encoding="utf-8")) or {}).get("regressions") or []
+    except Exception as e:  # noqa: BLE001
+        errors.append(f"regression-matrix.yaml 解析失败：{e}")
+        return
+    claim_ids = _load_claim_ids(research)
+    if claim_ids is None:
+        errors.append("claims.yaml 解析失败，无法校验 regression-matrix.yaml 的 guards_claim 引用")
+        return
+
+    valid_kind = {"test", "smoke", "metric-threshold", "numerical-equivalence"}
+    valid_status = {"unknown", "pass", "fail"}
+    for r in regs:
+        if not isinstance(r, dict):
+            continue
+        rid, kind, status = r.get("id"), r.get("check_kind"), r.get("last_status")
+        if kind not in valid_kind:
+            errors.append(f"regression {rid} 的 check_kind 非法：{kind}")
+        if status not in valid_status:
+            errors.append(f"regression {rid} 的 last_status 非法：{status}")
+            continue
+        if status == "unknown":
+            continue
+        guards_claim = r.get("guards_claim")
+        if _is_placeholder(guards_claim):
+            errors.append(f"regression {rid} 状态为 {status} 但 guards_claim 仍是未填占位符")
+        elif guards_claim not in claim_ids:
+            errors.append(f"regression {rid} 的 guards_claim 引用未知 claim：{guards_claim}")
+
+
 def check_tracked_bytes() -> None:
     git_dir = REPO / ".git"
     if not git_dir.exists():
@@ -170,6 +285,8 @@ def main() -> int:
     check_gitignore()
     check_yaml()
     check_evidence_chain()
+    check_release_gates()
+    check_regression_matrix()
     check_tracked_bytes()
     for w in warnings:
         print(f"WARN  {w}")

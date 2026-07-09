@@ -38,7 +38,7 @@ description: 当有新的 dataset/checkpoint/table/figure 等 asset 产生或需
 ## 步骤
 
 1. 发现 asset：定位新文件与其来源 run/config/commit。
-2. 为每个 asset 记录：`id` / `path` / `inspect`(如何检视) / `commit-config-run`(可复现三元组) / `dependency` / `status` / `missing-metadata` / `archive-recommendation`。
+2. 为每个 asset 记录关键字段（具体字段名以对应 index yaml 的实际 schema 为准，不同资产类型略有差异；以字段最全的 `result-index.yaml` 为例）：`id` / 描述性字段（`summary`，图表/模型对应 `caption`/`name`）/ `storage_path`(或 `source_path`) / `how_to_inspect`(如何检视) / `commit` + `config` + `run_id`(可复现三元组；图表/模型/checkpoint 里对应字段是 `generated_by_run`/`trained_by_run`/`from_run`) / `supports`(依赖/支持哪个 claim，图表里是 `supports_claim`) / `status` / `missing_metadata` / `archive_recommendation`(checkpoint 里是 `archive_after`)。
 3. 写入对应 index YAML；在 `deliverables/index.md` 挂上对外可见的交付物。
 4. stale 扫描：对照磁盘与索引，标记孤儿文件、缺元数据、过期 asset，产出 stale asset report。
 5. 对可归档者只写 `archive-recommendation`，交人类处置，绝不自行移动。

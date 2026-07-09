@@ -38,4 +38,7 @@ maintenance: |
 ## Notes
 
 - overclaim = claim 强度超出其 evidence，属违规；`validate-governance.py` 会拦截（引用可解析 + claim 强度 ≤ 最强证据）。
+- `release-gates.yaml` / `regression-matrix.yaml` 枚举字段与 claim 引用一致性，已由
+  `validate-governance.py` 强制校验（占位默认状态天然通过，仅在 gate/regression 离开占位
+  状态后才校验 claim 引用是否真实存在）。
 - 校验：`python scripts/validate-governance.py`。

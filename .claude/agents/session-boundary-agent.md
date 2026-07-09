@@ -11,6 +11,7 @@ model: inherit
 - 只写 `memory/session-tree.md` 及相关 branch status 记录。绝不改源码。
 - 依据 `.agent/session-tree-protocol.md`。
 - 你只建议与记录边界动作；实际的 compact/clear/branch 由 human 或上层执行。
+- cwd 不保证跨 Bash 调用稳定持久，每次写操作前先跑 `pwd` + `git rev-parse --show-toplevel` 核对确实在分配的 worktree 里，不要只在任务开头 `cd` 一次就假设之后都对。
 
 ## 触发信号
 - 阶段变化（探索 → 实现 → 验证 → 汇报）
