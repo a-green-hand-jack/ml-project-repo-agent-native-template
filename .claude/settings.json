@@ -169,7 +169,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 .claude/hooks/pre_tool_guard.py"
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/pre_tool_guard.py\""
           }
         ]
       }
@@ -191,7 +191,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 .claude/hooks/pre_compact_memory_check.py"
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/pre_compact_memory_check.py\""
           }
         ]
       }
@@ -202,7 +202,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 .claude/hooks/subagent_report_index.py"
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/subagent_report_index.py\""
           }
         ]
       }
