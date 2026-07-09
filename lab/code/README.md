@@ -11,9 +11,11 @@
 | `scripts/` | 一次性 / 运维 / 数据处理脚本 |
 | `tests/` | 单元与集成测试 |
 | `experiments/` | 实验入口与实验专属代码 |
+| `imported/` | adoption replay 导入的外部 repo 原始 root，按 case/slug 隔离 |
 
 ## 常见入口
 
 - 核心逻辑改动在 `src/`；对应结构见 `src/ANATOMY.md`。
 - 新实验从 `experiments/` 起步，配置放 `configs/`。
 - 提交前跑 `tests/`。
+- Agent-R1 case 内容在 `imported/agent-r1/`；迁移 proof 在 `lab/docs/audits/template-adoption-report.md`。

@@ -5,23 +5,23 @@
 
 ## Parent objective
 
-实现 `adopt-existing-repo`：把已有 repo 分步、可验证、尽量无人值守地收敛成模板完整形态。
+维护 Agent-R1 adoption replay case branch，用真实 agent-RL repo 压力测试模板迁移能力。
 
 ## Current phase
 
-Phase 7：Agent-R1 真实 repo replay 已通过并登记；正在做最终验证。
+Case branch population：Agent-R1 imported content 已复制，正在跑 case branch 验证与提交。
 
 ## Children
 
 | id | purpose | branch/worktree | plan doc | status | next prompt |
 | --- | --- | --- | --- | --- | --- |
-| main | implement adopt-existing-repo | `worktree-adopt-existing-repo` / `.claude/worktrees/adopt-existing-repo` | `plans/20260709-adopt-existing-repo.zh.md` | active | Run final validators after Agent-R1 replay report and ledger updates. |
+| case-agent-r1 | preserve Agent-R1 adoption replay | `worktree-case+agent-r1-adoption-replay` / `.claude/worktrees/case+agent-r1-adoption-replay` | `plans/20260709-adopt-existing-repo.zh.md` | active | Validate and commit the case branch. |
 
 ## Merge / review order
 
-1. 当前 worktree 内完成 plan、implementation、tests、ANATOMY/DESIGN/README 同步。
-2. 跑定向测试与 `python scripts/validate-governance.py --strict`。
-3. Human review 后再决定是否 push / PR / merge。
+1. 提交 case branch，不合并完整 case 内容回 `main`。
+2. 若 case 发现通用 template bug，回到 `worktree-adopt-existing-repo` 或新修复分支修。
+3. Human review 后再决定是否 push remote branch。
 
 ## Global forbidden paths
 
@@ -35,6 +35,5 @@ Phase 7：Agent-R1 真实 repo replay 已通过并登记；正在做最终验证
 
 ## Open risks
 
-- 主工作区已有未提交改动；本 feature 分支基于 `main` 的 clean HEAD，不包含那些改动。
-- 新增脚本、skill、command 会触发能力清单/ANATOMY/validator 同步需求。
-- 迁移工具若默认动作过激，可能破坏目标 repo；第一版必须 conservative，不能删除或覆盖。
+- Case branch 体积包含 Agent-R1 images/docs/examples/recipes；默认不要合并回 `main`。
+- Agent-R1 runtime 行为未验证，因为没有轻量 native test command。

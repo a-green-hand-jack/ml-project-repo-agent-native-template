@@ -1,0 +1,113 @@
+{
+  "created_at": "2026-07-09T20:12:46+00:00",
+  "import_root": "lab/code/imported/agent-r1",
+  "normalize_blockers": [],
+  "policy": "conservative",
+  "project_slug": "agent-r1",
+  "protected_roots": [],
+  "report_path": "lab/docs/audits/template-adoption-report.md",
+  "root_entries": [
+    {
+      "allowed_root": true,
+      "kind": "dir",
+      "path": ".github",
+      "protected": false,
+      "template_control_item": true
+    },
+    {
+      "allowed_root": true,
+      "kind": "file",
+      "path": ".gitignore",
+      "protected": false,
+      "template_control_item": true
+    },
+    {
+      "allowed_root": true,
+      "kind": "file",
+      "path": ".pre-commit-config.yaml",
+      "protected": false,
+      "template_control_item": false
+    },
+    {
+      "allowed_root": true,
+      "kind": "file",
+      "path": "LICENSE",
+      "protected": false,
+      "template_control_item": false
+    },
+    {
+      "allowed_root": true,
+      "kind": "file",
+      "path": "README.md",
+      "protected": false,
+      "template_control_item": true
+    },
+    {
+      "allowed_root": false,
+      "kind": "dir",
+      "path": "agent_r1",
+      "protected": false,
+      "template_control_item": false
+    },
+    {
+      "allowed_root": false,
+      "kind": "dir",
+      "path": "docs",
+      "protected": false,
+      "template_control_item": false
+    },
+    {
+      "allowed_root": false,
+      "kind": "dir",
+      "path": "examples",
+      "protected": false,
+      "template_control_item": false
+    },
+    {
+      "allowed_root": false,
+      "kind": "dir",
+      "path": "image",
+      "protected": false,
+      "template_control_item": false
+    },
+    {
+      "allowed_root": false,
+      "kind": "file",
+      "path": "mkdocs.yml",
+      "protected": false,
+      "template_control_item": false
+    },
+    {
+      "allowed_root": true,
+      "kind": "file",
+      "path": "pyproject.toml",
+      "protected": false,
+      "template_control_item": false
+    },
+    {
+      "allowed_root": false,
+      "kind": "dir",
+      "path": "recipes",
+      "protected": false,
+      "template_control_item": false
+    }
+  ],
+  "root_pollution": [
+    "agent_r1",
+    "docs",
+    "examples",
+    "image",
+    "mkdocs.yml",
+    "recipes"
+  ],
+  "schema": "template-adoption-plan-v1",
+  "state_dir": "lab/docs/audits/template-adoption/state",
+  "target": "/tmp/agent-r1-adoption-replay/Agent-R1",
+  "template_conflicts": [
+    ".github",
+    ".gitignore",
+    "README.md"
+  ],
+  "template_root": "/home/user/Projects/ml-project-repo-agent-native-template/.claude/worktrees/adopt-existing-repo",
+  "test_command": null
+}

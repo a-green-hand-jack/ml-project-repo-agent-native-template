@@ -1,0 +1,1184 @@
+{
+  "created_at": "2026-07-09T20:12:46+00:00",
+  "git_head": {
+    "command": "git rev-parse --verify HEAD",
+    "returncode": 0,
+    "stderr": "",
+    "stdout": "85e00992b16f0e6a2d06d79efcaba9c2dd08c5fe\n",
+    "timeout": false
+  },
+  "git_status": {
+    "command": "git status --short",
+    "returncode": 0,
+    "stderr": "",
+    "stdout": "?? lab/\n",
+    "timeout": false
+  },
+  "root_entries": [
+    {
+      "allowed_root": true,
+      "kind": "dir",
+      "path": ".github",
+      "protected": false,
+      "template_control_item": true
+    },
+    {
+      "allowed_root": true,
+      "kind": "file",
+      "path": ".gitignore",
+      "protected": false,
+      "template_control_item": true
+    },
+    {
+      "allowed_root": true,
+      "kind": "file",
+      "path": ".pre-commit-config.yaml",
+      "protected": false,
+      "template_control_item": false
+    },
+    {
+      "allowed_root": true,
+      "kind": "file",
+      "path": "LICENSE",
+      "protected": false,
+      "template_control_item": false
+    },
+    {
+      "allowed_root": true,
+      "kind": "file",
+      "path": "README.md",
+      "protected": false,
+      "template_control_item": true
+    },
+    {
+      "allowed_root": false,
+      "kind": "dir",
+      "path": "agent_r1",
+      "protected": false,
+      "template_control_item": false
+    },
+    {
+      "allowed_root": false,
+      "kind": "dir",
+      "path": "docs",
+      "protected": false,
+      "template_control_item": false
+    },
+    {
+      "allowed_root": false,
+      "kind": "dir",
+      "path": "examples",
+      "protected": false,
+      "template_control_item": false
+    },
+    {
+      "allowed_root": false,
+      "kind": "dir",
+      "path": "image",
+      "protected": false,
+      "template_control_item": false
+    },
+    {
+      "allowed_root": true,
+      "kind": "dir",
+      "path": "lab",
+      "protected": false,
+      "template_control_item": true
+    },
+    {
+      "allowed_root": false,
+      "kind": "file",
+      "path": "mkdocs.yml",
+      "protected": false,
+      "template_control_item": false
+    },
+    {
+      "allowed_root": true,
+      "kind": "file",
+      "path": "pyproject.toml",
+      "protected": false,
+      "template_control_item": false
+    },
+    {
+      "allowed_root": false,
+      "kind": "dir",
+      "path": "recipes",
+      "protected": false,
+      "template_control_item": false
+    }
+  ],
+  "schema": "template-adoption-baseline-v1",
+  "target": "/tmp/agent-r1-adoption-replay/Agent-R1",
+  "test_command": null,
+  "test_result": null,
+  "tracked_files": [
+    {
+      "path": ".github/workflows/docs.yml",
+      "protected": false,
+      "sha256": "bb415bf3c6e26a8053dc644645a725cfb13795c5d82cdf1a1090bdb3fe2bbdf7",
+      "size": 581
+    },
+    {
+      "path": ".gitignore",
+      "protected": false,
+      "sha256": "421cf69bed3fe1c8e4c7bdd5ff8bf3a8c297d1ebb4cb18dd673217fd858f1b53",
+      "size": 1372
+    },
+    {
+      "path": ".pre-commit-config.yaml",
+      "protected": false,
+      "sha256": "4140c3015c3ade686f9e1ee8c1c6c2a3ffc4dc2a986e96469612a5c0fb422f98",
+      "size": 339
+    },
+    {
+      "path": "LICENSE",
+      "protected": false,
+      "sha256": "323e4d01208240469c516e1d7d7bcc37eb1c8a2a18470532df6b612b099e3a9d",
+      "size": 1071
+    },
+    {
+      "path": "README.md",
+      "protected": false,
+      "sha256": "913652f77610d71fdedca2dffa84eebcca11c1dc2a9610d47e1b1b1670c9519f",
+      "size": 13695
+    },
+    {
+      "path": "agent_r1/agent_flow/__init__.py",
+      "protected": false,
+      "sha256": "c091f7e0c14a3fdb722cf494d13a821c0e7f7d17fdca17d292bad5b841291a44",
+      "size": 858
+    },
+    {
+      "path": "agent_r1/agent_flow/agent_env_loop.py",
+      "protected": false,
+      "sha256": "da55a59dc6d9502382ef1377e901f549880f11819d31657df10db736d8cdea45",
+      "size": 6430
+    },
+    {
+      "path": "agent_r1/agent_flow/agent_flow.py",
+      "protected": false,
+      "sha256": "b74920069693776d2723e7402f0090f8ff071daf9a102e7654679c459684e4f4",
+      "size": 44135
+    },
+    {
+      "path": "agent_r1/agent_flow/single_step_agent_flow.py",
+      "protected": false,
+      "sha256": "6f2be616f46fd7e3a4cf19e98d2315a2cbe85f3b40962650c711652f65754470",
+      "size": 2853
+    },
+    {
+      "path": "agent_r1/config/__init__.py",
+      "protected": false,
+      "sha256": "7faee07c8a1f6c7b1c58307669f1c77176de223717fd7ff5dc104e7aef2b1070",
+      "size": 656
+    },
+    {
+      "path": "agent_r1/config/agent_ppo_trainer.yaml",
+      "protected": false,
+      "sha256": "c3ed4143a741d0b1c28bd1b738648c0f102783f44adf229e61e5b96872eef6af",
+      "size": 691
+    },
+    {
+      "path": "agent_r1/config/config.py",
+      "protected": false,
+      "sha256": "6bc4f3ddaf28942d595a518c29c62547089fd963b96fb91ed2a0046197ae23a9",
+      "size": 3738
+    },
+    {
+      "path": "agent_r1/config/overrides/rollout.yaml",
+      "protected": false,
+      "sha256": "8da9915ce4ddec9eed91b2a5b2a5203c88527e4d926a7b97c1b7e1e83fdaf8fd",
+      "size": 1084
+    },
+    {
+      "path": "agent_r1/env/__init__.py",
+      "protected": false,
+      "sha256": "6e562e870e20420276702806f21a076d35a414606c484ecb62e2cfdfbfafb933",
+      "size": 214
+    },
+    {
+      "path": "agent_r1/env/base.py",
+      "protected": false,
+      "sha256": "91b91efa712a6074093f4dcbb90f13317ef115fa48c6bc8e0737d757755b70b3",
+      "size": 3350
+    },
+    {
+      "path": "agent_r1/env/envs/__init__.py",
+      "protected": false,
+      "sha256": "d1794d413d1b48542a00f171c2357d5ef7f0c3eb556906927d4f4a691df9301f",
+      "size": 49
+    },
+    {
+      "path": "agent_r1/env/envs/tool.py",
+      "protected": false,
+      "sha256": "701e888ab94e4cf0c57ee53f1181bf3aca1e0ac2c3f4615521fbac272b16813c",
+      "size": 4866
+    },
+    {
+      "path": "agent_r1/env/tool_format.py",
+      "protected": false,
+      "sha256": "f27c1772769794f7817c118be8b521553cf813f56630f97e56673d679fff0f21",
+      "size": 6371
+    },
+    {
+      "path": "agent_r1/reward_loop/__init__.py",
+      "protected": false,
+      "sha256": "ba6165f878e672f144d14b4d5888bbe966293de65941cb2fb4182f40ac51b8fb",
+      "size": 27
+    },
+    {
+      "path": "agent_r1/reward_loop/reward_loop.py",
+      "protected": false,
+      "sha256": "0759177aefca02438845e0ca981ebef36ca73966e6f435ce871fbfd43e3d655d",
+      "size": 12357
+    },
+    {
+      "path": "agent_r1/tool/__init__.py",
+      "protected": false,
+      "sha256": "19c8e2a62fdcb9a02c0fc7f3bb4045707cd45f7b0a84a591dde13268a85c5f9a",
+      "size": 100
+    },
+    {
+      "path": "agent_r1/tool/base.py",
+      "protected": false,
+      "sha256": "2ee5bb6b9d03921287cf00fd4d3562322fe68e72777a49f684564d43f39e7ccd",
+      "size": 3529
+    },
+    {
+      "path": "agent_r1/tool/schema.py",
+      "protected": false,
+      "sha256": "3dfcc83246d32da0254bd88674ab24df387d6e4d0256488db0b342fde3a06724",
+      "size": 4066
+    },
+    {
+      "path": "agent_r1/trainer/__init__.py",
+      "protected": false,
+      "sha256": "41b4c3f979a4f1786449e24847bf12978a9b009b00a8b10fc6fef816d0e0bc80",
+      "size": 23
+    },
+    {
+      "path": "agent_r1/trainer/main_agent_ppo.py",
+      "protected": false,
+      "sha256": "735591ac67dee83169394e6a04823e90b7ccab182be33537aebfd78809f4e40d",
+      "size": 15797
+    },
+    {
+      "path": "agent_r1/trainer/ppo/__init__.py",
+      "protected": false,
+      "sha256": "ecaec9af676e665bcc50f8ab2af2db9809bc98c90b87761a674dc3ed7b14eb3b",
+      "size": 27
+    },
+    {
+      "path": "agent_r1/trainer/ppo/core_algos.py",
+      "protected": false,
+      "sha256": "4a154af5466d2d69fc7dc9d87b08d67522cd297468e478b4d1027ed615f6a999",
+      "size": 34513
+    },
+    {
+      "path": "agent_r1/trainer/ppo/metric_utils.py",
+      "protected": false,
+      "sha256": "b9a1ff7181b39132726fa3105dc95359992d3946de69ee843da5d0cbbf9e93ae",
+      "size": 3815
+    },
+    {
+      "path": "agent_r1/trainer/ppo/ray_trainer.py",
+      "protected": false,
+      "sha256": "be29da4c2ec7a16a1cceb0dba185df345c1f89c0b8fbda50db0956595f8410d5",
+      "size": 61824
+    },
+    {
+      "path": "agent_r1/trainer/ppo/trajectory_batching.py",
+      "protected": false,
+      "sha256": "d3aee1e774a14a5088147c623335f156201559ec6371ecd94216aab97e308a34",
+      "size": 8702
+    },
+    {
+      "path": "agent_r1/workers/__init__.py",
+      "protected": false,
+      "sha256": "c4029e2adf605bbba84773123f447cacdb9b5153a01becf471ac1b63ddbf9ddf",
+      "size": 39
+    },
+    {
+      "path": "agent_r1/workers/actor/__init__.py",
+      "protected": false,
+      "sha256": "08b2009b6de975cc7e73d3d9edff31b826d7a389cb624769c4811380b3239932",
+      "size": 79
+    },
+    {
+      "path": "agent_r1/workers/actor/dp_actor.py",
+      "protected": false,
+      "sha256": "9c5359ae1ab87a153676bdaeb5a86b8beb9ce9d87b25350f8d4bd0438556cc0c",
+      "size": 10169
+    },
+    {
+      "path": "agent_r1/workers/critic/__init__.py",
+      "protected": false,
+      "sha256": "a69770099187d5ca073d5d593948918c8a28cd1bbc3a116d278e26ad36ccd16c",
+      "size": 82
+    },
+    {
+      "path": "agent_r1/workers/critic/dp_critic.py",
+      "protected": false,
+      "sha256": "b5241c5933efe6276799cba14a1727f474edc61f98b16f2179c3db334ba682c9",
+      "size": 6245
+    },
+    {
+      "path": "agent_r1/workers/engine_workers.py",
+      "protected": false,
+      "sha256": "a76bd06f481065acdc91c201fd747302284136251c12acfe8f89b332b32fd6fe",
+      "size": 8643
+    },
+    {
+      "path": "agent_r1/workers/fsdp_workers.py",
+      "protected": false,
+      "sha256": "e710ad4a756a7b47ba9d3d2adb3f0f651c682621d563b56d09e5cbfc37c3c9d2",
+      "size": 1973
+    },
+    {
+      "path": "agent_r1/workers/utils/__init__.py",
+      "protected": false,
+      "sha256": "19e826063d149f4127c2086aa816f5ad36c0d97f96df7b61036ada52c62521dc",
+      "size": 101
+    },
+    {
+      "path": "agent_r1/workers/utils/losses.py",
+      "protected": false,
+      "sha256": "54054cf89a8961b70a99098d3a6748b0eab4aaff0cceaed39e91da0c9a4047d3",
+      "size": 6120
+    },
+    {
+      "path": "docs/README.md",
+      "protected": false,
+      "sha256": "915ae65b06cb0f9406b8d785ebbb67a52b79905cff7bd9d910feaa2cef2f974b",
+      "size": 2915
+    },
+    {
+      "path": "docs/core-concepts/index.md",
+      "protected": false,
+      "sha256": "31c5f5fb467e937afae9c0926b70c832d59e33782da290d6ba3b14fbb0f45fa2",
+      "size": 711
+    },
+    {
+      "path": "docs/core-concepts/layered-abstractions.md",
+      "protected": false,
+      "sha256": "8787a219fb182cc38497091f8d1bdba31acc9b5b55e76eb83ceb321ee218258e",
+      "size": 3966
+    },
+    {
+      "path": "docs/core-concepts/step-level-mdp.md",
+      "protected": false,
+      "sha256": "118a7c270ddf97b543be2b8a4dd90f871c4f131a76a95da9bcdeb60b1f190b90",
+      "size": 2829
+    },
+    {
+      "path": "docs/experiments.md",
+      "protected": false,
+      "sha256": "11af27da9100cfcc7ab9d69f369828d4b198ffa31368e2cb86d7dc946ff0e422",
+      "size": 4936
+    },
+    {
+      "path": "docs/getting-started/index.md",
+      "protected": false,
+      "sha256": "0976373c45770af7e37b81b74c887f395c6335039b25d57413e3543d856832dd",
+      "size": 1026
+    },
+    {
+      "path": "docs/getting-started/installation-guide.md",
+      "protected": false,
+      "sha256": "f2e868ff5489fac512b6c565ce353a1508aa547fe82e6e0f85f08e7733039363",
+      "size": 931
+    },
+    {
+      "path": "docs/getting-started/quick-start.md",
+      "protected": false,
+      "sha256": "dd0ac6064669122056dc4896f639a702d3fe7a1793ab50b93f839daee13f3fe5",
+      "size": 2046
+    },
+    {
+      "path": "docs/index.md",
+      "protected": false,
+      "sha256": "bcb267222dfe8d73950e13f5d79c335e257a0bbecd61e163f3a28aa364cf0401",
+      "size": 2216
+    },
+    {
+      "path": "docs/requirements.txt",
+      "protected": false,
+      "sha256": "1b5a7200fce68c78913512bae4c35d26cce36897146d170201d84ea6cb7672b4",
+      "size": 75
+    },
+    {
+      "path": "docs/tutorials/agent-task.md",
+      "protected": false,
+      "sha256": "abb219ccb03533a0c2596b3bc29d6d27bafc572ee84106cb92255910c207166b",
+      "size": 4298
+    },
+    {
+      "path": "docs/tutorials/index.md",
+      "protected": false,
+      "sha256": "3a8049ee242cff90a2f8d77efe35b29ee0ec915a68bd4efb6828d411bcd10bb2",
+      "size": 524
+    },
+    {
+      "path": "docs/tutorials/recipes-and-algorithms.md",
+      "protected": false,
+      "sha256": "5e539daebc0775aa998575a4b3ffe72c2dcc7225bf76224ace5d48c1ddc22154",
+      "size": 4472
+    },
+    {
+      "path": "docs/zh/core-concepts/index.md",
+      "protected": false,
+      "sha256": "f722468206fbc8160086d0d3a8876e4465cde5963e7945549e067343c323b07e",
+      "size": 650
+    },
+    {
+      "path": "docs/zh/core-concepts/layered-abstractions.md",
+      "protected": false,
+      "sha256": "bc415e0252cd6a643cff42d5d742381668fe28dfaa95cce29d2bbd334f0e91d3",
+      "size": 3635
+    },
+    {
+      "path": "docs/zh/core-concepts/step-level-mdp.md",
+      "protected": false,
+      "sha256": "df2bb22cdd4d408f77b23958fbeb1a7bb595487610cb5ae6522eb79688dd661a",
+      "size": 2480
+    },
+    {
+      "path": "docs/zh/getting-started/index.md",
+      "protected": false,
+      "sha256": "eef5f35b5a074b0d4dc5640e97523966d1bfa05215e42a0ee78313b383f5caa0",
+      "size": 877
+    },
+    {
+      "path": "docs/zh/getting-started/installation-guide.md",
+      "protected": false,
+      "sha256": "62a85f1f92ba8d95ea1ee3ac409153ab9d025afcfc946961c1262816fdec90f4",
+      "size": 843
+    },
+    {
+      "path": "docs/zh/getting-started/quick-start.md",
+      "protected": false,
+      "sha256": "3ca5daf1dc3252851dbf930f8b21fd4e91e234dc61ea1d2b66be30cccb19ad47",
+      "size": 1949
+    },
+    {
+      "path": "docs/zh/index.md",
+      "protected": false,
+      "sha256": "bf78e575dd71100f6b3bb539e1b1fc19133160f63efefceb7ea75a3af3313015",
+      "size": 2173
+    },
+    {
+      "path": "docs/zh/tutorials/agent-task.md",
+      "protected": false,
+      "sha256": "faa3eb8002390256226e1416b490d2903b523a5eb0af6f0a27a3965f136eebbc",
+      "size": 3946
+    },
+    {
+      "path": "docs/zh/tutorials/index.md",
+      "protected": false,
+      "sha256": "7563581d9d45f98905c289c237f319e6e6e51a7d244094951511b54b435f0850",
+      "size": 427
+    },
+    {
+      "path": "docs/zh/tutorials/recipes-and-algorithms.md",
+      "protected": false,
+      "sha256": "e7c39f65060fbef32bdafefce7e3c68a00b1e3a9a089708678ba855a093c56f5",
+      "size": 4223
+    },
+    {
+      "path": "examples/alfworld/run_gigpo.sh",
+      "protected": false,
+      "sha256": "732f2d16eed033964b04668812e68f966bc1f9ce9d533bb68b2c3540bd66a904",
+      "size": 1009
+    },
+    {
+      "path": "examples/alfworld/run_grpo.sh",
+      "protected": false,
+      "sha256": "f8710b29df7e6c4061d182a74ffcf32e7d84a92ec07fdddbad0b43b21865155d",
+      "size": 5358
+    },
+    {
+      "path": "examples/alfworld/run_gspo.sh",
+      "protected": false,
+      "sha256": "b73dd8237ed9531ec7bcb8aa879dfcd05656f38269ccecafe6bd6fac3e830c38",
+      "size": 800
+    },
+    {
+      "path": "examples/alfworld/run_ppo.sh",
+      "protected": false,
+      "sha256": "aa5539ad8ef13a38743b28b6317a9dd0d43167d7e479c3034c906323415ad058",
+      "size": 4494
+    },
+    {
+      "path": "examples/alfworld/run_reinforce.sh",
+      "protected": false,
+      "sha256": "1eac7a1b905942d09589408a19e88e9428aa99bd7393035767c08566b564fb3b",
+      "size": 814
+    },
+    {
+      "path": "examples/alfworld/run_rloo.sh",
+      "protected": false,
+      "sha256": "acef37c33b437d0e10c8fa6b5be05d8e2ab65d52c915bdffb08c3a9013527080",
+      "size": 675
+    },
+    {
+      "path": "examples/alfworld/run_steppo.sh",
+      "protected": false,
+      "sha256": "6b407eeed39af723311e2726b3ba2e947b54d37207cac7cc3b6c22f280a1eb2f",
+      "size": 4557
+    },
+    {
+      "path": "examples/gsm8k/run_steppo.sh",
+      "protected": false,
+      "sha256": "a548ce9f5e6dfdef2daf032c771e0b5ec7df53e3fb6c31bfecd8690c926f6a63",
+      "size": 2405
+    },
+    {
+      "path": "examples/gsm8k/run_steppo_tool.sh",
+      "protected": false,
+      "sha256": "000b627f05a45e0f9248235810cc95ab16d9c5624735e6e6de82524ce29ebf4e",
+      "size": 2796
+    },
+    {
+      "path": "examples/hotpotqa/run_gigpo.sh",
+      "protected": false,
+      "sha256": "83f2595acda3756df9b249ea011c78ff702d7b92d67003f2ea3658d8d507b96f",
+      "size": 908
+    },
+    {
+      "path": "examples/hotpotqa/run_grpo.sh",
+      "protected": false,
+      "sha256": "25be5ba1c1cead44ef5919f18830bee233fdcf5fc474ffbf480ecf036c5a76a7",
+      "size": 5951
+    },
+    {
+      "path": "examples/hotpotqa/run_gspo.sh",
+      "protected": false,
+      "sha256": "d0b64ac3891a49c0c6285fae82ddd09f8e825fe2aea050779f534f4995d066ea",
+      "size": 700
+    },
+    {
+      "path": "examples/hotpotqa/run_ppo.sh",
+      "protected": false,
+      "sha256": "069aae6a0bdd6f743b0d6887291fb849fe2a00466ad855935d7397d0a5c422d4",
+      "size": 5171
+    },
+    {
+      "path": "examples/hotpotqa/run_reinforce.sh",
+      "protected": false,
+      "sha256": "b5fe541d04aa010e6a7e1bd0e50ef016a08c7828995d4c105f5c5ffaedc0d3d8",
+      "size": 709
+    },
+    {
+      "path": "examples/hotpotqa/run_rloo.sh",
+      "protected": false,
+      "sha256": "047103cce6cefeb7d35431729a62200384660546617828487446d18995c1b768",
+      "size": 575
+    },
+    {
+      "path": "examples/hotpotqa/run_steppo.sh",
+      "protected": false,
+      "sha256": "62acf85da635ebc3414d1070d2aa237e525e672067f7f1b8cea41449d7eb5e50",
+      "size": 5231
+    },
+    {
+      "path": "examples/paper_search/inference/run_evaluation.sh",
+      "protected": false,
+      "sha256": "f73bf889c514e8745bbcdcf8efd58c1f74b102c930ca59ee756d8c5d6b76dffb",
+      "size": 1219
+    },
+    {
+      "path": "examples/paper_search/run_gigpo.sh",
+      "protected": false,
+      "sha256": "25a8717c4820b748b04a0d84f117c0757aab756e682e1ba0fa865ddd54f7d018",
+      "size": 911
+    },
+    {
+      "path": "examples/paper_search/run_grpo.sh",
+      "protected": false,
+      "sha256": "a7d6f84f5820702e2ce0d9686af2d58c0732c4ff52d06c4ffb0f2e126ec82696",
+      "size": 5045
+    },
+    {
+      "path": "examples/paper_search/run_gspo.sh",
+      "protected": false,
+      "sha256": "cd206d563ed7a29e92c2f4f81490292c10f7d84984fe690b5a54535fb96b94dc",
+      "size": 703
+    },
+    {
+      "path": "examples/paper_search/run_ppo.sh",
+      "protected": false,
+      "sha256": "79aa4710af6b64e7cb2ba985a7b9390b491949085d1d51d8483c8029eec216c8",
+      "size": 4272
+    },
+    {
+      "path": "examples/paper_search/run_reinforce.sh",
+      "protected": false,
+      "sha256": "4a9cdebcfcb945b52fa5530153adb6c45d9e3be9de713581675550c37ef288c7",
+      "size": 712
+    },
+    {
+      "path": "examples/paper_search/run_rloo.sh",
+      "protected": false,
+      "sha256": "89b69a2b44cebb1b6aa67e03768338fa88316e9d5dcd0e0d8694fe4f4f358a42",
+      "size": 578
+    },
+    {
+      "path": "examples/paper_search/run_steppo.sh",
+      "protected": false,
+      "sha256": "3268e2c6c15a5c8be4d018d97fc89703a3deaf483c0ac83501ef60aad467e0f1",
+      "size": 4332
+    },
+    {
+      "path": "examples/webshop/run_gigpo.sh",
+      "protected": false,
+      "sha256": "8de814be8396e1a23402fa6c29784fcf39e6c86e22f982739f24557429aede7f",
+      "size": 1005
+    },
+    {
+      "path": "examples/webshop/run_grpo.sh",
+      "protected": false,
+      "sha256": "9345ab8880225fd7ba3fc41d9dd9c85bb9798a3894597a8567de1fee5a3eeb27",
+      "size": 5053
+    },
+    {
+      "path": "examples/webshop/run_gspo.sh",
+      "protected": false,
+      "sha256": "595f48a5c3ec459301ca231d046be8544b33c209091c793cc06c0ffd37c4dd83",
+      "size": 796
+    },
+    {
+      "path": "examples/webshop/run_ppo.sh",
+      "protected": false,
+      "sha256": "1a09a7a28b8f7a4971a945f7917318af34c8ed3adfe5c62519c4c4b711411e78",
+      "size": 4343
+    },
+    {
+      "path": "examples/webshop/run_reinforce.sh",
+      "protected": false,
+      "sha256": "b0c14c799a4c17a3f42becd5dfecba9ef4c40cd56f191a181d4381dd7bb14591",
+      "size": 810
+    },
+    {
+      "path": "examples/webshop/run_rloo.sh",
+      "protected": false,
+      "sha256": "567d24115fea9225fc6b4c93587deaf3f61cfe501e0f11a688a94bdd4cbcefc1",
+      "size": 671
+    },
+    {
+      "path": "examples/webshop/run_steppo.sh",
+      "protected": false,
+      "sha256": "1f2da70d98bac5dad6ee3b40c8610d6505b2001ca8e8e75cef892bf4b9556a6a",
+      "size": 4406
+    },
+    {
+      "path": "image/agent-r1-datasets.png",
+      "protected": false,
+      "sha256": "4b7503261f037928ee95daa8f252056d801234e071c2e6ce0f25d87e941998ae",
+      "size": 106736
+    },
+    {
+      "path": "image/agent-r1-gsm8k-context.png",
+      "protected": false,
+      "sha256": "d40db6010d1db21c845a900c0c27a627f2008b82fac5bd0fc02f97aa64701e1c",
+      "size": 148285
+    },
+    {
+      "path": "image/agent-r1-gsm8k.png",
+      "protected": false,
+      "sha256": "e539aff10a1b3660d150a8daa76c8a4a9477973474eb920c2f05a80dea341eb0",
+      "size": 165720
+    },
+    {
+      "path": "image/framework.png",
+      "protected": false,
+      "sha256": "a73c3041f90b98412791f9337a40e4f3390163d7e8a81c44910681d1fdfc1c11",
+      "size": 241083
+    },
+    {
+      "path": "image/logo.png",
+      "protected": false,
+      "sha256": "d276aefa4e322195a54e02b5d9b3f159235fcf3cba7c4a2c46e8f1a7470f6cef",
+      "size": 647706
+    },
+    {
+      "path": "image/step-level-mdp.png",
+      "protected": false,
+      "sha256": "d1c23807ac6e53bde9ddd6f35796cbf61b74c48bbeb1895671e8752bd5a9a2ef",
+      "size": 183740
+    },
+    {
+      "path": "mkdocs.yml",
+      "protected": false,
+      "sha256": "0b970cf99cf9a43df7e2f43e1b2d94549bde87d505e323f6d0f0cc5047d9b7d3",
+      "size": 3001
+    },
+    {
+      "path": "pyproject.toml",
+      "protected": false,
+      "sha256": "bd32a19287aceeff36af9c655360f3797e139b4c5d78b5fcba1caa6a0806bb9f",
+      "size": 1230
+    },
+    {
+      "path": "recipes/__init__.py",
+      "protected": false,
+      "sha256": "3af4487a565144d21ef87f075f5406e7abb49e46dd332980cc2826073f9382f3",
+      "size": 42
+    },
+    {
+      "path": "recipes/alfworld/README.md",
+      "protected": false,
+      "sha256": "a5609260acff93eadead733195677c8035af044e92a0d9d371e1ef010b7416da",
+      "size": 3801
+    },
+    {
+      "path": "recipes/alfworld/__init__.py",
+      "protected": false,
+      "sha256": "aa212418f78a7f0702c949218f23db36f98a827548dda5f087f0331df432ffa8",
+      "size": 23
+    },
+    {
+      "path": "recipes/alfworld/alfworld_agent_flow.py",
+      "protected": false,
+      "sha256": "ec5303aa567c97fdba3085047c0411acc64ad3354284bfe6db80537eb31fa01d",
+      "size": 10044
+    },
+    {
+      "path": "recipes/alfworld/base.yaml",
+      "protected": false,
+      "sha256": "d3eb0b636f656392806fe92a9ae63be7f65bcf6c79e1fca060740aecd28d2d15",
+      "size": 154
+    },
+    {
+      "path": "recipes/alfworld/data_preprocess/__init__.py",
+      "protected": false,
+      "sha256": "4905273d9f5dc4e0f2982b9e24998e868ed15d5bbbdd102a3b3b0ff1c85153bf",
+      "size": 45
+    },
+    {
+      "path": "recipes/alfworld/data_preprocess/process_alfworld.py",
+      "protected": false,
+      "sha256": "f6c45dd92311cbaa3ee6e246fd4892108ef2b1e22f1f487926fc8426815792ec",
+      "size": 6943
+    },
+    {
+      "path": "recipes/alfworld/env/alfworld_wrapper.py",
+      "protected": false,
+      "sha256": "ac32c997024c881a4d5caeb7adf10debc0354d525631179145eb033a01c158e7",
+      "size": 8085
+    },
+    {
+      "path": "recipes/alfworld/env/tool_executor.py",
+      "protected": false,
+      "sha256": "268aea57fd6824ddf93261e4244d6ffbc2e2559574cfb546211344c4608a04c6",
+      "size": 1378
+    },
+    {
+      "path": "recipes/alfworld/prompts.py",
+      "protected": false,
+      "sha256": "aafa43afbfa5e0d7eec37dae52f4d218dddded9da85044d72b4d0dbcccd06d73",
+      "size": 1998
+    },
+    {
+      "path": "recipes/alfworld/requirements.txt",
+      "protected": false,
+      "sha256": "87636909a622a206bd173193451b922f51f06a152f61cf6103352e9843bd4d3b",
+      "size": 131
+    },
+    {
+      "path": "recipes/alfworld/reward_fn.py",
+      "protected": false,
+      "sha256": "8535be74bd9d5cec2084698e9b6266db49770a1f107ba71ee8193b27f3107630",
+      "size": 3053
+    },
+    {
+      "path": "recipes/alfworld/summarize_validation.py",
+      "protected": false,
+      "sha256": "c78c8e92dbb4bf30a3e0d72f09b1dac344d80f881bb2d909e0954a6c29e3ba17",
+      "size": 5794
+    },
+    {
+      "path": "recipes/alfworld/utils.py",
+      "protected": false,
+      "sha256": "8b1337fec3d48029609f481f406681982e5d65f5c1fd98c29df682fec77e0fd6",
+      "size": 2036
+    },
+    {
+      "path": "recipes/gsm8k/README.md",
+      "protected": false,
+      "sha256": "d0b2d5286f1697896613380eb79057b33bc78cbb817b1ce4624c2dcacc375b27",
+      "size": 3452
+    },
+    {
+      "path": "recipes/gsm8k/__init__.py",
+      "protected": false,
+      "sha256": "a95a3938f19180e91139d6533a8126a3c8090d6a03fe98a4cca542a92f3073b9",
+      "size": 221
+    },
+    {
+      "path": "recipes/gsm8k/base.yaml",
+      "protected": false,
+      "sha256": "43c43d93bb95159c884ad324b0f1c4825c5b7bbe96b769d122d7ee5a612c4437",
+      "size": 130
+    },
+    {
+      "path": "recipes/gsm8k/data_preprocess/__init__.py",
+      "protected": false,
+      "sha256": "4a0a617d738c524f70d8d8b23cc705e77224373aa0293840e25ed7468fa4173f",
+      "size": 42
+    },
+    {
+      "path": "recipes/gsm8k/data_preprocess/process_gsm8k.py",
+      "protected": false,
+      "sha256": "ea9505c8ca9904c61f5468a0eca8e3ee08dcb17de66b5a1b5e40df255a298a66",
+      "size": 3780
+    },
+    {
+      "path": "recipes/gsm8k/data_preprocess/process_gsm8k_tool.py",
+      "protected": false,
+      "sha256": "30538efb1e2361b1e73f2e0f3413b5d6d46ec41cc4ced7fcbe14f8ef2112389b",
+      "size": 4070
+    },
+    {
+      "path": "recipes/gsm8k/prompts.py",
+      "protected": false,
+      "sha256": "836d3a86046694cd8017018858dcdf14a045413bc9dad3a02a8f88d50ff3abc3",
+      "size": 961
+    },
+    {
+      "path": "recipes/gsm8k/requirements.txt",
+      "protected": false,
+      "sha256": "439c6953fbb37497224f647003955e0b9a8011d51e9c01ef2b2deb8f713843ca",
+      "size": 111
+    },
+    {
+      "path": "recipes/gsm8k/reward_fn.py",
+      "protected": false,
+      "sha256": "39f088a87bd6b29140f24da59a43c104d8c2a8920cce53c1e49b1b7eaf525b79",
+      "size": 483
+    },
+    {
+      "path": "recipes/gsm8k/tool.py",
+      "protected": false,
+      "sha256": "936a8f5132f00adf6991749c848d736398ad9dc53274c2aff95c6deb0d581391",
+      "size": 1956
+    },
+    {
+      "path": "recipes/hotpotqa/README.md",
+      "protected": false,
+      "sha256": "0b7126e30efd8da49f4d05d65a8b6430e1ce1f53ed84feb005d6d35a403f2f6a",
+      "size": 4102
+    },
+    {
+      "path": "recipes/hotpotqa/__init__.py",
+      "protected": false,
+      "sha256": "e89e0fe21955c7daf51604f73bddac93f4f9b3353916713908f4feaf29cde02c",
+      "size": 23
+    },
+    {
+      "path": "recipes/hotpotqa/base.yaml",
+      "protected": false,
+      "sha256": "7837543952be6cd0e18a4c04104ca2024292bf4bda889a06a3f6811113323f1e",
+      "size": 660
+    },
+    {
+      "path": "recipes/hotpotqa/data_preprocess/__init__.py",
+      "protected": false,
+      "sha256": "aa9da7a54e710d6c33e5e0d4267a2f37bc911041d9ebfdb75d5c21529cf7eafc",
+      "size": 45
+    },
+    {
+      "path": "recipes/hotpotqa/data_preprocess/process_hotpotqa.py",
+      "protected": false,
+      "sha256": "8c53773ddc6296e08da3ead8d9efe2b0fe88e3de8df40403d7d2ee616f7d9f23",
+      "size": 11537
+    },
+    {
+      "path": "recipes/hotpotqa/env/__init__.py",
+      "protected": false,
+      "sha256": "cc9a05250b6e0f0e202af95ba856c5ee85f4755f35d47b249e93ee9659703ff5",
+      "size": 48
+    },
+    {
+      "path": "recipes/hotpotqa/env/build_index.py",
+      "protected": false,
+      "sha256": "20989c1e75e40cccb6c2487933bccbea324c8dc1fc3c8e1ab722e9e150223e8f",
+      "size": 3771
+    },
+    {
+      "path": "recipes/hotpotqa/env/build_retrieval_corpus.py",
+      "protected": false,
+      "sha256": "e1e44da46bbcb874a421af3df88ae10845afd2496f54bec725a12f407a20772c",
+      "size": 8459
+    },
+    {
+      "path": "recipes/hotpotqa/env/search_tool.py",
+      "protected": false,
+      "sha256": "6c012e304ad3d505241ce76df3c63905ef1889ca5701f95046e550233145d09f",
+      "size": 14536
+    },
+    {
+      "path": "recipes/hotpotqa/hotpotqa_agent_flow.py",
+      "protected": false,
+      "sha256": "b23510b6dd4c1cd58f0943f1615d90a8e0bab958f147dac5bbf621ea24944841",
+      "size": 16802
+    },
+    {
+      "path": "recipes/hotpotqa/prompts.py",
+      "protected": false,
+      "sha256": "a1a99c90eedc5fabedf5b236ee7e152fcf1d07ef7d48386ff28de88650e845e9",
+      "size": 2249
+    },
+    {
+      "path": "recipes/hotpotqa/requirements.txt",
+      "protected": false,
+      "sha256": "470d5730c6877b770d0c2a1e044d81472893d6fab252d720c0d1e8437c39beb2",
+      "size": 152
+    },
+    {
+      "path": "recipes/hotpotqa/reward_fn.py",
+      "protected": false,
+      "sha256": "0a0ce8f1bdba9d24a796f7a8782b8a8da6670d8db59011a8808bce136de3a774",
+      "size": 3677
+    },
+    {
+      "path": "recipes/paper_search/README.md",
+      "protected": false,
+      "sha256": "32c5c234a84630653a5ba19dfc22d6691d78bf02bc4019d9b6e61b1fd4ed698b",
+      "size": 5383
+    },
+    {
+      "path": "recipes/paper_search/__init__.py",
+      "protected": false,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    {
+      "path": "recipes/paper_search/base.yaml",
+      "protected": false,
+      "sha256": "0288bccbc181fb9edef311f8f5b67197f29e1093f74f3d14c00afda2710760d7",
+      "size": 208
+    },
+    {
+      "path": "recipes/paper_search/env/__init__.py",
+      "protected": false,
+      "sha256": "8cbfad6353f431f9648cbf624d5f75a9e0f02842be042b5e215d08cdfd5e2ab1",
+      "size": 62
+    },
+    {
+      "path": "recipes/paper_search/env/http_retry.py",
+      "protected": false,
+      "sha256": "09af2b64625ccfba3250eaceaf21d63d00bf972f559475c5ed43537f2995bc87",
+      "size": 6731
+    },
+    {
+      "path": "recipes/paper_search/env/paper_client.py",
+      "protected": false,
+      "sha256": "3aa25b768fee5b30502d93aa98ac55132d04b017d9902d676cc251a54a5f014f",
+      "size": 12760
+    },
+    {
+      "path": "recipes/paper_search/env/run_papersearch_selector_service.sh",
+      "protected": false,
+      "sha256": "77e3acbaf8a6c981cdad0e1584eaf059949a6336d391e7dd1f37dba05271abc7",
+      "size": 1598
+    },
+    {
+      "path": "recipes/paper_search/inference/__init__.py",
+      "protected": false,
+      "sha256": "04f550a7b549a133d459aef06bd34d4ece0a05e5da8972f868921194587c0cd7",
+      "size": 40
+    },
+    {
+      "path": "recipes/paper_search/inference/agent.py",
+      "protected": false,
+      "sha256": "5d0453517554ece99f3297a68718ff9b932fb8cba5566ce5304ea94966973f8f",
+      "size": 5658
+    },
+    {
+      "path": "recipes/paper_search/inference/date_utils.py",
+      "protected": false,
+      "sha256": "51aee9645be50633cdc1308e29884f303337ba3620852b5779b107dd2a99cdee",
+      "size": 388
+    },
+    {
+      "path": "recipes/paper_search/inference/default.yaml",
+      "protected": false,
+      "sha256": "bfc65e3799df9ae6094e9f98b086986b35edbcec0b789f587c503502fdc39e60",
+      "size": 1621
+    },
+    {
+      "path": "recipes/paper_search/inference/evaluation.py",
+      "protected": false,
+      "sha256": "92e5a056a20e821bb0f74fc552e169aca52ed394679e6e7198a1f84799b9922f",
+      "size": 4702
+    },
+    {
+      "path": "recipes/paper_search/inference/retrieval_client.py",
+      "protected": false,
+      "sha256": "71d0dc1a39c813b789dba702ea13ad31431cff6a58a2af7e0b0f6d37935bb3f2",
+      "size": 2971
+    },
+    {
+      "path": "recipes/paper_search/inference/run.py",
+      "protected": false,
+      "sha256": "6f5addb9e7291d73e70746ad2fb5ae8eec4fa5d18b2fe9c0fa7503c7d9a2cb68",
+      "size": 8988
+    },
+    {
+      "path": "recipes/paper_search/inference/serper.py",
+      "protected": false,
+      "sha256": "271f4cd25a24cc823a952ee94318645226c7e5c66b2693d62abad6368e133353",
+      "size": 5033
+    },
+    {
+      "path": "recipes/paper_search/paper_search_agent_flow.py",
+      "protected": false,
+      "sha256": "68b67651c6486093c11982d69fdb2347f69b27a708f6546e953eb53fe5ab6c6c",
+      "size": 6042
+    },
+    {
+      "path": "recipes/paper_search/prompts.py",
+      "protected": false,
+      "sha256": "c55dc6470541c377a0896778e2c90d9aecd744ff83a1ad268cdaef9db4c92f51",
+      "size": 2570
+    },
+    {
+      "path": "recipes/paper_search/requirements.txt",
+      "protected": false,
+      "sha256": "383e0770458887f7199d470e69a643552ac8010aeaba2718d1c3bfb7ab3b8beb",
+      "size": 155
+    },
+    {
+      "path": "recipes/paper_search/runtime.py",
+      "protected": false,
+      "sha256": "f7cc1f47a62426ae07c4637879ce20b0e4dfc504a3eb859eec58b84e8bd99031",
+      "size": 11435
+    },
+    {
+      "path": "recipes/paper_search/utils.py",
+      "protected": false,
+      "sha256": "deed1f9aa3185e848721d763f50ce380217cc78a294331f5faf9d1325ab27894",
+      "size": 4748
+    },
+    {
+      "path": "recipes/webshop/README.md",
+      "protected": false,
+      "sha256": "1bb7e63d307d6e0cbb171ab0373e627a284e73f8de061970cbed802e646e7e67",
+      "size": 4622
+    },
+    {
+      "path": "recipes/webshop/__init__.py",
+      "protected": false,
+      "sha256": "2bd4a557409abc5a7cf0b1e09c2ff2d4c5d37a4937fc1d26466404e6fcc79043",
+      "size": 30
+    },
+    {
+      "path": "recipes/webshop/base.yaml",
+      "protected": false,
+      "sha256": "e29480b5ea95d25f53adad1b454d96fe4f36279ffa9c3504f0da2729d54064f6",
+      "size": 202
+    },
+    {
+      "path": "recipes/webshop/data_preprocess/__init__.py",
+      "protected": false,
+      "sha256": "0e5b7b1dddf38b011b52db68aaf0ca62b38a1460908b6ad66f9773fad4745e95",
+      "size": 44
+    },
+    {
+      "path": "recipes/webshop/data_preprocess/process_webshop.py",
+      "protected": false,
+      "sha256": "8ff5c217f56f9c95056ac30ebfa1e3e7e67754841272ef10040c97c16fcdb11f",
+      "size": 4856
+    },
+    {
+      "path": "recipes/webshop/env/__init__.py",
+      "protected": false,
+      "sha256": "ace3dcf186cec2acc6ac1a2f25a9ecfad959f420f6974e6f01d0afd55d107ce9",
+      "size": 51
+    },
+    {
+      "path": "recipes/webshop/env/build_full_artifacts.sh",
+      "protected": false,
+      "sha256": "edb21fe97024c10b6b9b893552a780d3b2b7b1a37b61e646f0ebd3191ddbd565",
+      "size": 526
+    },
+    {
+      "path": "recipes/webshop/env/build_index.py",
+      "protected": false,
+      "sha256": "57ed8c1b7f6b63a279bba48f47a57782448bc4cfe69f904725b09a5885b4296c",
+      "size": 1135
+    },
+    {
+      "path": "recipes/webshop/env/catalog.py",
+      "protected": false,
+      "sha256": "e7ff00e28f54b35e7d3be9d137cc6831f085771f635bb8dacf6918d37c320366",
+      "size": 10130
+    },
+    {
+      "path": "recipes/webshop/env/client.py",
+      "protected": false,
+      "sha256": "c2fc18734cc643ce259024ebdd234fa37cb8d0f72d81859ca2a715c76318cf79",
+      "size": 1054
+    },
+    {
+      "path": "recipes/webshop/env/engine.py",
+      "protected": false,
+      "sha256": "b5ef8e9e0290a363f7c32b4ee211fa00f8082abbee10fb7b18e58e09b106b7a5",
+      "size": 21850
+    },
+    {
+      "path": "recipes/webshop/env/full_catalog.py",
+      "protected": false,
+      "sha256": "954be9870bbceb77f7ccabb57a3bb8b1ddff4251f36e2081f4cc13415e270d2b",
+      "size": 18237
+    },
+    {
+      "path": "recipes/webshop/env/run_env_server.sh",
+      "protected": false,
+      "sha256": "be7959fd6e621e8112f46e633cd3a632018b9b66607da4bf7dea26324d70e471",
+      "size": 1714
+    },
+    {
+      "path": "recipes/webshop/env/schemas.py",
+      "protected": false,
+      "sha256": "b33414b849d560d9cf9c803583a88a4683bfae678493dc6b978d1d544a654f1a",
+      "size": 869
+    },
+    {
+      "path": "recipes/webshop/env/server.py",
+      "protected": false,
+      "sha256": "d69e411460d8a51e0a11b2ccc8e9edde93654b0a06fd0f52e3a013eb2462dda6",
+      "size": 5246
+    },
+    {
+      "path": "recipes/webshop/prompts.py",
+      "protected": false,
+      "sha256": "70ada99d366eb83ce0357a557ceef17a26063151dbfef93452bf1702b3d90b73",
+      "size": 1515
+    },
+    {
+      "path": "recipes/webshop/requirements.txt",
+      "protected": false,
+      "sha256": "5bd0981d5afa79f1fc93ad06f7bdce92840c8d91a0519b93bf6e47c0e223f00f",
+      "size": 176
+    },
+    {
+      "path": "recipes/webshop/reward_fn.py",
+      "protected": false,
+      "sha256": "ca8182b2933606d6da3452f802df887640bb7eebca200319d6f2e4dce1217ac8",
+      "size": 2021
+    },
+    {
+      "path": "recipes/webshop/utils.py",
+      "protected": false,
+      "sha256": "4ebb8bf97696b8f5545f11efd866eb2d791deceb7d912f6bd0940cd27599714e",
+      "size": 2059
+    },
+    {
+      "path": "recipes/webshop/webshop_agent_flow.py",
+      "protected": false,
+      "sha256": "c7757aa4e88e3c9e055f8fc9c31c9abbcfccccfb86affd45d13a96486922c051",
+      "size": 9686
+    }
+  ]
+}
