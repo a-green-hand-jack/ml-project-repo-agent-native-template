@@ -17,6 +17,7 @@
 - 每个结构 claim 尽量引用代码坐标：`path/to/file.py:42` 或 `:42-90`。
 - 目标 ~80 行，硬上限 ~120 行。写不短通常是代码边界不清，不是文档该加长。
 - **same-commit rule**：移动/改名/拆分/合并/删除文件或函数、改 ownership/调用关系/持久状态 shape/lifecycle/routing/workflow，都算结构改动，必须同 commit 更新相关 anatomy。
+  由 `scripts/check-same-commit.py` 机器强制（在「有自己 anatomy 的目录」里 A/D/R 文件却没同变更集更新该 anatomy → 拦）：pre-commit hook（`.githooks/`）+ CI 各查一道。逃生 `SAME_COMMIT_SKIP=1` / `--no-verify`（文档卫生，非安全地板）。
 - refactor 前先 grep 被动文件名在所有 `ANATOMY.md`、index YAML、ledger 里的引用。
 
 ## 模板

@@ -1,0 +1,9 @@
+#!/bin/sh
+# 仓库版 git pre-commit hook：强制 same-commit rule（结构改动 <-> ANATOMY.md 同变更集）。
+# 见 .agent/anatomy-protocol.md、scripts/check-same-commit.py。
+#
+# 启用（每个 clone 一次性，git config 不随 clone 复制）：
+#   git config core.hooksPath .githooks
+#
+# 逃生：git commit --no-verify，或 SAME_COMMIT_SKIP=1 git commit ...
+exec python scripts/check-same-commit.py --staged

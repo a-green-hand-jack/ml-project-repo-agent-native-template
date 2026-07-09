@@ -11,6 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # same-commit 检查需要 base ref
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -18,3 +20,16 @@ jobs:
         run: pip install pyyaml
       - name: Validate governance (strict)
         run: python scripts/validate-governance.py --strict
+      - name: Same-commit rule (structure <-> anatomy)
+        run: |
+          BASE=""
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            BASE="${{ github.event.before }}"
+          fi
+          if [ -z "$BASE" ] || echo "$BASE" | grep -qE '^0+$'; then
+            echo "no base ref (new branch / first push) — skipping same-commit check"
+            exit 0
+          fi
+          python scripts/check-same-commit.py --against "$BASE"
