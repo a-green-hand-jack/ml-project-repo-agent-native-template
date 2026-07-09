@@ -9,13 +9,13 @@
 
 ## Current phase
 
-Case branch population：Agent-R1 imported content 已复制，正在跑 case branch 验证与提交。
+Case branch complete：Agent-R1 imported content 已提交并通过 pressure matrix。
 
 ## Children
 
 | id | purpose | branch/worktree | plan doc | status | next prompt |
 | --- | --- | --- | --- | --- | --- |
-| case-agent-r1 | preserve Agent-R1 adoption replay | `worktree-case+agent-r1-adoption-replay` / `.claude/worktrees/case+agent-r1-adoption-replay` | `plans/20260709-adopt-existing-repo.zh.md` | active | Validate and commit the case branch. |
+| case-agent-r1 | preserve Agent-R1 adoption replay | `worktree-case+agent-r1-adoption-replay` / `.claude/worktrees/case+agent-r1-adoption-replay` | `plans/20260709-adopt-existing-repo.zh.md` | done | Keep branch for future stress testing; do not merge full case into main by default. |
 
 ## Merge / review order
 
