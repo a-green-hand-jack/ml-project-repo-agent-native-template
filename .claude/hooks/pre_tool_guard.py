@@ -22,6 +22,12 @@ import re
 import shlex
 import subprocess
 import sys
+from pathlib import Path
+
+# 本脚本自己的仓库根：`_current_branch()` 的 subprocess 调用要锚定到这里，
+# 不能依赖调用进程当下的 cwd（cwd 若已漂移进嵌套仓库，会静默检查错误仓库的
+# 分支，进而影响 push-to-main 保护逻辑的判断）。本文件在 `.claude/hooks/` 下。
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 # 受保护 bytes / 私有 / 追踪产物路径。
 PROTECTED_PREFIXES = (
@@ -87,6 +93,7 @@ def _current_branch() -> str:
         out = subprocess.run(
             ["git", "branch", "--show-current"],
             capture_output=True, text=True, timeout=5,
+            cwd=str(REPO_ROOT),
         )
         return out.stdout.strip()
     except Exception:  # noqa: BLE001  无 git / 超时 / 非仓库
