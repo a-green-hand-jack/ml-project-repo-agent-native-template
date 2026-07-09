@@ -5,30 +5,29 @@
 
 ## Parent objective
 
-收尾 `ml-project-repo-agent-native-template` v1 治理面：补齐 main 活状态，确认功能测试覆盖与
-`.reference-docs` 覆盖关系，把必要结论落盘。
+整理 main / worktree / GitHub branch：清理已合入分支，把 `adopt-existing-repo` 功能合入 main，
+并保留两个 replay case 分支作为独立压测证据。
 
 ## Current phase
 
-无 `phase-dashboard.yaml` 具体 phase id；本轮处于 **v1 coverage/status hardening**。
-
-已知背景：
-
-- ELF case 压力测试已经完成并登记为 `lab/docs/audits/stress-test-ledger.yaml` 首条 case。
-- 最新 main 为 `f2f1dee`，已把 `template-stress-test` skill、policy、probe catalog、ledger 落进模板。
-- main 的历史空状态文件是当前需要修复的小问题。
+`worktree-adopt-existing-repo` 已合入 main；memory 文件冲突已按最新决策整理，最终 validator 已通过。
+feature worktree/branch cleanup 已完成。
 
 ## Children
 
 | id | purpose | branch/worktree | plan doc | status | next prompt |
 | --- | --- | --- | --- | --- | --- |
-| _none_ | 本轮不派生子 session | `main` / repo root | _n/a_ | active | _n/a_ |
+| feature | adopt-existing-repo workflow | merged into `main`; local feature worktree/branch removed | `plans/20260709-adopt-existing-repo.zh.md` | done | _none_ |
+| case-agent-r1 | Agent-R1 adoption replay case | `worktree-case+agent-r1-adoption-replay` / `.claude/worktrees/case+agent-r1-adoption-replay` | `plans/20260709-adopt-existing-repo.zh.md` | keep | Keep as case branch; do not merge full external case into main. |
+| case-elf | ELF template replay case | `worktree-case+elf-template-replay` / `.claude/worktrees/case+elf-template-replay` | `memory/branches/case-elf-template-replay.md` | keep/archive | Keep as replay evidence; do not merge into main. |
 
 ## Merge / review order
 
-1. 本轮只在 main 工作树做本地文档/状态改动。
-2. 运行 validator 与 same-commit 检查。
-3. 由 human 决定是否提交、保留/移动/清理 ELF case 本地 worktree，或继续做新 case。
+1. Reference coverage / live-status fix was committed locally on main as `cb89a6b`.
+2. Merged `worktree-adopt-existing-repo` into main.
+3. Ran final validation on merged main.
+4. Removed only the adopted feature worktree/branch after merge commit completed.
+5. Leave both replay case worktrees/branches in place unless human asks to archive/move them separately.
 
 ## Global forbidden paths
 
@@ -39,12 +38,9 @@
 - `wandb/**`
 - `lab/infra/private/**`
 - `.env`
-- `.claude/worktrees/**`（本轮只读，不清理/改写 ELF case branch 的本地 worktree checkout）
 
 ## Open risks
 
-- `.claude/worktrees/case+elf-template-replay/` 是 `worktree-case+elf-template-replay` branch 的本地
-  worktree checkout；它在 main 视角显示为 untracked，是嵌套 worktree 的表现，不是孤立残留目录。
-- `agent-native-template-functional-test-report.md` 是历史报告正文，不是最新状态总览；最新摘要看
-  `stress-test-ledger.yaml` 与本文件。
-- reference coverage 是语义核对，不是机器自动证明；后续参考文档更新时应同步更新 coverage note。
+- `main` will be ahead of `origin/main` after the local commits; do not push main without explicit human release/push approval.
+- `.claude/worktrees/**` appears as untracked from the main checkout because the worktrees live inside the repo directory.
+- The two case branches contain full replay evidence and should not be merged into main by default.

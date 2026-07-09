@@ -33,3 +33,24 @@ cases:
     report: lab/docs/audits/agent-native-template-functional-test-report.md
     probe_log: lab/docs/audits/stress-probe-catalog.md
     status: complete
+  - id: agent-r1-adoption-replay
+    case_source: "AgentR1/Agent-R1（agent-RL / ML-research 公开仓库，真实 existing repo adoption replay）"
+    template_commit_range: "93fabae（adoption workflow feature）; case commit 5c8850f"
+    branch: worktree-case+agent-r1-adoption-replay
+    depth: targeted-smoke
+    rounds: 1
+    date: "2026-07-09"
+    findings_summary: >
+      新增 `adopt-existing-repo` 迁移能力后，用 Agent-R1 commit 85e0099 做真实 replay，
+      并将迁移后 case 固化为 template repo branch `worktree-case+agent-r1-adoption-replay`
+      （commit 5c8850f）。
+      discover/baseline/scaffold/normalize/prove 全阶段通过：178 个 tracked 文件按 hash
+      全部保留，normalize 移动 9 个 root entries，0 blockers，目标 repo
+      `validate-governance.py --strict` 为 0 error / 0 warning，remaining_root_pollution=0。
+      发现 v1 结构收敛有效但语义归类较粗（docs/images/examples/recipes 作为 imported unit
+      保留在 `lab/code/imported/agent-r1/`），且目标 repo 无轻量 native test command，
+      因此 runtime 行为未验证。Replay 中已增强 adoption report，使其显示 moved entries、
+      blocker count、root pollution 与 move-based Git status 说明。
+    report: lab/docs/audits/agent-r1-adoption-replay-report.md
+    probe_log: null
+    status: complete

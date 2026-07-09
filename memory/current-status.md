@@ -5,8 +5,9 @@
 
 ## 当前 objective
 
-收尾 `ml-project-repo-agent-native-template` v1 治理面：补齐 main 上的活状态文件，核对模板功能测试覆盖与
-`.reference-docs` 覆盖关系，并把必要结论落盘。
+收尾 branch hygiene：已把 main 上的 reference coverage / 活状态修复提交到本地 main，正在把
+`worktree-adopt-existing-repo` 功能分支合入 main；两个 replay case 分支只作为压测证据保留，不合入 main。
+合并后的验证矩阵已通过，adopt feature 的本地 worktree/branch 已清理。
 
 ## Constraints
 
@@ -14,96 +15,89 @@
 - 不编辑或删除 `lab/data/**`、`lab/runs/**`、`lab/models/**` bytes、`checkpoints/**`、`wandb/**`、
   `lab/infra/private/**`、`.env`。
 - 不启动/kill/restart 长训练或远端作业。
-- 不做 PR / merge / release / 远端基础设施改动；本轮只做本地文档与状态修复。
-- 结构改动若涉及 anatomy/ledger，必须同变更集同步对应记录。
+- 不 push main、不开 PR、不 release。
+- Human 已确认：`worktree-case+agent-r1-adoption-replay` 与 `worktree-case+elf-template-replay` 是测试 case，
+  不合并到 main；通过独立 README/报告说明情况。
 
 ## Files inspected
 
 - `AGENTS.md`
 - `.agent/AGENTS.md`
+- `.agent/action-boundary.md`
+- `.agent/human-gates.md`
 - `ANATOMY.md`
 - `memory/current-status.md`
 - `memory/session-tree.md`
-- `memory/ANATOMY.md`
-- `.claude/ANATOMY.md`
-- `lab/ANATOMY.md`
-- `lab/research/ANATOMY.md`
+- `.reference-docs/implementation-coverage-note.md`
 - `DESIGN.md`
 - `README.md`
-- `PROJECT.md`
-- `DECISIONS.md`
-- `.reference-docs/claude_code_optimization_spirit_zh.md`
-- `.reference-docs/claude_code_practice_for_ai_phd_zh.md`
-- `lab/docs/audits/README.md`
-- `lab/docs/audits/agent-native-template-functional-test-report.md`
-- `lab/docs/audits/stress-probe-catalog.md`
-- `lab/docs/audits/stress-test-ledger.yaml`
-- `.claude/skills/template-stress-test/SKILL.md`
-- `.claude/skills/template-stress-test/references/probe-surface-catalog.md`
-- `scripts/validate-governance.py`
-- `scripts/check-agent-harness.py`
-- `.github/workflows/governance.yml`
+- `git branch -a` / `git worktree list --porcelain` / `gh pr list`
 
 ## Files modified
 
-- `memory/current-status.md`：把 main 上的空模板替换为当前真实状态与下一步。
-- `memory/session-tree.md`：把空模板替换为当前无并行子 session 的收尾状态。
 - `.reference-docs/implementation-coverage-note.md`：新增参考文档覆盖说明，记录当前实现是工程化超集以及有意不逐字实现的项。
 - `README.md`：更新 `.reference-docs/` 描述，提到覆盖说明文档。
-- `DESIGN.md`：更新来源说明和决策表，避免仍暗示 `.reference-docs/` 只有两份文件。
+- `DESIGN.md`：更新来源说明、能力清单和决策表。
+- `memory/current-status.md`：从空骨架/feature handoff 冲突整理为当前 main 状态。
+- `memory/session-tree.md`：记录 feature 分支已合并，case 分支保留不合入。
+- `.claude/commands/adopt-existing-repo.md`：新增迁移已有 repo 的 slash command。
+- `.claude/skills/adopt-existing-repo/SKILL.md`：新增迁移 skill。
+- `scripts/adopt-existing-repo.py`：新增 phased adoption CLI。
+- `scripts/check-adoption-integrity.py`：新增 baseline hash integrity checker。
+- `lab/evals/adoption/`：新增 synthetic existing repo smoke test 与说明。
+- `plans/20260709-adopt-existing-repo.zh.md`：新增迁移能力计划。
+- `lab/docs/audits/agent-r1-adoption-replay-report.md` / `stress-test-ledger.yaml`：记录 Agent-R1 replay case。
+- `.claude/ANATOMY.md`、`lab/ANATOMY.md`、`lab/README.md`、`lab/docs/audits/README.md`、
+  `scripts/ANATOMY.md`、`scripts/README.md`：同步新能力路由。
 
 ## Decisions
 
 - main 上此前的 `memory/current-status.md` / `memory/session-tree.md` 是空骨架，不足以作为 fresh session
-  接续入口；本轮直接补齐，不再要求下一位 agent 通过 case worktree 和 git log 还原近期状态。
-- `lab/docs/audits/agent-native-template-functional-test-report.md` 是 ELF case round 1-3 原样 promote
-  的历史报告；round 4 的后续修复不回填正文，已在 `lab/docs/audits/README.md` 与
-  `stress-test-ledger.yaml` 说明。
-- 当前模板不是逐字实现 `.reference-docs` 里的每个示例 hook / prompt / 可选机制；更准确地说，它覆盖了
-  两份参考文档的核心控制面，并在多个关键面做了工程化超集：validators、CI、same-commit rule、
-  parser-based hook、branch-aware push guard、中文审阅安全网、recipe/eval 流水线、template stress test
-  能力。
-- 参考文档中明确标为 TODO 或示例性质的部分（如完整 paper writing workflow、formatter PostToolUse hook、
-  组件激活/`.harness` CLI）不作为 v1 必须逐字实现项；当前 repo 用 `deliverables/paper/` writing
-  contract、`paper-reproduce` command、human gate 与 evidence chain 覆盖最小必要边界。
+  接续入口；已提交本地 commit `cb89a6b` 修复。
+- 当前模板覆盖 `.reference-docs` 的核心控制面，并在 validator、CI、same-commit rule、parser-based hook、
+  branch-aware push guard、中文审阅安全网、recipe/eval 流水线、template stress test 层面形成工程化超集。
+- `adopt-existing-repo` 合入 main；它是模板功能，不是一次性测试产物。
+- `worktree-case+agent-r1-adoption-replay` 与 `worktree-case+elf-template-replay` 是压测 case 分支，不合入 main。
+- 已清理两个已合入 main 的重复本地 agent 分支，以及两个已合入的远端 feature 分支。
 
 ## Commands + results
 
 | command | 结论 |
 | --- | --- |
-| `git status --short --branch` | main 与 origin/main 对齐；`.claude/worktrees/` 在主仓库视角显示为 untracked，但它实际承载 ELF case branch 的本地 worktree checkout。 |
-| `git log --oneline --decorate -n 20` | 最新为 `f2f1dee`，已把 template stress test 沉淀进 main。 |
-| `find .reference-docs -maxdepth 2 -type f -print` | 参考文档原有两份：spirit + practice；本轮新增 coverage note。 |
-| `rg -n "^#{1,4} " .reference-docs/*.md` | 已按参考文档章节核对当前实现覆盖面。 |
-| `python scripts/validate-governance.py --strict` | OK — check-agent-harness / check-anatomy-drift / governance 均 0 error、0 warning。 |
-| `python scripts/check-same-commit.py --staged`（未 stage 时） | OK — 0 处结构改动；仅作为基线，信号有限。 |
-| 临时 `git add` 本轮 5 个路径 → `python scripts/check-same-commit.py --staged` → `git restore --staged ...` | OK — 1 处结构改动，对应 anatomy 要求满足；已 unstage 回普通工作树改动。 |
-| `git diff --check` | OK — 无 whitespace error。 |
-| `git status --short` | 本轮 4 个 tracked 文件修改 + 1 个新增 coverage note；`.claude/worktrees/` 仍未跟踪且未改动。 |
+| `git fetch --all --prune` | 远端分支状态已刷新。 |
+| `git branch -d worktree-agent-a91dd3b9da57a8b88 worktree-agent-ac59d517d71e5ae89` | 两个本地重复 agent 分支已删除。 |
+| `git push origin --delete feature/release-gates-regression-matrix-validation feature/round4-doctrine-sync` | 两个已 merged 的 GitHub feature 分支已删除。 |
+| `python scripts/check-same-commit.py --staged` | reference coverage commit 前通过：1 处结构改动，对应 anatomy 已同变更集更新。 |
+| `python scripts/validate-governance.py --strict` | reference coverage commit 前通过：0 error / 0 warning。 |
+| `git commit -m "docs: record reference coverage status"` | 本地 main commit `cb89a6b` 已创建；未 push。 |
+| `git merge --no-ff worktree-adopt-existing-repo -m "merge: adopt existing repo workflow"` | 自动合并除两个 memory 活状态文件外均完成；memory 冲突已手动整理。 |
+| `git diff --check --cached` | 修复 `lab/evals/adoption/README.md` 末尾空行后通过。 |
+| `python -m py_compile scripts/adopt-existing-repo.py scripts/check-adoption-integrity.py lab/evals/adoption/run-adoption-smoke.py` | 通过。 |
+| `python lab/evals/adoption/run-adoption-smoke.py` | 通过，输出 `[adoption-smoke] OK`。 |
+| `python scripts/check-same-commit.py --staged` | 通过：8 处结构改动，对应 anatomy 已同变更集更新。 |
+| `python scripts/validate-governance.py --strict` | 通过：0 error / 0 warning。 |
+| `git worktree remove .claude/worktrees/adopt-existing-repo && git branch -d worktree-adopt-existing-repo` | 已移除 adopt feature worktree，并删除本地 feature 分支。 |
 
 ## Subagent reports
 
-本轮未派生 subagent。原因：任务是 main 活状态修复 + 文档覆盖核对，直接读文件和运行 validator 足够。
+本轮未派生 subagent。
 
 ## Open issues / blockers
 
-- `.claude/worktrees/case+elf-template-replay/` 是 `worktree-case+elf-template-replay` branch 的本地
-  worktree checkout（远端也有 `origin/worktree-case+elf-template-replay`）。它在 main 的 `git status`
-  里显示为 untracked 是因为 worktree 被放在主仓库目录内，不代表它不是 template repo 的 branch。
-  是否保留这个本地 checkout、移到 repo 外、或仅保留远端 branch，应由 human 决定。本轮不删除。
-- ELF case 的完整报告正文只到 round 3；round 4 结论在 ledger/README 中，不回填报告正文。这是有意保留
-  promote 原文的选择，但 fresh reader 需要知道以 ledger 为最新摘要。
-- v1 功能覆盖已经足够进入“按变更触发压力测试”的维护模式；未来新增 validator/hook/subagent/skill/command
-  时，按 `.agent/template-stress-test-policy.md` 决定测试深度。
+- main 已有本地 merge commit；尚未 push。
+- `.claude/worktrees/case+agent-r1-adoption-replay/` 与 `.claude/worktrees/case+elf-template-replay/` 仍是本地
+  worktree checkout；它们在 main 视角显示为 untracked 是嵌套 worktree 的正常表现。
+- `origin/worktree-case+elf-template-replay` 仍保留为 ELF replay case 的远端 archive。
 
 ## Exact next steps
 
-1. 向 human 汇报覆盖结论、修改文件和剩余风险。
-2. 等 human 决定是否提交本轮文档/状态修复。
-3. `.claude/worktrees/case+elf-template-replay/` 这个本地 worktree checkout 是否保留、移动或清理，单独等 human 指令。
+1. 如需共享当前 main，另行由 human 明确批准 push main。
+2. 两个 replay case worktree/branch 继续作为证据保留；如需移动或归档，单独处理。
+3. 后续新增/修改 validator、hook、权限面、结构面或能力面时，按 `.agent/template-stress-test-policy.md`
+   触发对应深度测试。
 
 ## Do-not-forget
 
 - 需要 human 介入/过目的输出默认中文。
-- `.claude/worktrees/case+elf-template-replay/` 是 ELF case branch 的 worktree，不是 main 的当前状态源。
+- 两个 replay case 分支默认作为证据保留，不合入 main。
 - `.reference-docs/implementation-coverage-note.md` 是覆盖说明，不替代两份参考文档本身。

@@ -4,6 +4,8 @@ related_files:
   - check-agent-harness.py
   - check-anatomy-drift.py
   - validate-governance.py
+  - adopt-existing-repo.py
+  - check-adoption-integrity.py
 maintenance: |
   新增/删除检查脚本时同 commit 更新本表。检查项与 .agent/ doctrine 对应关系变化时也更新。
 ---
@@ -12,7 +14,8 @@ maintenance: |
 
 ## What this is
 
-repo 的可运行门禁层。四个独立脚本，无第三方硬依赖，只读、只报告、返回退出码。
+repo 的可运行门禁层与迁移工具层。validator 无第三方硬依赖，只读、只报告、返回退出码；
+adoption 脚本用于把外部 repo 收敛成本模板形态，并自带 proof/integrity 检查。
 
 ## Components
 
@@ -22,6 +25,8 @@ repo 的可运行门禁层。四个独立脚本，无第三方硬依赖，只读
 | `check-anatomy-drift.py` | ANATOMY related_files 与 line citation 漂移 + 120 行硬上限 | `.agent/anatomy-protocol.md` |
 | `validate-governance.py` | 聚合上两者 + gitignore/YAML/tracked-bytes + 证据链一致性(overclaim 拦截) | `.agent/action-boundary.md` · `artifact-policy.md` · `principles.md` |
 | `check-same-commit.py` | same-commit rule：结构改动(A/D/R)未同变更集更新对应 ANATOMY → 拦。diff 驱动，不进 governance；由 `.githooks/pre-commit` + CI 调用 | `.agent/anatomy-protocol.md` |
+| `adopt-existing-repo.py` | 分 phase 迁移已有 Git repo：discover/baseline/scaffold/normalize/prove | `plans/20260709-adopt-existing-repo.zh.md` · `.claude/skills/adopt-existing-repo/SKILL.md` |
+| `check-adoption-integrity.py` | 读取 adoption baseline，按 hash 证明原 tracked bytes 仍存在 | `.claude/skills/adopt-existing-repo/SKILL.md` |
 
 ## Connections
 
@@ -29,9 +34,12 @@ Inbound:
 - `.github/workflows/` CI 调用 `validate-governance.py --strict` 与 `check-same-commit.py --against`。
 - `.githooks/pre-commit` 调用 `check-same-commit.py --staged`。
 - `.claude/settings.json` 把脚本列入 allow。
+- `.claude/commands/adopt-existing-repo.md` 调用 adoption 脚本。
 
 Outbound:
 - `validate-governance.py` 以 subprocess 调用另两个脚本（用 `sys.executable`）。
+- `check-adoption-integrity.py` 通过 `importlib` 加载 `adopt-existing-repo.py` 的
+  `integrity_result()`，避免两份 hash 逻辑漂移。
 
 ## Notes
 

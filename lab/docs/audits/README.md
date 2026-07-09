@@ -18,3 +18,6 @@
   mutate/expected/actual)。与 `.claude/skills/template-stress-test/references/
   probe-surface-catalog.md`(面向未来、随模板演化持续维护)是两份不同定位的文件。
 - `stress-test-ledger.yaml`——多 case 登记账,首条记录即 ELF case。
+- `agent-r1-adoption-replay-report.md`——`adopt-existing-repo` 的真实 replay:
+  将 AgentR1/Agent-R1 迁移成模板形态,验证 hash integrity、template governance
+  与 root pollution 收敛。
