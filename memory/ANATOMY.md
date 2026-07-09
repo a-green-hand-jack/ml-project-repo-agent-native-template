@@ -8,6 +8,7 @@
 memory/
 ├── current-status.md        活状态单一真相源（single source of truth）
 ├── session-tree.md          父/子 session 拓扑 + 合并顺序 + 禁改路径
+├── worktree-status.md       跨分支/worktree 状态总览（由 branch-reporter 生成，非持续维护）
 ├── current-practices.md     采用中的 CC recipe 索引（→ lab/recipes/claude-code/）
 ├── deprecated-practices.md  失效技巧账
 ├── phase-dashboard.yaml     phase 看板（结构化，validator 可读）
@@ -16,6 +17,8 @@ memory/
 ├── branches/                <slug>.md 单分支状态
 └── handoffs/                <YYYYMMDD>-<slug>.md 交接文档
 ```
+
+`worktree-status.md` 由 `branch-reporter` subagent（见 `.claude/agents/branch-reporter.md`）盘点所有 active branch/worktree 后写入，不是每个 session 都会更新的活文件——只在派生 branch-reporter 生成一次汇总报告时才出现/刷新。
 
 ## 状态流
 
