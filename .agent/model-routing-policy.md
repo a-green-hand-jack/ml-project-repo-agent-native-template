@@ -33,6 +33,12 @@ human 说「开 subagent 做 X」
 
 `fast / standard / strong` 是**抽象档**，不是 model id：低成本查找 / 常规实现 / 高风险决策。落到当前可用模型由派发方决定，稳定后可在本 policy 记映射并定期复校（同 recipe 防漂移）。
 
+## 已知例外（`model: inherit` 不适用的情况）
+
+- `.claude/agents/zh-review-gate.md` 的 frontmatter 显式锁定 `model: haiku`，不遵循上面"model: inherit，不写死"的默认原则。这是刻意的、经 human 明确要求的窄例外，不是遗漏。
+- 理由：`zh-review-gate` 是"文档默认中文"doctrine（见 `human/decisions/20260709-doc-language-default-chinese.md`）的翻译安全网，其存在价值恰恰在于成本要独立于主 session 当次用的模型——哪怕主 session 用最贵的模型，这个兜底检查也应该几乎零成本；若它 inherit 主 session 的模型，就失去了作为「低成本安全网」的意义。
+- 这是目前**唯一**的已知例外。以后若出现类似「职责决定必须用便宜模型、不能 inherit」的新 subagent，应在本节补充记录，而不是只散落在各 agent 自己的文件里、让本 policy 本身看不出该原则已有先例。
+
 ## 选 tier 的问题
 
 - 是不是 read-only？
