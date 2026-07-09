@@ -21,6 +21,8 @@ doctrine 是分文件的，每个文件一个关注点，短而稳定、可 revi
 13. `repo-documentation-topology.md` — 导航四件套的分工与放置规则。
 14. `release-agent-boundary.md` — 仅当本 repo 交付 agent 产品时适用。
 15. `autonomous-window.md` — human 授权无人值守窗口的协议：放宽 permission、保留 hook 地板。
+16. `template-stress-test-policy.md` — 模板自身机制漂移的防线：变更幅度 → 测试深度分级，
+    多 case 登记账定位。
 
 ## 模板与清单
 

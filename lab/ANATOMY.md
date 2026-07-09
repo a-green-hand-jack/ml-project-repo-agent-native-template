@@ -28,7 +28,7 @@ maintenance: |
 
 ## 只有 README 的 leaf 层
 
-`models/`、`runs/`、`traces/human-cc/`、`recipes/claude-code/`、`evals/cc-workflow/`、`reports/cc-workflow/` 为 leaf/scaffold，只有 `README.md`，无独立 anatomy。
+`models/`、`runs/`、`traces/human-cc/`、`recipes/claude-code/`、`evals/cc-workflow/`、`reports/cc-workflow/`、`docs/{reference,research-narrative,audits}/` 为 leaf/scaffold，只有 `README.md`，无独立 anatomy（`docs/` 三个子目录的用途见 `human/decisions/20260709-lab-docs-reference-and-external-vendor-placement.md`；`reference/`、`research-narrative/` 目前无真实内容，暂未物理创建，仅 `audits/` 已落地）。
 
 ## State（意图）
 
