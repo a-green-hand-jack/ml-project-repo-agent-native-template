@@ -75,6 +75,9 @@
 | `python scripts/validate-governance.py --strict` | Agent-R1 report/ledger 更新后再次通过，0 error / 0 warning。 |
 | `git diff --check` | Agent-R1 report/ledger 更新后通过，无输出。 |
 | `python scripts/check-same-commit.py --staged` | 临时 `git add -A` 后通过：`8 处结构改动，对应 anatomy 已同变更集更新`；随后已取消暂存。 |
+| `git commit -m "feat: add existing repo adoption workflow"` | 功能分支提交成功：`93fabae`。 |
+| `git worktree add .../case+agent-r1-adoption-replay -b worktree-case+agent-r1-adoption-replay 93fabae` | 创建 Agent-R1 case branch/worktree。 |
+| `git commit -m "test: add Agent-R1 adoption replay case"` | case branch 提交成功：`5c8850f`。 |
 
 ## Subagent reports
 
@@ -91,8 +94,9 @@
 
 ## Exact next steps
 
-1. 如要提交，先 review `git diff`，再 commit `worktree-adopt-existing-repo` 分支。
-2. 若要增强 v2，优先补 protected root path policy、semantic normalize policy 和更多 fixture。
+1. 提交 feature branch 的审计记录回填（case branch/commit metadata）。
+2. 跑最终压力测试矩阵：feature branch + case branch validators / smoke / integrity。
+3. 若要增强 v2，优先补 protected root path policy、semantic normalize policy 和更多 fixture。
 
 ## Do-not-forget
 

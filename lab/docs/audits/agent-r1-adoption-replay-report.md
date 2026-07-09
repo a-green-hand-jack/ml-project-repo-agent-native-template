@@ -8,6 +8,9 @@ Date: 2026-07-09
 - Replay clone: `/tmp/agent-r1-adoption-replay/Agent-R1`
 - Source commit tested: `85e0099` (shallow clone)
 - Template branch tested: `worktree-adopt-existing-repo`
+- Template feature commit: `93fabae`
+- Persisted case branch: `worktree-case+agent-r1-adoption-replay`
+- Persisted case commit: `5c8850f`
 - Feature under test: `scripts/adopt-existing-repo.py` + `scripts/check-adoption-integrity.py`
 
 Agent-R1 is an agent-RL / ML-research codebase with Python package code, recipes,
@@ -61,6 +64,14 @@ Generated target report:
 
 ```text
 lab/docs/audits/template-adoption-report.md
+```
+
+The migrated case content is also preserved as a template repo branch:
+
+```text
+branch: worktree-case+agent-r1-adoption-replay
+worktree: .claude/worktrees/case+agent-r1-adoption-replay
+commit: 5c8850f
 ```
 
 Key target report facts:
