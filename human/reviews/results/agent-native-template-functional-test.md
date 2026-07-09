@@ -1,45 +1,47 @@
-# Result review: agent-native template functional test (ELF-template-case migration)
+# 结果 review：agent-native 模板功能测试（ELF-template-case 迁移）
 
-## Summary
+## 摘要
 
-Migrated `~/Projects/ELF-template-case` (an older `.harness/`-lineage template case, built
-around the real public `lillian039/ELF` project) into this template's `lab/` + `deliverables/` +
-`human/` + `memory/` shape on branch `worktree-case+elf-template-replay`, then exercised the
-template's own validators, hooks, and a sample of subagents against it. Full findings:
-`lab/docs/audits/agent-native-template-functional-test-report.md`.
+把 `~/Projects/ELF-template-case`（一个更早的 `.harness/` 谱系模板 case，围绕真实公开的
+`lillian039/ELF` 项目搭建）迁移进本模板的 `lab/` + `deliverables/` + `human/` + `memory/` 结构，
+落在分支 `worktree-case+elf-template-replay` 上，然后对模板自身的 validators、hooks，以及一部分
+subagent 做了实测。完整发现见：
+`lab/docs/audits/agent-native-template-functional-test-report.md`。
 
-## What was run (verifiable)
+## 跑了什么（可验证）
 
-- `python scripts/validate-governance.py`, `check-anatomy-drift.py`, `check-agent-harness.py`,
-  `check-same-commit.py --staged` — all pass clean on commits `c164232`, `fdfa519`, `0828a94`.
-- Real `lillian039/ELF` re-clone (`pytorch_elf` @ `b29d8833609e9ab7f67cd9da39435ac5cea04837`) +
-  fresh CPU-only dependency install + tiny synthetic forward pass, independently reproducing the
-  old audit's recorded output shapes `(2,4,8)` / `(2,4,32)`.
-- Hook probes (sudo, curl|sh, protected-path rm/mv/Write, git-push-to-main/topic-branch/escape) —
-  all behaved as designed.
-- 5 of 15 subagents exercised for real (artifact-librarian, experiment-orchestrator,
-  repo-doc-steward, branch-reporter, test-runner); all stayed within their declared boundaries.
+- `python scripts/validate-governance.py`、`check-anatomy-drift.py`、`check-agent-harness.py`、
+  `check-same-commit.py --staged` —— 在 commit `c164232`、`fdfa519`、`0828a94` 上全部干净通过。
+- 真实 `lillian039/ELF`（`pytorch_elf` @ `b29d8833609e9ab7f67cd9da39435ac5cea04837`）重新 clone +
+  全新 CPU-only 依赖安装 + 一次微型合成前向传播，独立复现了旧审计记录的输出形状 `(2,4,8)` /
+  `(2,4,32)`。
+- Hook 探测（sudo、curl|sh、受保护路径的 rm/mv/Write、git-push-to-main/topic-branch/escape）——
+  全部按设计行事。
+- 15 个 subagent 里实测了 5 个（artifact-librarian、experiment-orchestrator、
+  repo-doc-steward、branch-reporter、test-runner）；全部停留在其声明的边界内。
 
-## Evidence pointers
+## 证据指针
 
-- `lab/research/{claims,evidence,experiment-ledger}.yaml` — migrated + one fresh replay entry.
-- `lab/artifacts/{result,trace}-index.yaml` — smoke-test index entries (result-001/002, trace-001/002).
-- `memory/current-status.md` — full command/result log and decisions.
-- `memory/branches/case-elf-template-replay.md`, `memory/worktree-status.md` — branch-reporter's inventory.
+- `lab/research/{claims,evidence,experiment-ledger}.yaml` —— 迁移内容 + 一条新的回放条目。
+- `lab/artifacts/{result,trace}-index.yaml` —— smoke 测试索引条目（result-001/002、
+  trace-001/002）。
+- `memory/current-status.md` —— 完整的命令/结果记录与决策。
+- `memory/branches/case-elf-template-replay.md`、`memory/worktree-status.md` ——
+  branch-reporter 的清点结果。
 
-## Not yet proven / explicitly out of scope
+## 尚未证实 / 明确超出范围
 
-- No GPU, dataset, checkpoint, training/generation loop, or metric reproduction for ELF (smoke only,
-  matching the old evidence's own scope limits).
-- 10 of 15 subagents and all `.claude/skills/`/commands entry points not yet exercised this round.
-- The 6 findings classified as template gaps/friction (see report F2, F3, F5, F6, F7) are recorded,
-  not fixed — this was a test-first pass per the task's scope.
+- 没有对 ELF 做 GPU、数据集、checkpoint、训练/生成循环、指标复现（仅 smoke，与旧证据自身的范围
+  限制一致）。
+- 15 个 subagent 中的 10 个，以及所有 `.claude/skills/`/命令入口，本轮尚未实测。
+- 被归类为 template gap/摩擦的 6 条发现（见报告 F2、F3、F5、F6、F7）已记录，尚未修复——这一轮按
+  任务范围是 test-first。
 
-## Human decision needed
+## 需要人类决策
 
-- Whether to act on F2 (the nested-vendored-repo + relative hook-path self-locking failure) —
-  arguably the most consequential finding, since it can wedge a whole session.
-- Whether/when to push this case branch to the remote, and whether a further round should cover the
-  remaining 10 subagents and the skill-level (Skill tool / slash command) entry points.
+- 是否要处理 F2（嵌套 vendored 仓库 + 相对 hook 路径导致的自锁失败）——可以说是最重要的发现，因为
+  它能卡死整个 session。
+- 是否/何时把这个 case 分支 push 到远端，以及是否要再来一轮覆盖剩下的 10 个 subagent 与 skill 层级
+  （Skill 工具/斜杠命令）入口。
 
-Status: **pending human review** — not yet approved.
+状态：**待人类 review**——尚未批准。
