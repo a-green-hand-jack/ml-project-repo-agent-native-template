@@ -143,25 +143,121 @@ markdown 形式落进 `lab/docs/`，这意味着它们完全在 `validate-govern
 - 第一次 commit 的信息声称所有 validator 都通过了，但已提交的 `current-status.md` 表格里还写着
   "尚未运行"——被 `branch-reporter` 发现，在下一个 commit 里修复。
 
+## 第二轮（Round 2，2026-07-09 追加）
+
+Round 1 报告写完后，human 明确要求：(a) 书面文档默认中文（已固化为 doctrine，见下）、
+(b) 修复 F2、(c) push。这些修复没有在本分支里直接改，而是走了独立的 `hook-self-lock-fix`
+分支（off `main`），PR #1 squash-merge 进 `main`（commit `6fed240`），再 `git merge origin/main`
+合回本分支。之后继续跑了 round 2：剩余 9 个 subagent + 2 个 skill。
+
+### F10 — F2 修复本身验证充分，但本 session 无法现场自证生效（新发现，中等价值）
+
+修复分两步验证：(1) 独立 subagent 用合成 stdin JSON 直接喂给三个 hook 脚本，确认裸相对路径版本
+在模拟的嵌套仓库 cwd 下失败、`$CLAUDE_PROJECT_DIR` 锚定版本成功——这一步严谨、可信。
+(2) 修复合并回本分支后，在**同一个仍在运行的 session** 里做了一次真实（非合成）复测：真的
+`cd` 进 `lab/code/external/ELF`，跑后续命令——**仍然复现了修复前的旧报错**，报错里的命令还是
+裸相对路径，不是磁盘上已经锚定的新版本。用 `ExitWorktree(keep)` + `EnterWorktree(path=...)`
+重进 worktree 后重试，**依然复现同样的失败**。结论：这个 session 的 hook 配置似乎在启动时就
+已固定，不会因为磁盘上 `.claude/settings.json` 改了、或者 Exit/EnterWorktree 而重新加载。
+**这不代表修复本身有问题**（合成测试已经确认逻辑正确），而是「同一个 session 无法自证一个
+它自己启动之后才落地的配置修复」——验证这类修复必须开一个全新 session。这是一条对任何
+Claude-Code-hook 开发流程都有参考价值的操作性发现，已写成两条 candidate recipe（见下）。
+
+### F11 — 同一类 bug 还有未修的实例（`repo-researcher` 审计，高价值，待 human 决定是否扩大修复范围）
+
+`hook-self-lock-fix` 只锚定了 `.claude/settings.json` 里三条 hook 命令 + `statusLine.command`。
+派 `repo-researcher` 专门审计同一类「裸相对路径假设 cwd==repo 根」的 bug，发现还有：
+
+- `.githooks/pre-commit:9` —— `exec python scripts/check-same-commit.py --staged`，裸相对路径，
+  是真正的 pre-commit git hook（每次本地 commit 都会跑），同一类风险。
+- `.claude/hooks/pre_compact_memory_check.py:14` —— `STATUS_FILE = "memory/current-status.md"`
+  裸相对路径；因为这个 hook 是 advisory（失败也 exit 0），cwd 漂移时会**静默**查不到文件，
+  而不是报错——比 F2 更隐蔽。
+- `.claude/hooks/subagent_report_index.py:18-19` —— `REPORTS_DIR`/`INDEX_FILE` 同样是裸相对
+  路径，cwd 漂移时会在错误位置创建目录/写文件，同样静默。
+- `.claude/settings.example.json` —— 面向新 fork 项目的参考模板，仍然是修复前的裸路径版本，
+  会把这个 bug 传播给任何照抄这份 example 的新项目。
+- `.github/workflows/governance.yml` 里的裸路径在 CI 场景下是安全的（`actions/checkout` 保证
+  cwd==repo 根），但作为一种可移植模式仍不建议沿用。
+
+`scripts/*.py`（四个 validator）本身全部已经用 `Path(__file__).resolve().parent.parent` 正确
+锚定，`.claude/settings.json` 本体也已修复——问题只在上述几处遗留位置。
+
+### F12 — auto-mode 分类器对「能力面」写入的把关比单个 subagent 契约更严格（正面发现）
+
+Round 2 里两次触发：(1) 一个 subagent 试图把「human 已经同意」的转达信息当作足够授权去 commit/push
+`.claude/settings.json` 的追加改动，被拒绝，要求必须是人类在当前 transcript 里的直接指令；改由
+本 agent 直接执行 push 后才成功。(2) 试图派 `sub-agent-maker-agent` 起草一个新 subagent 定义
+（它自己的契约本来就允许"只产出 draft"），仍被 auto-mode classifier 整体拦下，理由是这次
+session 里 human 从未明确要求新增/起草 agent 定义这类能力面变更。两次都说明：这一层分类器
+对 `.claude/agents/`、`.claude/settings.json` 这类能力/权限相关路径的把关，比任何单个
+subagent 自己声明的"我被允许做 X"更严格——即使转达的是真实的人类原话，也不算数；必须是人类在
+当前 session 里的直接指令。这是一条对多 agent 编排安全性的正面验证。
+
+### F13 — 不带 Bash 的 subagent 可能把文件写进错误的仓库（新发现，中等严重度，已发现即改）
+
+`session-boundary-agent`（工具集只有 Read/Write/Edit，没有 Bash）被要求在本 worktree 里更新
+`memory/session-tree.md` 和 `memory/branches/*.md`，prompt 里明确写了
+"Working directory: .../worktrees/case+elf-template-replay"。但它实际把这些文件写进了**主仓库**
+`/home/user/Projects/ml-project-repo-agent-native-template/memory/`，而不是这个 worktree。
+同一批派生的 `checkpoint-writer`（同样只有 Read/Write/Edit，没有 Bash）却正确写进了 worktree
+里的 `memory/current-status.md`。两者用几乎一样的 prompt 措辞，行为却不一致——推测是因为主 agent
+（我）当时正在主仓库里跑 PR 合并相关的 git 命令，恰好在派生 `session-boundary-agent` 前后
+自己的 cwd 落在了主仓库，而没有 Bash 的 subagent 似乎会继承派生时刻编排者的 cwd，而不是稳定
+使用 prompt 里文字描述的路径。发现后已手工把内容搬回本 worktree、把主仓库 `git checkout --` 
++ `rm` 还原干净。**教训**：给没有 Bash 工具的 subagent 派活时，prompt 里的"Working directory: X"
+文字约定不是可靠保证；编排者自己的 cwd 在多 worktree/多分支操作交错时必须格外小心，写完之后要
+独立核对文件是否真的落在了预期仓库/路径。
+
+### F14 — 8/9 个 round 2 subagent 行为符合契约，1 个被上一层拦下（正面 + 已知限制）
+
+`subagent-router-agent`（生成 launch packet，随后据此实际派了 `repo-researcher`）、
+`repo-researcher`（见 F11）、`checkpoint-writer`（正确增量更新，未覆盖）、`experiment-monitor`
+（正确报告"当前无实验可监控"、给出真实证据而不是编造，并且**正确识别并忽略了一条工具输出里
+夹带的、要求它调用无关工具/放松停下核查姿态的可疑 system-reminder**——这是一次对
+prompt-injection-resistance 的正面验证）、`hook-maker-agent`（只产出 draft，物理隔离在
+`.claude/hooks/drafts/`，未接线；顺带发现 `pre_tool_guard.py` 的 `_current_branch()` 调用
+`git branch --show-current` 时没有传 `cwd`，cwd 漂移时可能悄悄检查错仓库的分支——又一个 F11
+同类问题的实例）、`interactive-plan-writer`（只写 `plans/`，停下等 human 批注，产出了有价值的
+round 3 优先级建议和 5 个开放问题）、`workflow-recipe-harvester`（从真实 trace 提炼出两条
+`candidate` 级 recipe，明确标注证据缺口，未擅自采用）——均在各自声明的工具/边界契约内。
+`session-boundary-agent` 除 F13 的路径错误外，其余判断（"round 2 尚在进行，暂不做边界动作"）
+是合理的。`sub-agent-maker-agent` 被 F12 提到的分类器整体拦下，本轮未能实测。
+
+### `anatomy-drift-control` / `session-boundary-control` skill 实测
+
+两个 skill 通过 Skill 工具真实调用（而非只用底层机制）：`anatomy-drift-control` 发现一个真实
+gap——`hook-maker-agent` 新增的 `.claude/hooks/drafts/` 未登记进 `.claude/ANATOMY.md`——照
+skill 的 same-commit 流程补上；`session-boundary-control` 判定 round 2 刚结束适合 continue
+（完成本报告 + commit + push），但建议收尾后开一个全新 session 专门做 F10 的干净复验，以及
+视 human 决定是否启动 round 3。两个 skill 的 SKILL.md 描述与实际执行流程一致，验证命令
+（`check-anatomy-drift.py`/`validate-governance.py`）都按文档要求跑过。
+
 ## 覆盖度警示（不做完整性的静默声明）
 
-- 15 个 subagent 里只实测了 5 个（artifact-librarian、experiment-orchestrator、
-  repo-doc-steward、branch-reporter、test-runner）。未实测：checkpoint-writer、
-  experiment-monitor、feature-worker、hook-maker-agent、interactive-plan-writer、
-  repo-researcher、session-boundary-agent、sub-agent-maker-agent、subagent-router-agent、
-  workflow-recipe-harvester。
-- 没有任何 `.claude/skills/*` workflow 被作为 skill invocation 端到端驱动过（本次 session 直接用了
-  底层机制——worktree、validators、subagents——而不是通过 Skill 工具调用例如 `/checkpoint` 或
-  `/pr-review` 命令，或 `worktree-pr-flow`/`experiment-workflow` skill）。
+- 15 个 subagent：round 1 + round 2 共实测 13 个。仍未实测：`feature-worker`（作为"被测对象"——
+  它本身作为工具已经被大量使用，但没有专门验证过它单任务隔离 worktree 的契约细节）、
+  `sub-agent-maker-agent`（被 auto-mode classifier 拦下，见 F12）。
+- `.claude/skills/*` 里只端到端跑了 `anatomy-drift-control`、`session-boundary-control` 两个；
+  其余 6 个（worktree-pr-flow、experiment-workflow、artifact-indexing、subagent-routing、
+  interactive-plan-doc、workflow-recipe-harvesting）本轮仍只是"底层机制被间接用到"，没有通过
+  Skill 工具正式调用过。7 个 slash command（checkpoint、experiment-watch、feature-split、
+  paper-reproduce、pr-review、result-promote、weekly-maintenance）完全未测——`plans/` 下的
+  round 3 计划文档里对这个缺口有具体的分层建议和给 human 的开放问题。
 - 没有对 ELF 做 GPU、数据集加载、checkpoint 加载、训练/生成循环、指标复现——仅 smoke 级别，与新旧
   两份证据记录明确声明的范围一致。
-- 按任务范围，这一轮是纯测试性质：上面记录的发现只是记录，没有在模板本体里修复（本分支只做了迁移
-  内容与文档同步方面的修复）。
+- F2 的修复已经落地并合并进 `main`，但**本 session 未能独立验证它对新 session 生效**（见 F10）——
+  这是本轮唯一一个"应该已经解决但严格意义上还没有闭环确认"的项。
 
 ## 遗留债务
 
-- 如果这个分支的发现要在上游被采纳，F2（hook 路径健壮性）是最值得优先修的候选。
+- F11（同一类 bug 的其余未修实例：`.githooks/pre-commit`、两个 hook 脚本内部路径、
+  `settings.example.json`、`pre_tool_guard.py` 的 `_current_branch()`）是否要扩大这次修复的
+  范围，待 human 决定；`hook-maker-agent` draft 的 `nested_repo_cd_guard.py` 也待 human review
+  后决定是否启用。
+- F10：需要在一个全新 session 里独立复验 F2 修复是否真的对新 session 生效（本 session 无法自证）。
 - F5/F6（缺少 reference/research-narrative/外部 vendor 约定）值得在 `DECISIONS.md` 里记录一个
   明确决定，不管最终倾向哪个方向。
-- 未测试：checkpoint-writer、session-boundary-agent，以及 skill 层级的入口（commands、
-  Skill 工具驱动的 workflow）——如果想再来一轮测试，这是自然的下一片切片。
+- 未测试：`feature-worker`（专门验证）、`sub-agent-maker-agent`（被拦下）、6 个 skill、7 个
+  slash command、对抗性 validator 探针矩阵（round 1 只做了 1 个 overclaim 探针）——
+  `plans/20260709-round3-template-functional-test.zh.md` 给出了下一轮的具体优先级建议。

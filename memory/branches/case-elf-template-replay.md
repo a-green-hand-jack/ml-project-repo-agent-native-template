@@ -3,6 +3,27 @@
 > 由 branch-reporter 通过只读 git 清点生成（`git log`、
 > `git show --stat`、`git diff`、`git status`）。生成过程未执行任何 git 写操作。
 
+> **Round 2 补记（session-boundary-agent, 2026-07-09）**：此文件下方的正文是 round 1 结束时的
+> 快照，round 2 期间发生的事按时间顺序补记如下，不重写正文：
+> 1. `hook-self-lock-fix` 分支（off `main`）诊断并修复了正文提到的 hook 自锁隐患，PR #1 已
+>    squash-merge 进 `main`（commit `6fed240`），worktree 已清理；同时新增了「书面文档默认中文」
+>    doctrine（`.agent/behavior-contract.md` + ADR）。
+> 2. `main` 已合并回本分支（clean merge），`validate-governance.py` 复跑仍全过，解决了正文
+>    「Merge 目标」一节提到的两处遗留：validator 已针对最终树跑过、commit message 与
+>    current-status.md 的矛盾已在后续 commit 里修正。
+> 3. 在**同一个仍在运行的 session** 里现场复验该修复：真实 `cd` 进 `lab/code/external/ELF`
+>    再跑后续命令，**仍复现修复前的旧报错**；用 ExitWorktree/EnterWorktree 重进也未刷新。
+>    结论：hook 配置在 session 启动时缓存，不随磁盘改动或 worktree 重进而刷新；此修复要在
+>    **全新 session** 里才能验证是否真的生效。详见
+>    `lab/traces/human-cc/2026-07-09/hook-cwd-drift-stuck-recovery/trace.md`。
+> 4. round 2 正在派生剩余约 9 个 subagent + 部分 skill；其中 `repo-researcher` 的审计发现同一类
+>    「裸相对路径假设 cwd==repo 根」的 bug 在 `.githooks/pre-commit`、两个 hook 脚本内部路径、
+>    `.claude/settings.example.json` 里还有未修复的实例——是否扩大这次修复范围待人类决定。
+> 5. 本次 round 2 的 `session-boundary-agent` 调用本身把 `memory/session-tree.md` 与两份
+>    `memory/branches/*.md` 误写进了**主仓库**（`/home/user/Projects/ml-project-repo-agent-native-template`）
+>    而不是本 worktree——因为该 agent 没有 Bash 工具，只能靠 prompt 里的文字路径而非实际 `cd`；
+>    已发现并手工搬回本 worktree、主仓库已还原干净。这本身是一条值得记录的多 agent 编排发现。
+
 ## 用途
 
 `ml-project-repo-agent-native-template` 仓库自身的独立功能测试 **case** 分支。它把

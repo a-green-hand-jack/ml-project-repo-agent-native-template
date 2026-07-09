@@ -44,4 +44,16 @@ subagent 做了实测。完整发现见：
 - 是否/何时把这个 case 分支 push 到远端，以及是否要再来一轮覆盖剩下的 10 个 subagent 与 skill 层级
   （Skill 工具/斜杠命令）入口。
 
-状态：**待人类 review**——尚未批准。
+## Round 2 追加（2026-07-09）
+
+按 human 要求：F2 已修（独立分支 `hook-self-lock-fix` → PR #1 → squash-merge 进 `main`
+commit `6fed240` → 合回本分支），并新增了「书面文档默认中文」doctrine。随后跑了 round 2：
+剩余 9 个 subagent（8 个完成、1 个被 auto-mode classifier 正确拦下）+ 2 个 skill
+（`anatomy-drift-control`、`session-boundary-control`）。关键新发现：F2 的修复本身验证充分，
+但本 session 无法现场自证生效（hook 配置似乎在 session 启动时缓存）；`repo-researcher` 发现
+同一类 bug 在别处还有未修实例；一个不带 Bash 的 subagent 曾把文件误写进主仓库（已发现并清理）。
+完整记录见 `lab/docs/audits/agent-native-template-functional-test-report.md` 的「第二轮」一节。
+
+状态：**待人类 review**——尚未批准。round 2 的具体待决项：是否扩大 F2 修复范围（F11）、是否需要
+一个全新 session 独立复验 F2（F10）、是否启动 `plans/20260709-round3-template-functional-test.zh.md`
+提出的 round 3。
