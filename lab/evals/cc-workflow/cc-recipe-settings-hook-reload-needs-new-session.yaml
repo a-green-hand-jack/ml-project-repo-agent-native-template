@@ -1,8 +1,7 @@
 # recipe 复测任务。回填自 lab/recipes/claude-code/settings-hook-reload-needs-new-session.yaml
 # 的 retest: 字段，转写为 lab/evals/cc-workflow/EXAMPLE.yaml 的 schema，不新增场景。
-# 注：对应 recipe 文件当前只存在于 worktree-case+elf-template-replay 分支，尚未同步进
-# 本分支的 lab/recipes/claude-code/；合并前请确认该 recipe 文件已就位，避免本 eval
-# 文件引用一个不存在的 recipe_id（见本次 PR 的 merge notes）。
+# recipe 文件已随本 PR 一起从 worktree-case+elf-template-replay 分支原样带入
+# lab/recipes/claude-code/，recipe_id 引用不再悬空。
 
 recipe_id: cc-recipe-settings-hook-reload-needs-new-session
 eval_id: settings-hook-reload-needs-new-session
