@@ -1,0 +1,47 @@
+# Project-scoped Codex config. Trust this repo before relying on these hooks.
+
+[agents]
+max_threads = 6
+max_depth = 1
+
+[[hooks.PreToolUse]]
+matcher = "^(Bash|apply_patch|Edit|Write)$"
+
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = 'python3 "$(git rev-parse --show-toplevel)/.claude/hooks/pre_tool_guard.py"'
+timeout = 30
+statusMessage = "Checking repo safety floor"
+
+[[hooks.PostToolUse]]
+matcher = "^(apply_patch|Edit|Write)$"
+
+[[hooks.PostToolUse.hooks]]
+type = "command"
+command = 'python3 "$(git rev-parse --show-toplevel)/.claude/hooks/format_changed_python.py"'
+timeout = 30
+statusMessage = "Formatting changed Python files"
+
+[[hooks.PostToolUse.hooks]]
+type = "command"
+command = 'python3 "$(git rev-parse --show-toplevel)/.claude/hooks/zh_review_advisory.py"'
+timeout = 30
+statusMessage = "Checking Chinese-default docs"
+
+[[hooks.PreCompact]]
+matcher = "^.*$"
+
+[[hooks.PreCompact.hooks]]
+type = "command"
+command = 'python3 "$(git rev-parse --show-toplevel)/.claude/hooks/pre_compact_memory_check.py"'
+timeout = 30
+statusMessage = "Checking memory freshness"
+
+[[hooks.SubagentStop]]
+matcher = "^.*$"
+
+[[hooks.SubagentStop.hooks]]
+type = "command"
+command = 'python3 "$(git rev-parse --show-toplevel)/.claude/hooks/subagent_report_index.py"'
+timeout = 30
+statusMessage = "Indexing subagent report"

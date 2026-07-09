@@ -31,4 +31,4 @@ doctrine 是分文件的，每个文件一个关注点，短而稳定、可 revi
 
 ## 与其他平面的关系
 
-- doctrine 说「为什么这样限制」；`.claude/settings.json` 让 Claude Code 加载权限；`scripts/` 验证没漂移。三者必须一致。
+- doctrine 说「为什么这样限制」；`.claude/settings.json` / `.codex/config.toml` / `.codex/rules/` 让工具加载权限与 hooks；`scripts/` 验证没漂移。三者必须一致。

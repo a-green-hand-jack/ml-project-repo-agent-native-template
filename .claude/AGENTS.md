@@ -11,6 +11,7 @@
 
 - 改 `settings.json` 或 hooks 后：`python scripts/check-agent-harness.py`，并用 `/hooks` 或 debug mode 确认 hook 触发。
 - 新增 agent/skill 必须有 frontmatter（name/description）与明确边界；没有索引的能力不算正式 surface。
+- 改 `agents/`、`skills/` 或 `commands/` 后：运行 `python scripts/sync-codex-adapters.py`，保证 Codex adapters 同步。
 
 ## 禁止
 

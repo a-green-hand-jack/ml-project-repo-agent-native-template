@@ -15,6 +15,7 @@
 - `.claude/skills/` — 项目专属 workflows
 - `.claude/commands/` — 项目专属 slash commands
 - `.claude/hooks/` + `.claude/settings.json` — lifecycle 约束与权限
+- `.codex/` + `.agents/` — 从 `.claude/` 生成的 Codex adapters（改 canonical 后跑 `python scripts/sync-codex-adapters.py`）
 
 除非 human 明确要求，不要用 user 全局的 agents/skills/hooks 承载本项目行为。
 
@@ -22,7 +23,7 @@
 
 - 不编辑/删除 `lab/data/`、`lab/runs/`、`lab/models/` bytes、checkpoints、wandb、远端产物、`lab/infra/private/`，除非明确要求。
 - 不启动/kill/restart 长训练或远端作业。
-- 不开 PR / merge / release / 改远端基础设施，除非拿到 human 批准。`git push`：topic/实验分支 `allow`，`main`/`master` 需 `CLAUDE_ALLOW_PUSH_MAIN=1` 显式放行。
+- 不开 PR / merge / release / 改远端基础设施，除非拿到 human 批准。`git push`：topic/实验分支 `allow`，`main`/`master` 需 `CLAUDE_ALLOW_PUSH_MAIN=1` / `CODEX_ALLOW_PUSH_MAIN=1` 显式放行。
 - 不无理由新增依赖。
 
 ## 验证

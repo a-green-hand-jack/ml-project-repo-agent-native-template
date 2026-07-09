@@ -6,7 +6,8 @@
 2. 根污染：根目录只出现白名单条目（未知条目告警）。
 3. 导航四件套：重要目录有 README/AGENTS/CLAUDE/ANATOMY。
 4. 能力索引：.claude/agents/*.md 与 .claude/skills/*/SKILL.md 有 frontmatter（name/description）。
-5. settings.json 可解析、含 permissions、deny 覆盖受保护路径，且 hooks 引用的脚本存在。
+5. Claude/Codex 配置可解析、受保护路径有权限地板，且 hooks 引用的脚本存在。
+6. Codex adapters 与 canonical .claude 能力同步。
 
 无第三方依赖。退出码 0 = 通过（可含 warning），1 = 有 error。
 用法：python scripts/check-agent-harness.py [--strict]
@@ -16,7 +17,9 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -24,14 +27,14 @@ REPO = Path(__file__).resolve().parent.parent
 # 必需的顶层条目。
 REQUIRED_TOP = [
     "README.md", "PROJECT.md", "AGENTS.md", "CLAUDE.md", "ANATOMY.md",
-    ".agent", ".claude", "lab", "memory", "scripts",
+    ".agent", ".claude", ".codex", ".agents", "lab", "memory", "scripts",
 ]
 
 # 根目录白名单（其余视为潜在污染 -> warning）。
 ROOT_WHITELIST = {
     "README.md", "PROJECT.md", "DECISIONS.md", "DESIGN.md", "AGENTS.md", "CLAUDE.md",
-    "ANATOMY.md", ".gitignore", ".github", ".githooks", ".agent", ".claude", "human",
-    "lab", "memory", "deliverables", "scripts", "plans", ".reference-docs",
+    "ANATOMY.md", ".gitignore", ".github", ".githooks", ".agent", ".claude", ".codex",
+    ".agents", "human", "lab", "memory", "deliverables", "scripts", "plans", ".reference-docs",
     # 常见工程文件（允许存在，不算污染）
     "LICENSE", "pyproject.toml", "uv.lock", ".python-version",
     ".pre-commit-config.yaml", "Makefile",
@@ -44,7 +47,7 @@ ROOT_IGNORE = {
 
 # 需要完整四件套的目录。
 QUARTET_DIRS = [
-    "human", ".claude", "lab", "lab/code", "lab/code/src",
+    "human", ".claude", ".codex", ".agents", "lab", "lab/code", "lab/code/src",
     "lab/infra", "lab/research", "lab/artifacts", "memory",
     "deliverables", "scripts",
 ]
@@ -164,6 +167,80 @@ def check_settings() -> None:
                     err(f"hook 脚本不存在：{m.group(0)}（{event}）")
 
 
+def check_codex_config() -> None:
+    config = REPO / ".codex" / "config.toml"
+    if not config.exists():
+        err("缺少 .codex/config.toml")
+        return
+    try:
+        data = tomllib.loads(config.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError as e:
+        err(f".codex/config.toml 解析失败：{e}")
+        return
+
+    hooks = data.get("hooks") or {}
+    pre_tool = hooks.get("PreToolUse") or []
+    pre_tool_text = json.dumps(pre_tool, ensure_ascii=False)
+    if "pre_tool_guard.py" not in pre_tool_text:
+        warn(".codex/config.toml PreToolUse 未接入 pre_tool_guard.py")
+
+    for event, groups in hooks.items():
+        if not isinstance(groups, list):
+            continue
+        for group in groups:
+            for hook in group.get("hooks", []):
+                cmd = hook.get("command", "")
+                m = re.search(r"\.claude/hooks/[\w./-]+\.py", cmd)
+                if m and not (REPO / m.group(0)).exists():
+                    err(f"Codex hook 脚本不存在：{m.group(0)}（{event}）")
+
+    rules = REPO / ".codex" / "rules" / "default.rules"
+    if not rules.exists():
+        warn("缺少 .codex/rules/default.rules（Codex execpolicy prompt/deny 层）")
+    elif "pip" not in rules.read_text(encoding="utf-8", errors="replace"):
+        warn(".codex/rules/default.rules 未见 pip install 禁止规则")
+
+
+def check_codex_adapters() -> None:
+    sync_script = REPO / "scripts" / "sync-codex-adapters.py"
+    if not sync_script.exists():
+        err("缺少 scripts/sync-codex-adapters.py")
+        return
+    proc = subprocess.run(
+        [sys.executable, str(sync_script), "--check"],
+        cwd=str(REPO),
+        text=True,
+        capture_output=True,
+        timeout=30,
+    )
+    if proc.returncode != 0:
+        detail = (proc.stdout + proc.stderr).strip()
+        err(f"Codex adapters 与 .claude canonical 源不同步：{detail}")
+
+    for path in sorted((REPO / ".codex" / "agents").glob("*.toml")):
+        try:
+            data = tomllib.loads(path.read_text(encoding="utf-8"))
+        except tomllib.TOMLDecodeError as e:
+            err(f"Codex agent TOML 解析失败：{path.relative_to(REPO)}：{e}")
+            continue
+        for key in ("name", "description", "developer_instructions"):
+            if key not in data:
+                err(f"Codex agent 缺 {key}：{path.relative_to(REPO)}")
+
+    skills_dir = REPO / ".agents" / "skills"
+    if not skills_dir.is_dir():
+        err("缺少 .agents/skills/")
+        return
+    for skill in sorted(p for p in skills_dir.iterdir() if p.is_dir()):
+        sk = skill / "SKILL.md"
+        if not sk.exists():
+            err(f"Codex skill 缺少 SKILL.md：{skill.relative_to(REPO)}/")
+            continue
+        fm = _frontmatter(sk)
+        if fm is None or "name" not in fm or "description" not in fm:
+            err(f"Codex SKILL.md frontmatter 缺 name/description：{sk.relative_to(REPO)}")
+
+
 def check_design_inventory() -> None:
     """若存在 DESIGN.md，校验其 §10 能力清单表里的数量与实际一致（防手记漂移）。
     对应 doctrine：`.agent/repo-documentation-topology.md`。DESIGN.md 可选：不存在则跳过；
@@ -199,6 +276,8 @@ def main() -> int:
     check_quartets()
     check_capabilities()
     check_settings()
+    check_codex_config()
+    check_codex_adapters()
     check_design_inventory()
 
     for w in warnings:

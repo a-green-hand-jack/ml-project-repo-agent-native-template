@@ -38,7 +38,7 @@ lab/docs/audits/stress-test-ledger.yaml           多 case 登记账（纪律面
 | --- | --- | --- |
 | 纯文档/措辞改动 | 改 README 措辞、修 typo | 不需要压力测试 |
 | 新增/改一个 subagent、skill、command | 新增一个 skill(如本次的 `template-stress-test` 自己) | 只需针对该表面的定向 smoke(如：用 `Skill` 工具真实调用一次,确认内容自洽),不需要整个 case 回放 |
-| 改 validator、hook、`settings.json` 权限面 | 新增/改一条 validator 检查、改 hook 锚定方式 | 需要完整对抗性探针矩阵(mutate→assert→revert,ELF case round 3 P0/P1 那种规模) |
+| 改 validator、hook、Claude `settings.json` / Codex rules 权限面 | 新增/改一条 validator 检查、改 hook 锚定方式 | 需要完整对抗性探针矩阵(mutate→assert→revert,ELF case round 3 P0/P1 那种规模) |
 | 改 `lab/`/`deliverables/`/`memory/` 的结构形状本身 | 新增顶层子目录、改四件套约定 | 需要完整 case-based 回放(ELF case round 1-3 那种规模),且应该用不止一个 case 交叉验证 |
 
 ## 登记账定位
