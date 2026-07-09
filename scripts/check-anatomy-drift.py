@@ -29,8 +29,10 @@ ANATOMY_LINE_LIMIT = 120  # 硬上限，见 .agent/anatomy-protocol.md
 CITATION_RE = re.compile(
     r"`?([A-Za-z0-9_./-]+\.[A-Za-z0-9_]+):(\d+)(?:-(\d+))?`?"
 )
-# 占位/示例信号：出现则跳过该引用。
+# 占位/示例信号（用于 related_files 逐条判断）。
 PLACEHOLDER_HINTS = ("<", ">", "example", "path/to", "foo.", "bar.")
+# 能出现在 citation ref 内部的占位信号（逐个匹配判断，不整行跳过）。
+PLACEHOLDER_REF_HINTS = ("example", "path/to", "foo.", "bar.")
 
 errors: list[str] = []
 
@@ -71,13 +73,24 @@ def check_related_files(anatomy: Path, text: str) -> None:
             )
 
 
+def _is_placeholder_citation(line: str, m: re.Match) -> bool:
+    """逐个匹配判断是否占位/示例（不再整行跳过，避免漏检同行的真实 citation）。"""
+    ref = m.group(1)
+    if any(h in ref for h in PLACEHOLDER_REF_HINTS):
+        return True
+    # 被尖括号包裹的示例，如 `<示例：a.py:42>`：ref 本身不含 <>，看上下文。
+    if "<" in line[: m.start()] and ">" in line[m.end() :]:
+        return True
+    return False
+
+
 def check_citations(anatomy: Path, text: str) -> None:
     # 去掉 frontmatter 再扫正文。
     body = re.sub(r"^---\s*\n.*?\n---\s*\n", "", text, count=1, flags=re.DOTALL)
     for line in body.splitlines():
-        if any(h in line for h in PLACEHOLDER_HINTS):
-            continue
         for m in CITATION_RE.finditer(line):
+            if _is_placeholder_citation(line, m):
+                continue
             ref, start, end = m.group(1), int(m.group(2)), m.group(3)
             # 只关心带路径分隔符或已知代码后缀的引用，避免误判 "3.10" 之类。
             if "/" not in ref and not ref.endswith(

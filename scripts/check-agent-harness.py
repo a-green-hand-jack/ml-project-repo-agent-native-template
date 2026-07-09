@@ -6,7 +6,7 @@
 2. 根污染：根目录只出现白名单条目（未知条目告警）。
 3. 导航四件套：重要目录有 README/AGENTS/CLAUDE/ANATOMY。
 4. 能力索引：.claude/agents/*.md 与 .claude/skills/*/SKILL.md 有 frontmatter（name/description）。
-5. settings.json 可解析、含 permissions，且 hooks 引用的脚本存在。
+5. settings.json 可解析、含 permissions、deny 覆盖受保护路径，且 hooks 引用的脚本存在。
 
 无第三方依赖。退出码 0 = 通过（可含 warning），1 = 有 error。
 用法：python scripts/check-agent-harness.py [--strict]
@@ -49,6 +49,12 @@ QUARTET_DIRS = [
     "deliverables", "scripts",
 ]
 QUARTET_FILES = ["README.md", "AGENTS.md", "CLAUDE.md", "ANATOMY.md"]
+
+# settings.json deny 必须覆盖的受保护路径 token（见 .agent/action-boundary.md）。
+PROTECTED_DENY_TOKENS = [
+    "lab/data", "lab/runs", "lab/models", "lab/infra/private",
+    "checkpoints", "wandb", ".env",
+]
 
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 
@@ -140,6 +146,15 @@ def check_settings() -> None:
         return
     if "permissions" not in data:
         warn(".claude/settings.json 无 permissions 段")
+    # 断言 deny 真的覆盖受保护路径（防有人删掉某条 deny 而无人察觉）。
+    # hook 地板也拦这些，但 permission deny 是第一层——两层都要在。
+    deny_text = " ".join(str(r) for r in (data.get("permissions") or {}).get("deny", []))
+    for token in PROTECTED_DENY_TOKENS:
+        if token not in deny_text:
+            warn(
+                f".claude/settings.json deny 未覆盖受保护路径：{token}"
+                "（应有 Edit/Write deny；参见 .agent/action-boundary.md）"
+            )
     for event, groups in (data.get("hooks") or {}).items():
         for group in groups:
             for hook in group.get("hooks", []):
