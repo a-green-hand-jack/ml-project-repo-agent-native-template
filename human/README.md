@@ -23,6 +23,9 @@
 | `decisions/` | 轻量 ADR（索引在根 `DECISIONS.md`） |
 | `inbox/` | 未整理输入的落脚点 |
 
+> plan **正文**不在这里，在根 `plans/<日期>-<slug>.zh.md`（human 直接在文件里批注）；
+> `reviews/plans/` 只放 plan 的**评审记录**。二者配套，见 `interactive-plan-writer` agent。
+
 ## 原则
 
 human 的输入一旦重要到会影响 agent 行为，就应落到 `human/` 的正式位置，而不是停留在对话里。`inbox/` 是临时缓冲，要定期清空。

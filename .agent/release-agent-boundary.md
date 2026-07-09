@@ -30,4 +30,4 @@
 - 「开发时约束 Claude Code 的规则」属于 repo editing harness；「产品 agent 的行为契约」属于 release artifact。
 - capability claim 必须有 evidence chain 支撑，进 `lab/research/claims.yaml` + `lab/research/release-gates.yaml`。
 
-> 需要完整脚手架时可参考 `agent-development-repo-bootstrap` skill；但本模板默认只提供边界，不预设内层 agent 结构。
+> 本模板默认**只提供边界，不预设内层 agent 结构**。真要交付 agent 产品时，另建 repo-local skill/subagent 承载内层脚手架（并在 `lab/research/` 建独立 trace-eval 证据链），不要把内层结构塞进外层 harness。

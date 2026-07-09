@@ -29,3 +29,5 @@ model: inherit
 ## 停止 / 升级
 - 找不到行为证据（只有主观感受）时，不产出该 recipe。
 - 证据只支持弱结论时，状态最多标 candidate，并说明缺口。
+- **只产候选草稿到 `lab/recipes/claude-code/`，绝不自行采用、绝不写入 `memory/current-practices.md`**；
+  是否纳入由 human 经 `human/reviews/recipes/` review 后决定（与 `sub-agent-maker-agent`/`hook-maker-agent` 同为 draft-only）。

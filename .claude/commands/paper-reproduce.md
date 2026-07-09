@@ -16,3 +16,4 @@ argument-hint: <paper 名/链接>
 6. 缺失/歧义之处
 
 用 `.agent/templates/experiment-card.md` 结构记录；证据表见 `lab/research/`。
+进入实际跑实验/整理证据阶段，走 `experiment-workflow` skill（claim→artifact 证据链）。

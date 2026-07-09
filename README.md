@@ -53,14 +53,17 @@ cd <new-project> && rm -rf .git && git init
 
 1. 填写 `PROJECT.md`：研究对象、active family、trunk、remote/worktree 策略。
 2. 把 `.github/CODEOWNERS` 里的 `@a-green-hand-jack` 换成该项目真实 owner。
-3. 删掉用不到的目录（模板是「一次建好，按需删减」，不是「一定全用」）。
-4. 跑 `python scripts/validate-governance.py` 确认 harness 仍然自洽。
-5. 在 `.reference-docs/` 里保留或更新你信奉的 doctrine 版本。
+3. 启用 same-commit git hook：`git config core.hooksPath .githooks`
+   （per-clone，不随 `git clone` 复制；换机器/重新 clone 要重跑。CI 那道始终生效）。
+4. 删掉用不到的目录（模板是「一次建好，按需删减」，不是「一定全用」）。
+5. 跑 `python scripts/validate-governance.py` 确认 harness 仍然自洽。
+6. 在 `.reference-docs/` 里保留或更新你信奉的 doctrine 版本。
 
 ## 快速门禁
 
 ```bash
-python scripts/validate-governance.py     # 总门禁：harness + anatomy + 治理
-python scripts/check-agent-harness.py     # 结构/必需文件/根污染
-python scripts/check-anatomy-drift.py     # ANATOMY 引用与行号漂移
+python scripts/validate-governance.py     # 总门禁：harness + anatomy + 治理 + 证据链
+python scripts/check-agent-harness.py     # 结构/必需文件/根污染/权限 deny 覆盖
+python scripts/check-anatomy-drift.py     # ANATOMY 引用/行号漂移 + 120 行上限
+python scripts/check-same-commit.py --staged  # 结构改动 <-> ANATOMY 同变更集（pre-commit + CI 自动跑）
 ```
