@@ -5,32 +5,36 @@
 
 ## Parent objective
 
-（顶层目标：整个 session 树在追求什么。）
+实现 `adopt-existing-repo`：把已有 repo 分步、可验证、尽量无人值守地收敛成模板完整形态。
 
 ## Current phase
 
-（当前处于 `phase-dashboard.yaml` 的哪个 phase id，以及本阶段焦点。）
+Phase 7：Agent-R1 真实 repo replay 已通过并登记；正在做最终验证。
 
 ## Children
 
 | id | purpose | branch/worktree | plan doc | status | next prompt |
 | --- | --- | --- | --- | --- | --- |
-|  |  |  | `plans/<YYYYMMDD>-<slug>.zh.md` | planned/active/blocked/done |  |
+| main | implement adopt-existing-repo | `worktree-adopt-existing-repo` / `.claude/worktrees/adopt-existing-repo` | `plans/20260709-adopt-existing-repo.zh.md` | active | Run final validators after Agent-R1 replay report and ledger updates. |
 
 ## Merge / review order
 
-（子 session 完成后合并/评审的顺序与依赖。谁先合、谁挡谁。）
-
-1.
+1. 当前 worktree 内完成 plan、implementation、tests、ANATOMY/DESIGN/README 同步。
+2. 跑定向测试与 `python scripts/validate-governance.py --strict`。
+3. Human review 后再决定是否 push / PR / merge。
 
 ## Global forbidden paths
 
-（所有子 session 都禁止改动的路径。任何 agent 越界前必须先取得 human gate。）
-
--
+- `lab/data/**`
+- `lab/runs/**`
+- `lab/models/**` bytes
+- `checkpoints/**`
+- `wandb/**`
+- `lab/infra/private/**`
+- `.env`
 
 ## Open risks
 
-（跨分支的风险：冲突、竞态、共享文件、易漂移的契约。）
-
--
+- 主工作区已有未提交改动；本 feature 分支基于 `main` 的 clean HEAD，不包含那些改动。
+- 新增脚本、skill、command 会触发能力清单/ANATOMY/validator 同步需求。
+- 迁移工具若默认动作过激，可能破坏目标 repo；第一版必须 conservative，不能删除或覆盖。
