@@ -72,7 +72,106 @@
 
 ## Human 批注区
 
-（待 human 批注）
+Q1-Q5 已由 human 批注给出方向（见「未解决问题」区的引用块）。汇总：
+
+- Q1：subagent 可以程序化触发 slash command（human 信任现有 SOTA coding agent 能力）——P2 不需要
+  「human 亲自跑 + agent 事后审阅日志」的降级方案，可以照搬 P0/P1 的自包含探针模式。
+- Q2：对抗性压测尽量全面，照搬旧 `stress-probe-catalog.md` 方法论——采纳「保留完整仪式感」的取舍，
+  不适用的行也要显式记 `N/A + 原因`，而不是静默丢弃（P4-1 的映射表已经是这个形态，只是要在最终产出里
+  把 N/A 行也留着，不要因为「不适用」就删掉）。
+- Q3：round 3 等 round 2 完全收尾再开工——round 2 已经在 2026-07-09 完成（见
+  `memory/current-status.md`、本报告 F10-F14），round 3 现在可以开工。
+- Q4：要做真实端到端调用；且**任何需要 human 介入/过目的产出都要用中文**（PR 标题/正文、静态审阅
+  报告等）——这条超出 round 3 本身，是对整个协作模式的补充规则，见下方「Track 0」。
+- Q5：要沉淀，且要按本模板自己的形式沉淀，产出应该是**一组文档**而不是一份；human 的心智模型是
+  「模板每次做出不同程度的调整，都应该对应不同程度的压力测试」，而且以后会有更多 case——这已经不是
+  「round 3 的一个可选任务」，而是要把「压力测试」本身变成模板的一个持久能力。见下方「Track 3」，
+  这部分设计需要 human 先对整体形状拍板，再进入实现。
+
+## Track 0 — 人类可读产出默认中文（补充规则，适用于本计划之后的所有轨道）
+
+human 明确要求：**PR 标题/正文、任何需要 human 过目批准的静态审阅报告，都要用中文**——这是对已有
+`.agent/behavior-contract.md`「文档默认语言」一节的补充：那一节列了「报告、review、memory 状态文件、
+ANATOMY 正文、commit message 正文」，但**没有明确列出 PR/issue 标题与正文**，而 PR #1（F2 修复）
+的标题和正文实际上是英文写的——这是一个真实的疏漏，需要在扩大 F11 修复范围时一并补上 doctrine 措辞。
+
+human 还提出一个可选机制：**开一个小的 sub-agent、用便宜的模型（如 haiku）作翻译器**。两种方案都可行，
+不互斥：
+
+- **方案 A（默认、零新增机制）**：起草 PR/报告时直接用中文写，不英文起草再翻译——这对*新写*的内容
+  零成本，本计划的 Track 1-3 所有产出默认走这条路。
+- **方案 B（安全网，捕捉遗漏）**：一个轻量翻译 subagent/skill，用便宜模型扫描即将面向 human 的产出
+  （PR 正文、`human/reviews/`、`lab/docs/audits/` 报告），发现非中文内容就翻译或提醒——用于兜底
+  「写的时候忘了」这种情况（就像这次 PR #1 那样）。
+
+**待 human 确认**：是否需要方案 B 作为常设机制（例如做成一个 `.claude/hooks/` PostToolUse advisory，
+或一个 `.claude/skills/zh-review-gate/` skill），还是方案 A（直接用中文写 + 人工偶尔抽查）已经够用。
+如果需要方案 B，这本身也是一次模板能力变更，应该走 Track 3 的「变更幅度 → 压力测试深度」映射来验收。
+
+## Track 1 — 扩大 F2 修复范围到 F11 发现的其余实例（独立于 round 3，off `main`）
+
+repo-researcher（round 2）发现的未修实例，按 human「扩大修复范围」的批注，全部纳入：
+
+- `.githooks/pre-commit:9` —— 裸相对路径 `python scripts/check-same-commit.py --staged`。
+- `.claude/hooks/pre_compact_memory_check.py:14` —— `STATUS_FILE = "memory/current-status.md"` 裸路径。
+- `.claude/hooks/subagent_report_index.py:18-19` —— `REPORTS_DIR`/`INDEX_FILE` 裸路径。
+- `.claude/settings.example.json` —— 仍是修复前的裸路径版本，会把 bug 传播给新 fork 项目。
+- `.claude/hooks/pre_tool_guard.py` 的 `_current_branch()` —— `git branch --show-current` 没有传 `cwd`，
+  cwd 漂移时可能悄悄检查错仓库分支（hook-maker-agent 发现）。
+- `hook-maker-agent` 起草的 `nested_repo_cd_guard.py`（暂存在本 case 分支的
+  `.claude/hooks/drafts/`）—— human review 后决定是否启用；如果启用，也应该在这次修复里一并接线。
+
+执行方式沿用上次的模式：独立 subagent 在 off `main` 的新分支上做修复 → 跑 validator →
+**PR 标题/正文用中文**（吸取 Track 0 的教训）→ human 视情况批准 merge。
+
+## Track 2 — F2 修复的独立复验
+
+在这个仍在运行的 session 里，主 session 的 hook 配置已确认是启动时缓存、不会中途刷新（见 F10）。
+两步走，先低成本再升级：
+
+1. **先试：派一个全新的 subagent（Agent 工具新起的进程）**，让它 `cd` 进 `lab/code/external/ELF`
+   之类的嵌套仓库，看它的 hook 配置是不是也是「主 session 启动时」就固定的，还是 subagent 进程有
+   自己独立、更新鲜的加载时机。如果 subagent 级别的新鲜度就足够验证修复生效，就不需要劳烦 human 开一个
+   全新的顶层 session。
+2. **如果第 1 步也复现旧 bug**：说明只有一个真正全新的顶层 Claude Code session 才能验证，需要 human
+   自己开一个新 session（不是这个对话里的 `/clear`）来做这个复验，我会把复验步骤写清楚交接。
+
+## Track 3 — 把「模板压力测试」沉淀成一个持久能力（提案，需要 human 先对形状拍板）
+
+这是这一轮反馈里最大的一块，直接回应 Q5。core idea：**压力测试不该是这次 case 分支里的一次性产出，
+应该变成模板自己的一部分**，可以被未来的模板调整反复触发，也可以接纳未来更多的 case。提案形状
+（仿照旧 `.harness` 世代的 `research-template-case-harness-test` skill + `stress-probe-catalog.md`，
+但适配到新模板自己的 `.claude/skills/` + `lab/docs/` + `.agent/` 约定）：
+
+1. **新 skill**：`.claude/skills/template-stress-test/SKILL.md`——把这次从头到尾做的事情（挑/建一个
+   case → 迁移进模板结构 → 跑 governance validator → 演练 subagent/skill/command → 对抗性探针矩阵 →
+   写发现 → 决定修复范围 → 独立复验）formalize 成可重复的流程，供以后任何一次模板大改之后照做。
+2. **探针目录**：`.claude/skills/template-stress-test/references/stress-probe-catalog.md`——本轮
+   P4-1 已经做的映射表（旧 15 行 probe matrix → 新模板 4 个 validator + N/A 说明）作为起点，长期维护，
+   每次模板新增机制（新 validator/新 hook/新 subagent 类别）就补一行探针。
+3. **变更幅度 → 测试深度 的映射 doctrine**：新增一份 `.agent/` doctrine（暂定
+   `.agent/template-stress-test-policy.md`，或并入 `anatomy-protocol.md`/`repo-editing-guardrails.md`），
+   给出类似这样的分级（具体阈值待 human 确认）：
+   - 纯文档/措辞改动 → 不需要压力测试。
+   - 新增/改一个 subagent、skill、command → 只需要针对该表面的定向 smoke（不需要整个 case 回放）。
+   - 改 validator、hook、`settings.json` 权限面 → 需要完整的对抗性探针矩阵（本轮 P0/P1 这种规模）。
+   - 改 `lab/`/`deliverables/`/`memory/` 的结构形状本身 → 需要完整的 case-based 回放（本轮 round 1-3
+     这种规模），且应该用**不止一个** case 来验证（见下条）。
+4. **多 case 登记账**：一份 ledger（暂定 `lab/docs/audits/stress-test-ledger.yaml` 或
+   `memory/` 下某个文件），记录「哪个模板 commit，被哪个 case，测到什么深度，什么时候，结果如何，
+   报告在哪」。ELF 是第一条记录；以后加新 case 时registry 增长，而不是每次都散落成独立、互相不知道
+   彼此存在的 case 分支。
+5. **case 分支命名/流程约定**：把「`case/<name>` 分支 + worktree + 迁移 + 报告」这一整套本轮走出来的
+   流程写成文档（可能是 `template-stress-test` skill 本身的一部分），让以后加新 case 的人（或 agent）
+   不用从头摸索。
+
+**这是提案，不是既成设计**——需要 human 确认：
+
+- 形状本身是否认可（skill + catalog + policy + ledger 四件套，还是想要更简单/更复杂的形态）？
+- 落地位置是否认可（`.claude/skills/`、`.agent/`、`lab/docs/`）？
+- 这次要不要现在就动手实现（走一次它自己的 Track 1 式流程：新分支 off `main`、subagent 实现、PR、
+  中文正文），还是先只把这份提案定稿，实现留到下一次专门的时间？
+- 变更幅度分级的具体阈值/例子是否需要调整？
 
 ## 当前决策
 
@@ -80,31 +179,63 @@
 - P4（沉淀成正式 catalog 文档）标记为可选：如果 human 只想要「这轮测试过什么、结果如何」的记录，P0-P1 的探针本身在执行时按现有 round 1/2 的习惯写进 `memory/current-status.md` 的 Commands+results 表即可，不一定需要单独建立一份新的 `stress-probe-catalog.md`。是否值得建这份持久文档，留给 human 在批注区拍板（见未解决问题 Q2）。
 - 默认继续遵守「先测试、不修模板」的既定策略：P0-P4 任何探针如果意外发现真实的 validator/文档缺口（例如 P1-4 的 release-gates 疑点），一律只记录、不顺手修复。
 
-## 未解决问题
+## 未解决问题（Q1-Q5 已获 human 批注，状态见下；新增 Q6-Q9 待确认）
 
-1. **Q1 — slash command 能否被 subagent 程序化触发、还是必须真人在交互式主线程里敲 `/xxx`？** 如果只能后者，P2 的「端到端调用」部分需要改成「human 亲自跑 + agent 事后审阅日志」的协作模式，而不是 agent 独立执行；如果前者可行（例如某种 `SlashCommand` 工具对派生 subagent 也开放），P2 可以照搬 P0/P1 的自包含探针模式。这直接决定 P2 的排期与执行方式，需要 human 确认。
-2. **Q2 — 对抗性压测要不要照搬旧 `stress-probe-catalog.md` 的方法论，多大程度上？** 已确认旧文件路径与内容（见任务树 P4-1 的映射表）：15 行 probe matrix 里约 5-6 行能直接映射到本模板的 4 个 validator，3 行（template mode / component activation-reactivation / branch CD boundary）对应的机制本模板压根没有，1 行（source visibility）已经在 round 1 迁移时降级为纯文档、非 validator 目标。建议方案是「记录映射表 + 只对真实存在的机制写新探针」（本文档任务树已经这样做），而不是逐字复制旧 15 行、把不适用的也跑一遍占位。但这是我（plan writer）的判断，需要 human 确认是否认可这个取舍，还是希望保留旧目录里更完整的仪式感（例如哪怕不适用也留一行「N/A + 为什么」）。
-3. **Q3 — round 3 该不该等 round 2 完全收尾再开工？** P0/P1 是瞬时 mutate→revert，不改任何持久状态，理论上可以立刻并行做，不会和 round 2 冲突；但如果 P0/P1 的执行也要往 `memory/current-status.md` 追加一行 Commands+results，就有和 round 2 同时写同一个文件的编辑竞态风险。是希望 round 3 的 P0/P1 现在就能开始（只是先不碰 `current-status.md`，探针结果先记别处，回合结束后再合并一次），还是严格等 round 2 关掉这个 worktree 的写权限后再开工？
-4. **Q4 — P2 里涉及人类闸门的 command（`/pr-review`、`/result-promote`、`/checkpoint`）要不要做真实端到端调用？** 本文档默认只做静态审阅 + 需要 human 提供 synthetic 目标才做真实调用（见 Forbidden paths）。如果 human 觉得静态审阅信息量不够、想要真实调用，需要明确给出一次性、绝不会被误当真实 claim/PR 的测试目标（例如一个专门为测试造的 `claim-test-round3-throwaway`），并且明确知道这条 claim/evidence 事后要不要清理。
-5. **Q5 — P4（沉淀成正式 `lab/docs/audits/stress-probe-catalog.md`）要不要做？** 如果要做，落地位置、命名是否要跟旧仓库保持一致（`docs/audits/` vs 本模板的 `lab/docs/audits/`，命名已经天然不同因为目录结构不同），以及这份文档以后要不要长期维护（每次模板迭代都重跑一遍）还是只是本轮的一次性记录。
+1. **Q1 — slash command 能否被 subagent 程序化触发？** ✅ 已确认：可以，human 信任现有 SOTA coding
+   agent 能力。P2 照搬 P0/P1 的自包含探针模式，不需要「human 亲自跑」的降级方案。
+2. **Q2 — 对抗性压测要不要照搬旧 `stress-probe-catalog.md` 的方法论？** ✅ 已确认：要尽量全面，
+   不适用的行也要显式留 `N/A + 原因`，不要因为「不适用」就静默丢弃。
+3. **Q3 — round 3 该不该等 round 2 完全收尾再开工？** ✅ 已确认：等 round 2 收尾——round 2 已于
+   2026-07-09 完成（见 `memory/current-status.md`、报告 F10-F14），round 3 现在可以开工。
+4. **Q4 — 涉及人类闸门的 command 要不要做真实端到端调用？** ✅ 已确认：要做端到端测试；额外规则：
+   任何需要 human 介入的产出（含 PR）都要用中文——已展开为「Track 0」，需要 human 再确认是否要方案 B
+   （翻译 subagent 安全网）常设化。
+5. **Q5 — P4 要不要做？** ✅ 已确认：要做，而且要扩大成一个持久能力（不只是一份文档）——已展开为
+   「Track 3」，需要 human 对提案形状拍板（见 Track 3 末尾的 4 个待确认项）。
 
 > 1. `slash command` 可以被 subagent 程序化触发(我很信任现在的SOTA coding agent的能力)
-> 2. 
+> 2. `对抗性压测`可以照搬`stress-probe-catalog.md 的方法论`.我希望压力测试是尽可能全面,免得真实的project上问题一大堆
+> 3. round3 等 round2 完工了再开工
+> 4. 需要做端到端测试,而且pr 也要写成中文的(因为我英语不好,所以,凡是需要让我介入的部分都应该写中文.这里甚至可以开一个小的sub-agent或者什么别的方案;用一个便宜的模型,作为翻译器)
+> 5. 需要沉淀,需要根据本模板的形式来沉淀;这个文档应该变成一组文档.我理解每对template进行一次大的调整,我们都需要进行压力测试.或者说,进行不同程度的调整都要对应不同程度的压力测试.甚至我们后面还会添加更多的case 来做压力测试.
+
+6. **Q6（新）— Track 1/2/3 的执行顺序？** 建议顺序：Track 1（F11 修复，off `main`，风险最低、范围最
+   明确）→ Track 2（F2 复验，先用 subagent 试，不行再交给 human 开新 session）→ Track 3 形状拍板
+   （human 决策，不需要执行资源）→ Track 3 落地（如果 human 批准现在做）与 round 3 本体（P0-P4）
+   可以并行，因为一个改 `main`、一个改 case 分支，互不冲突。是否认可这个顺序？
+7. **Q7（新）— Track 0 的方案 B（翻译 subagent 安全网）要不要现在就做？** 还是先只用方案 A（直接
+   中文起草），方案 B 留到真的发现「又忘了写英文」的时候再补。
+8. **Q8（新）— Track 3 现在就实现，还是先定稿提案、之后再挑时间实现？** 这是一个模板能力变更，
+   体量不小（skill + catalog + policy + ledger 四件套），如果现在做，会占用相当篇幅的执行时间。
+9. **Q9（新）— round 3 本体（P0-P4）现在开工，还是等 Track 1/2/3 的决策都有着落之后再开工？**
+   P0-P4 在 case 分支里做，理论上和 Track 1/2/3（在 `main` 或需要 human 决策）互不阻塞，可以立刻开工。
+
+> 6. 认可这个顺序
+> 7. 现在就做
+> 8. 先定稿提案,后面在实现,现在template还在第一版本,这件事情不是很着急
+> 9. 立刻开工
 
 ## 验证标准
 
 本轮（plan 阶段）的验证标准：
 
-- human 在本文件批注区留下明确反馈（认可 / 调整优先级 / 回答 Q1-Q5）。
-- Q1-Q4 至少有初步方向后，才允许进入执行阶段；执行阶段本身的验证标准（每条探针的期望 exit code / 报错文案）已经写在任务树里，届时逐条核对「实际输出 == 期望输出」，任何不一致都要如实分类（模板真实 gap / 探针写错 / 预期本来就该是软约束不拦截）而不是含糊带过。
-- 执行阶段完成后，`memory/current-status.md` 需要更新 Commands+results 表 + Open issues，格式延续 round 1/2 已经建立的表格惯例。
+- human 在本文件批注区留下明确反馈（认可 / 调整优先级 / 回答 Q1-Q9）。
+- Track 1-3 与 round 3 本体（P0-P4）各自的验证标准已在对应章节写明；执行阶段完成后统一更新
+  `memory/current-status.md` 的 Commands+results 表 + Open issues，格式延续 round 1/2 已经建立的
+  表格惯例。
 
 ## 下一步
 
-1. 等待 human 在本文档批注（尤其 Q1-Q5）。
-2. 读批注 + `git diff`，收敛任务树的优先级与范围，更新本文档。
-3. human 明确批准后，才把 P0（及视 Q3 答案而定的 P1）交给下一个执行 session/subagent 去真正跑；本 plan-writer 角色本身不执行。
+1. 等待 human 对本次更新（Track 0-3 + Q6-Q9）的批注。
+2. 读批注 + `git diff`，收敛范围，可能需要的话把 Track 3 拆成独立的 plan doc（如果 human 觉得体量
+   已经超出「round 3」这个标题该装的范围）。
+3. human 明确批准后，才开始真正执行：Track 1/2 走 subagent + PR 流程；round 3 本体（P0-P4）走
+   mutate→assert→revert 探针；Track 3 视 Q8 答案决定现在做还是定稿后另找时间做。本 plan-writer /
+   本轮回应角色本身不在 human 批准前执行任何一项。
 
 ## Plan revision log
 
 - 2026-07-09 初稿（round 3 提案，基于 round 1/2 现状梳理 + 对 `scripts/validate-governance.py`、`lab/research/ANATOMY.md`、旧 `stress-probe-catalog.md` 的实读核对）。
+- 2026-07-09 第二版（本次）：收敛 human 对 Q1-Q5 的批注；新增 Track 0（人类可读产出默认中文）、
+  Track 1（扩大 F2 修复到 F11 其余实例）、Track 2（F2 独立复验）、Track 3（把压力测试沉淀成模板
+  持久能力的提案）；新增 Q6-Q9 待 human 拍板。尚未执行任何一项——仍在等待 human 批准。
