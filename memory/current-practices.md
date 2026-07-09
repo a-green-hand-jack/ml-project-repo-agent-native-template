@@ -10,8 +10,8 @@
 
 ## 说明
 
-- **id**：与 `lab/recipes/claude-code/<id>.md` 对应。
-- **status**：`trial`（试用中）/ `adopted`（已采用）/ `review`（待复审）。
+- **id**：与 `lab/recipes/claude-code/<id>.yaml` 对应。
+- **status**：用 `.agent/claude-code-recipe-policy.md` 的状态机词表。本表只收 `provisional`（有复测、连续通过≥2次，可局部采用）与 `stable`（跨任务类别仍有效）；`candidate` 还不进本表，`deprecated` 移入 `deprecated-practices.md`。
 - **evidence**：为什么采用——指向 `human/reviews/recipes/` 的 review 或实测证据路径。
-- **expires**：复审到期日；到期未复审的 recipe 应降级或移入 `deprecated-practices.md`。
+- **expires**：复审到期日；到期未复审的 recipe 应降级（`stable`→`provisional`）或移入 `deprecated-practices.md`。
 - 新 recipe 必须先经 recipe review（小 diff，见 `.agent/claude-code-recipe-policy.md`）才能进本表。

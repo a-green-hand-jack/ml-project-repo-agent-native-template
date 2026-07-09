@@ -37,5 +37,5 @@ maintenance: |
 
 ## Notes
 
-- overclaim = claim 强度超出其 evidence，属违规，validator 应拦截。
+- overclaim = claim 强度超出其 evidence，属违规；`validate-governance.py` 会拦截（引用可解析 + claim 强度 ≤ 最强证据）。
 - 校验：`python scripts/validate-governance.py`。

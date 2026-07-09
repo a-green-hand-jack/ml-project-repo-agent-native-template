@@ -122,7 +122,7 @@ agent **准备**（写好 commit、起草 PR body、生成归档提案），huma
 - 每个重要目录有**导航四件套**：`README`（给 human）/`AGENTS`（给 agent）/`CLAUDE`（薄路由）/`ANATOMY`（结构地图）。
 - `ANATOMY.md` 是给 coding agent 的**地图不是教程**：组件、调用关系、持久状态、line-addressed 引用（`file.py:42`）。根只做 router。
 - **same-commit rule**：结构改动（移动/改名/拆分/合并/改 ownership/状态 shape）必须同 commit 更新相关 anatomy 与 ledger。
-- `scripts/check-anatomy-drift.py` 挡 missing file / out-of-range line；语义正确性仍需 agent 打开代码验证。
+- `scripts/check-anatomy-drift.py` 挡 missing file / out-of-range line / 超 120 行硬上限；语义正确性仍需 agent 打开代码验证。
 
 ---
 
@@ -134,6 +134,7 @@ agent **准备**（写好 commit、起草 PR body、生成归档提案），huma
 - **台账**（`lab/research/`）：`claims.yaml`（主张）↔ `evidence.yaml`（已确认证据，含 commit/run_id/config/checkpoint/data_split/metric_source）互相引用，构成可追溯证据链。
 - **索引**（`lab/artifacts/` + `lab/data/` + `lab/models/`）：大 bytes 不进 Git，只留逻辑索引（status: active/superseded/archived/unknown）。由 `artifact-librarian` 维护。
 - **进 evidence 的门槛**：run 可定位、config 可复现、metric 来源清楚、与 baseline 比较清楚、caveat 写明、经 fresh verifier。
+- **overclaim 由 validator 拦截**（不只口头）：`validate-governance.py` 校验 claims↔evidence 引用可解析，且 claim 强度 ≤ 最强证据（`supported` 需 ≥metric 证据；paper-grade 需经 fresh reviewer 的 paper-claim 证据）。
 - promote 结果为 paper claim 走 human gate。
 
 ---

@@ -23,6 +23,16 @@ human 说「开 subagent 做 X」
 → 模式稳定后经 issue/branch/PR 更新本 policy
 ```
 
+## 预算落到实处：为什么 frontmatter 是 `model: inherit`
+
+「预算不是身份」要能在**执行层**成立，不能只写在文档里：
+
+- `.claude/agents/*.md` 的 frontmatter 一律 `model: inherit` 是**刻意的**——不给角色钉死模型档位，避免「repo-researcher 天生最贵」这类身份化。
+- 真正的档位在**派发时**决定：main 按 launch packet 的 `recommended model` / `recommended effort`，在启动 child 时逐次覆盖（Agent 调用的 per-call model/effort 参数）。tier→model 映射随 CC 版本与预算变化，由 main 在派发点决定具体 model id，不硬编码进 repo。
+- 因此 `inherit` 是「无固定身份、等派发时定预算」的默认，不是「永远继承 main 的最高档」。若某次派发不带覆盖，child 才回退到继承——这只应发生在 tier 与 main 同档的任务上。
+
+`fast / standard / strong` 是**抽象档**，不是 model id：低成本查找 / 常规实现 / 高风险决策。落到当前可用模型由派发方决定，稳定后可在本 policy 记映射并定期复校（同 recipe 防漂移）。
+
 ## 选 tier 的问题
 
 - 是不是 read-only？

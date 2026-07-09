@@ -6,6 +6,8 @@
 2. 正文里的 line-addressed citation `path/to/file.py:42` 或 `:42-90`：
    - 被引文件必须存在（相对 repo 根 或 相对该目录解析）。
    - 行号必须在文件行数范围内。
+3. 行数不超过硬上限（见 .agent/anatomy-protocol.md：目标 ~80，硬上限 120）。
+   写不短通常是代码边界不清，不是文档该加长——把口头阈值升级成运行时防线。
 
 只校验「看起来像真实 repo 文件」的引用；占位符（含 `<...>`、`example`、模板示例）跳过。
 这是结构性检查：只能挡 missing file / out-of-range line；语义正确性仍需人打开代码验证。
@@ -21,6 +23,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 SKIP_DIRS = {".git", ".venv", "__pycache__", ".reference-docs", "node_modules"}
+ANATOMY_LINE_LIMIT = 120  # 硬上限，见 .agent/anatomy-protocol.md
 
 # 形如 `path/seg.ext:12` 或 `path/seg.ext:12-90`，允许被反引号包裹。
 CITATION_RE = re.compile(
@@ -99,12 +102,22 @@ def check_citations(anatomy: Path, text: str) -> None:
                 )
 
 
+def check_line_budget(anatomy: Path, text: str) -> None:
+    n = text.count("\n") + (0 if text.endswith("\n") or not text else 1)
+    if n > ANATOMY_LINE_LIMIT:
+        errors.append(
+            f"{anatomy.relative_to(REPO)}: 超过硬上限 {ANATOMY_LINE_LIMIT} 行"
+            f"（当前 {n} 行）——拆分边界，别加长文档"
+        )
+
+
 def main() -> int:
     files = list(iter_anatomy_files())
     for anatomy in files:
         text = anatomy.read_text(encoding="utf-8", errors="replace")
         check_related_files(anatomy, text)
         check_citations(anatomy, text)
+        check_line_budget(anatomy, text)
 
     for e in errors:
         print(f"ERROR {e}")

@@ -5,6 +5,7 @@
 1. .gitignore 保护危险路径（data/runs/models bytes、checkpoints、wandb、private、.env）。
 2. lab/{research,artifacts,data,models}/*.yaml 可解析（有 PyYAML 时深检，否则做轻量结构检查）。
 3. 大 bytes 未被误加进 Git（有 git 时检查 tracked 文件不含受保护 bytes 路径）。
+4. 证据链一致：claims↔evidence 引用可解析，且 claim 强度 ≤ 最强证据（overclaim 拦截）。
 
 先跑子检查（作为独立进程，便于单独调用），再跑本文件治理规则。
 无第三方依赖（PyYAML 可选）。退出码 0 = 全通过，非 0 = 有失败。
@@ -76,6 +77,67 @@ def check_yaml() -> None:
                 errors.append(f"YAML 解析失败：{f.relative_to(REPO)}: {e}")
 
 
+def check_evidence_chain() -> None:
+    """证据链一致性 + overclaim 拦截（见 lab/research/ANATOMY.md、.agent/principles.md）。
+
+    只在有 PyYAML 时运行（需解析结构）；否则跳过并告警。
+    规则：
+    - 引用完整：claim.evidence[] 里的 ev id 必须存在；evidence.supports_claim 必须指向已知 claim。
+    - overclaim：证据分层 log<metric<table<figure<paper-claim。
+        · status=supported 需 ≥1 条证据，且最强证据 ≥ metric。
+        · status=partial 需 ≥1 条证据。
+        · verified_by_fresh_reviewer=true（paper-grade）需 ≥1 条 grade=paper-claim
+          且该证据自身 verified_by_fresh_reviewer=true。
+    模板占位（claim status=proposed、evidence=[]）天然通过，不误伤。
+    """
+    research = REPO / "lab" / "research"
+    claims_f, ev_f = research / "claims.yaml", research / "evidence.yaml"
+    if not (claims_f.exists() and ev_f.exists()):
+        return
+    try:
+        import yaml  # type: ignore
+    except ImportError:
+        warnings.append("未安装 PyYAML：跳过证据链一致性检查")
+        return
+    try:
+        claims = (yaml.safe_load(claims_f.read_text(encoding="utf-8")) or {}).get("claims") or []
+        evlist = (yaml.safe_load(ev_f.read_text(encoding="utf-8")) or {}).get("evidence") or []
+    except Exception as e:  # noqa: BLE001
+        errors.append(f"证据链解析失败：{e}")
+        return
+
+    grade_rank = {"log": 1, "metric": 2, "table": 3, "figure": 4, "paper-claim": 5}
+    ev_by_id = {e.get("id"): e for e in evlist if isinstance(e, dict)}
+    claim_ids = {c.get("id") for c in claims if isinstance(c, dict)}
+
+    for e in evlist:
+        if isinstance(e, dict) and e.get("supports_claim") not in claim_ids:
+            errors.append(f"evidence {e.get('id')} 的 supports_claim 指向未知 claim：{e.get('supports_claim')}")
+
+    for c in claims:
+        if not isinstance(c, dict):
+            continue
+        cid, status = c.get("id"), c.get("status")
+        refs = c.get("evidence") or []
+        linked = [ev_by_id[r] for r in refs if r in ev_by_id]
+        for r in refs:
+            if r not in ev_by_id:
+                errors.append(f"claim {cid} 引用未知 evidence：{r}")
+        strongest = max((grade_rank.get(e.get("grade"), 0) for e in linked), default=0)
+        if status in ("partial", "supported") and not linked:
+            errors.append(f"overclaim：claim {cid} status={status} 但无 evidence 支撑")
+        if status == "supported" and strongest < grade_rank["metric"]:
+            errors.append(f"overclaim：claim {cid} status=supported 但最强证据低于 metric")
+        if c.get("verified_by_fresh_reviewer") is True:
+            paper = [e for e in linked if e.get("grade") == "paper-claim"
+                     and e.get("verified_by_fresh_reviewer") is True]
+            if not paper:
+                errors.append(
+                    f"overclaim：claim {cid} 标记 paper-grade（fresh reviewer）"
+                    "但缺少经 fresh reviewer 的 paper-claim 级证据"
+                )
+
+
 def check_tracked_bytes() -> None:
     git_dir = REPO / ".git"
     if not git_dir.exists():
@@ -107,6 +169,7 @@ def main() -> int:
     print("\n=== governance ===", flush=True)
     check_gitignore()
     check_yaml()
+    check_evidence_chain()
     check_tracked_bytes()
     for w in warnings:
         print(f"WARN  {w}")
