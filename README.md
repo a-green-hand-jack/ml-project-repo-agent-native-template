@@ -4,7 +4,9 @@
 
 这个模板把 Claude Code 当作**实验仪器**而不是聊天窗口：短上下文做当前判断，repo 文件做长期控制面，subagent 做隔离任务，worktree 做并行边界，hook/permission 做硬约束，anatomy/ledger/validator 做防漂移，测试与实验记录做事实来源。
 
-设计精神与实践依据见 `.reference-docs/`（`claude_code_optimization_spirit_zh.md` 与 `claude_code_practice_for_ai_phd_zh.md`）。
+设计精神与实践依据见 `.reference-docs/`：两份来源文档
+`claude_code_optimization_spirit_zh.md` / `claude_code_practice_for_ai_phd_zh.md`，以及当前实现覆盖说明
+`implementation-coverage-note.md`。
 
 ## 这个 repo 是什么
 
