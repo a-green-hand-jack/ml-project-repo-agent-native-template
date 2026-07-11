@@ -17,6 +17,8 @@ maintenance: |
 
 # repo ANATOMY（root router）
 
+<!-- template:begin -->
+
 ## What this is
 
 `ml-project-repo` 的结构路由。它把 agent 导向「最近的 ownership」，避免 grep 误判。
@@ -35,6 +37,7 @@ maintenance: |
 | 活状态层 | `memory/` | current-status / session-tree / practices | `memory/ANATOMY.md` |
 | 对外承诺层 | `deliverables/` | paper / slides / release | `deliverables/ANATOMY.md` |
 | 门禁层 | `scripts/` | harness / anatomy-drift / governance validators | `scripts/ANATOMY.md` |
+| 版本同步层 | `VERSION` `CHANGELOG.md` `template-manifest.toml` | 模板版本真源与上下游同步分类锚点（下游另持 `.template.toml`） | `.agent/template-versioning-policy.md` |
 
 ## 结构规则（详见 `.agent/anatomy-protocol.md`）
 
@@ -46,3 +49,7 @@ maintenance: |
 ## Notes
 
 - 大 bytes（`lab/data`、`lab/runs`、`lab/models`、checkpoints、wandb）不进 Git，repo 只留 index。
+
+<!-- template:end -->
+
+<!-- 项目自定义区（template:end 之后，sync 不碰）：下游在此追加本项目特定内容；template:begin/end 块内是模板拥有的内容，如需改动请走 template-feedback 上报，勿在此直接改块内。 -->

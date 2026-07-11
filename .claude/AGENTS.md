@@ -1,5 +1,7 @@
 # .claude/ — AGENTS
 
+<!-- template:begin -->
+
 给维护本能力层的 agent。
 
 ## 允许改
@@ -21,3 +23,7 @@
 ## 演化
 
 反复出现的轨迹用 `sub-agent-maker-agent` / `hook-maker-agent` / `workflow-recipe-harvester` 提炼成 draft，走 human review + branch/PR + validator 才启用。
+
+<!-- template:end -->
+
+<!-- 项目自定义区（template:end 之后，sync 不碰）：下游在此追加本项目特定内容；template:begin/end 块内是模板拥有的内容，如需改动请走 template-feedback 上报，勿在此直接改块内。 -->

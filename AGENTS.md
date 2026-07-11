@@ -1,5 +1,7 @@
 # AGENTS
 
+<!-- template:begin -->
+
 > 所有编码/研究 agent 的 repo 级入口与硬规则。Claude Code 见 `CLAUDE.md`（薄路由指向此处）。
 
 ## 进入 repo 先读
@@ -48,3 +50,7 @@
 - 模型/effort 路由：`.agent/model-routing-policy.md`
 - 工具/skill 接口：`.agent/tool-skill-interface.md`
 - human gates：`.agent/human-gates.md`
+
+<!-- template:end -->
+
+<!-- 项目自定义区（template:end 之后，sync 不碰）：下游在此追加本项目特定内容；template:begin/end 块内是模板拥有的内容，如需改动请走 template-feedback 上报，勿在此直接改块内。 -->

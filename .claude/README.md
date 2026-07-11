@@ -1,5 +1,7 @@
 # .claude/
 
+<!-- template:begin -->
+
 Claude Code 项目能力层，也是 Codex adapter 的 canonical source。项目专属能力放这里，**不装到 user 全局**。
 
 | 目录 | 内容 |
@@ -16,3 +18,7 @@ Claude Code 项目能力层，也是 Codex adapter 的 canonical source。项目
 
 Codex 读取的 `.codex/agents` 与 `.agents/skills` 由本目录生成；改完 agents / skills / commands 后运行
 `python scripts/sync-codex-adapters.py`。
+
+<!-- template:end -->
+
+<!-- 项目自定义区（template:end 之后，sync 不碰）：下游在此追加本项目特定内容；template:begin/end 块内是模板拥有的内容，如需改动请走 template-feedback 上报，勿在此直接改块内。 -->

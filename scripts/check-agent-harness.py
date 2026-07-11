@@ -35,6 +35,8 @@ ROOT_WHITELIST = {
     "README.md", "PROJECT.md", "DECISIONS.md", "DESIGN.md", "AGENTS.md", "CLAUDE.md",
     "ANATOMY.md", ".gitignore", ".github", ".githooks", ".agent", ".claude", ".codex",
     ".agents", "human", "lab", "memory", "deliverables", "scripts", "plans", ".reference-docs",
+    # 模板版本 / 上下游同步锚点（见 .agent/template-versioning-policy.md）
+    "VERSION", "CHANGELOG.md", "template-manifest.toml", ".template.toml",
     # 常见工程文件（允许存在，不算污染）
     "LICENSE", "pyproject.toml", "uv.lock", ".python-version",
     ".pre-commit-config.yaml", "Makefile",

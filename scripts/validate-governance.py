@@ -9,6 +9,8 @@
 5. 发布闸门 / 回归矩阵一致：release-gates.yaml 与 regression-matrix.yaml 的枚举字段合法，
    且一旦离开占位默认状态（gate_status/last_status 不再是 open/unknown），其 claim 引用
    必须指向 claims.yaml 中真实存在的 claim（防止「已判定放行/已判定回归通过」却引用空主张）。
+6. merge 哨兵：template-manifest.toml 标为 merge 的文件必须有成对 template:begin/end 块，
+   否则 template-sync 会整体跳过它、模板更新传不到下游（见 template-versioning-policy.md）。
 
 先跑子检查（作为独立进程，便于单独调用），再跑本文件治理规则。
 无第三方依赖（PyYAML 可选）。退出码 0 = 全通过，非 0 = 有失败。
@@ -253,6 +255,68 @@ def check_regression_matrix() -> None:
             errors.append(f"regression {rid} 的 guards_claim 引用未知 claim：{guards_claim}")
 
 
+def _classify(path: str, rules: list) -> str | None:
+    """按 template-manifest.toml 规则顺序，返回 path 的第一条匹配 kind。"""
+    import fnmatch
+    for rule in rules:
+        glob = rule.get("glob", "")
+        if glob.endswith("/**"):
+            pre = glob[:-3]
+            hit = path == pre or path.startswith(pre + "/")
+        else:
+            hit = fnmatch.fnmatch(path, glob)
+        if hit:
+            return rule.get("kind")
+    return None
+
+
+def check_merge_sentinels() -> None:
+    """merge 类文件必须有成对 template:begin/end 哨兵块（见 .agent/template-versioning-policy.md）。
+
+    template-sync 只替换块内内容；merge 文件缺哨兵会被整体跳过，模板更新传不到下游。
+    分类唯一源是 template-manifest.toml。只校验实际存在的 tracked 文件。
+    """
+    manifest = REPO / "template-manifest.toml"
+    if not manifest.exists():
+        return
+    try:
+        import tomllib
+    except ImportError:  # Python < 3.11
+        warnings.append("无 tomllib（Python<3.11）：跳过 merge 哨兵检查")
+        return
+    try:
+        rules = tomllib.loads(manifest.read_text(encoding="utf-8")).get("rule", [])
+    except Exception as e:  # noqa: BLE001
+        errors.append(f"template-manifest.toml 解析失败：{e}")
+        return
+
+    try:
+        out = subprocess.run(
+            ["git", "ls-files"], cwd=REPO, capture_output=True, text=True, check=True
+        ).stdout
+        files = [ln for ln in out.splitlines() if ln]
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        files = [
+            p.relative_to(REPO).as_posix()
+            for p in REPO.rglob("*")
+            if p.is_file() and ".git" not in p.relative_to(REPO).parts
+        ]
+
+    begin, end = "<!-- template:begin -->", "<!-- template:end -->"
+    for rel in files:
+        if _classify(rel, rules) != "merge":
+            continue
+        f = REPO / rel
+        if not f.exists():
+            continue
+        text = f.read_text(encoding="utf-8", errors="replace")
+        i, j = text.find(begin), text.find(end)
+        if i == -1 or j == -1:
+            errors.append(f"merge 文件缺 template:begin/end 哨兵块：{rel}")
+        elif j < i:
+            errors.append(f"merge 文件哨兵顺序错误（end 在 begin 前）：{rel}")
+
+
 def check_tracked_bytes() -> None:
     git_dir = REPO / ".git"
     if not git_dir.exists():
@@ -287,6 +351,7 @@ def main() -> int:
     check_evidence_chain()
     check_release_gates()
     check_regression_matrix()
+    check_merge_sentinels()
     check_tracked_bytes()
     for w in warnings:
         print(f"WARN  {w}")

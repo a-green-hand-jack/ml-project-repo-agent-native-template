@@ -11,7 +11,13 @@ python scripts/check-same-commit.py --staged  # same-commit rule：结构改动 
 python scripts/sync-codex-adapters.py --check # Codex adapters 与 .claude canonical 能力是否同步
 python scripts/adopt-existing-repo.py <repo> --phase all  # 迁移已有 repo 到 template 形态
 python scripts/check-adoption-integrity.py <repo>         # 校验 adoption baseline bytes 仍存在
+python scripts/bump-template-version.py --level minor --note "..."   # 发版：递增 VERSION + tag（上游）
+python scripts/template-sync.py --from /path/to/upstream             # 追平上游框架层（下游）
 ```
+
+上下游同步闭环（`bump-template-version.py` + `template-sync.py`）见 `.agent/template-versioning-policy.md`：
+上游发版打 tag，下游按 `template-manifest.toml` 分类追平（framework 覆盖 / project 保护 / merge 换哨兵块），
+MAJOR 跨越需 `--allow-major` 人工确认。
 
 加 `--strict` 让 warning 也算失败（适合 CI）。脚本**无第三方依赖**（PyYAML 可选，用于 YAML 深度解析）。
 

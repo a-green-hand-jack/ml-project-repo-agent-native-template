@@ -1,5 +1,7 @@
 # Claude Code 入口
 
+<!-- template:begin -->
+
 > 薄路由。真正的 doctrine 在 `AGENTS.md` 与 `.agent/`，不要在这里堆第二套规则。
 
 ## 先读
@@ -35,3 +37,7 @@
 ## Python
 
 - 优先用 `uv`（`uv run` / `uv add` / `uv sync`）。
+
+<!-- template:end -->
+
+<!-- 项目自定义区（template:end 之后，sync 不碰）：下游在此追加本项目特定内容；template:begin/end 块内是模板拥有的内容，如需改动请走 template-feedback 上报，勿在此直接改块内。 -->
