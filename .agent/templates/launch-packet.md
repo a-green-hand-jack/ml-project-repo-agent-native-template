@@ -5,9 +5,14 @@
 ```
 agent_type:          <repo-researcher | feature-worker | test-runner | ...>
 task:                <一句话可收敛任务>
+role:                <impl | ui | research | planning | audit>
 budget tier:         <0-4>
+recommended provider:<codex | claude_code | paseo provider string>
 recommended model:   <fast | standard | strong>
 recommended effort:  <low | medium | high>
+quota snapshot:      <current/weekly remaining + reset for Codex and Claude Code>
+usage velocity:      <recent token/message burn proxy>
+paseo preference:    <role default provider or missing/defaulted>
 allowed paths:       <可读/可写路径>
 forbidden paths:     <绝对不碰>
 tools:               <允许工具>

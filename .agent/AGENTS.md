@@ -23,6 +23,8 @@ doctrine 是分文件的，每个文件一个关注点，短而稳定、可 revi
 15. `autonomous-window.md` — human 授权无人值守窗口的协议：放宽 permission、保留 hook 地板。
 16. `template-stress-test-policy.md` — 模板自身机制漂移的防线：变更幅度 → 测试深度分级，
     多 case 登记账定位。
+17. `template-versioning-policy.md` — 模板版本(semver)判级契约 + 上下游反馈同步四站闭环
+    （下游上报 issue → 上游发版 → sync 追平）。
 
 ## 模板与清单
 
@@ -31,4 +33,4 @@ doctrine 是分文件的，每个文件一个关注点，短而稳定、可 revi
 
 ## 与其他平面的关系
 
-- doctrine 说「为什么这样限制」；`.claude/settings.json` 让 Claude Code 加载权限；`scripts/` 验证没漂移。三者必须一致。
+- doctrine 说「为什么这样限制」；`.claude/settings.json` / `.codex/config.toml` / `.codex/rules/` 让工具加载权限与 hooks；`scripts/` 验证没漂移。三者必须一致。

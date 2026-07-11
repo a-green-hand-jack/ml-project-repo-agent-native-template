@@ -14,3 +14,10 @@ changes:
     anatomy_updated: true
     validator_passed: true
     human_approved: true
+  - id: chg-20260710-codex-adapters
+    date: 2026-07-10
+    kind: capability
+    summary: 新增 Codex project adapters：.codex config/custom agents、.agents skills、同步脚本与共享 hook 适配
+    anatomy_updated: true
+    validator_passed: true
+    human_approved: true

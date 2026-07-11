@@ -6,7 +6,7 @@
 
 | 目录 | 是什么 |
 | --- | --- |
-| `permissions/` | 解释 `.claude/settings.json` 的 deny/ask/allow 为何这样设（owner + 理由 + 验证） |
+| `permissions/` | 解释 `.claude/settings.json` 与 `.codex/rules/default.rules` 的 deny/ask/allow/prompt 为何这样设（owner + 理由 + 验证） |
 | `paths/` | 路径约定：数据/输出/checkpoint 落在哪 |
 | `storage/` | 存储后端与配额约定 |
 | `launch/` | 可复现的启动命令（**启动是人类闸门**） |

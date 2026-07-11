@@ -54,3 +54,23 @@ cases:
     report: lab/docs/audits/agent-r1-adoption-replay-report.md
     probe_log: null
     status: complete
+  - id: template-upstream-sync-selftest
+    case_source: "自造合成 case：从本模板 working tree 派生上/下游 checkout（非外部真实仓库）"
+    template_commit_range: "bc7a037..feat/template-upstream-sync（模板上下游同步闭环 + 哨兵）"
+    branch: feat/template-upstream-sync
+    depth: adversarial-probe-matrix
+    rounds: 3
+    date: "2026-07-11"
+    findings_summary: >
+      新增一类机制（VERSION/bump/template-sync/manifest/merge 哨兵 + check_merge_sentinels
+      validator）。按合成下游 repo 做端到端对抗探针：框架层覆盖（改脏 doctrine 被覆盖）、
+      project 层零触碰（112 私有文件保留）、版本追平、MAJOR 门禁（rc=2，--allow-major 放行）、
+      幂等（二次 0 覆盖）、bump 有/无 git 两路径、哨兵合并（上游改块内传入 + 下游自定义区存活 +
+      下游乱改块内被覆盖）、哨兵 validator mutate→assert→revert 正负用例。真上游
+      validate-governance 0 error/0 warning。fresh sonnet5 reviewer 复审（fb70fb1）：1 HIGH
+      （codex 重建 rc 未检查被静默吞）+ 4 MEDIUM + 1 LOW；HIGH 及 replace count=1 / TOML 转义 /
+      哨兵唯一性校验已在 merge 前修复，orphan 处理与 classify 去重列为 fast-follow。
+      局限：case 为自造合成而非外部真实仓库，depth 记 adversarial-probe-matrix 而非 full-case-replay。
+    report: null
+    probe_log: null
+    status: complete

@@ -12,9 +12,9 @@
 本 hook 是"防误操作"护栏，非对抗性沙箱：不为"把危险命令藏进 python -c / 命令替换"负责
 （这类代码执行本就被 allow 的 pytest/uv run 信任，数据安全最终靠 gitignore + 备份）。
 
-协议：Claude Code 通过 stdin 传 JSON（tool_name / tool_input）；exit 2 = 阻止，exit 0 = 放行。
-解析失败保守放行。无第三方依赖。push 到受保护分支需 `CLAUDE_ALLOW_PUSH_MAIN=1`（见
-`.agent/autonomous-window.md`）。
+协议：Claude Code / Codex 通过 stdin 传 JSON（tool_name / tool_input）；exit 2 = 阻止，
+exit 0 = 放行。解析失败保守放行。无第三方依赖。push 到受保护分支需
+`CLAUDE_ALLOW_PUSH_MAIN=1` 或 `CODEX_ALLOW_PUSH_MAIN=1`（见 `.agent/autonomous-window.md`）。
 """
 import json
 import os
@@ -39,7 +39,7 @@ PROTECTED_FILES = (".env",)
 
 # 受保护分支：push 需 human 明确放行。
 PROTECTED_BRANCHES = {"main", "master"}
-PUSH_ESCAPE_ENV = "CLAUDE_ALLOW_PUSH_MAIN"
+PUSH_ESCAPE_ENVS = ("CLAUDE_ALLOW_PUSH_MAIN", "CODEX_ALLOW_PUSH_MAIN")
 
 # rm -r 允许递归删除的安全目标（缓存/构建/临时，可再生）。
 SAFE_RM_BASENAMES = {
@@ -192,6 +192,21 @@ def _git_push_protected(push_args: list[str]) -> bool:
     return False
 
 
+def _patch_paths(patch_text: str) -> list[str]:
+    paths: list[str] = []
+    for line in patch_text.splitlines():
+        for prefix in (
+            "*** Add File: ",
+            "*** Update File: ",
+            "*** Delete File: ",
+            "*** Move to: ",
+        ):
+            if line.startswith(prefix):
+                paths.append(line[len(prefix) :].strip())
+                break
+    return paths
+
+
 def _block(reason: str) -> None:
     out = {
         "hookSpecificOutput": {
@@ -214,7 +229,10 @@ def _check_bash(raw_cmd: str) -> None:
     if DESTRUCTIVE_PROTECTED.search(_dequote(raw_cmd)):
         _block("破坏性命令触碰受保护数据/产物路径（含 find -exec 等嵌套）。删/移 bytes 走 human gate。")
 
-    session_escape = os.environ.get(PUSH_ESCAPE_ENV, "").strip().lower() in ("1", "true", "yes")
+    session_escape = any(
+        os.environ.get(env, "").strip().lower() in ("1", "true", "yes")
+        for env in PUSH_ESCAPE_ENVS
+    )
 
     for tokens in _commands(raw_cmd):
         envs, rest = _split_env(tokens)
@@ -223,7 +241,9 @@ def _check_bash(raw_cmd: str) -> None:
         name = os.path.basename(rest[0])
         args = rest[1:]
         cmd_escape = session_escape or any(
-            re.match(rf"^{PUSH_ESCAPE_ENV}=(1|true|yes)$", e, re.IGNORECASE) for e in envs
+            re.match(rf"^{env}=(1|true|yes)$", e, re.IGNORECASE)
+            for env in PUSH_ESCAPE_ENVS
+            for e in envs
         )
 
         if name == "sudo":
@@ -244,7 +264,8 @@ def _check_bash(raw_cmd: str) -> None:
             if _git_push_protected(args[1:]) and not cmd_escape:
                 _block(
                     f"push 到受保护分支（{'/'.join(sorted(PROTECTED_BRANCHES))}）需 human 明确放行："
-                    f"命令前加 `{PUSH_ESCAPE_ENV}=1 ` 或 session 内 export。topic/实验分支不受限。"
+                    "命令前加 `CLAUDE_ALLOW_PUSH_MAIN=1 ` / `CODEX_ALLOW_PUSH_MAIN=1 ` "
+                    "或 session 内 export。topic/实验分支不受限。"
                 )
 
 
@@ -268,6 +289,13 @@ def main() -> None:
             _block(
                 f"受保护路径不可写：{path}。bytes/私有/产物只留 index，删改走 human gate。"
             )
+    elif tool == "apply_patch":
+        patch_text = tool_input.get("command", "") or ""
+        for path in _patch_paths(patch_text):
+            if _is_protected_file(path):
+                _block(
+                    f"受保护路径不可写：{path}。bytes/私有/产物只留 index，删改走 human gate。"
+                )
 
     sys.exit(0)
 

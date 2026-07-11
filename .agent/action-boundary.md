@@ -1,6 +1,6 @@
 # 动作边界
 
-三档：**禁止 / 需问 / 可做**。这是 doctrine 层的解释；机器强制在 `.claude/settings.json`（permissions + hooks），漂移检查在 `scripts/`。三者必须对齐。
+三档：**禁止 / 需问 / 可做**。这是 doctrine 层的解释；机器强制在 `.claude/settings.json`、`.codex/config.toml` / `.codex/rules/` 与共享 hooks，漂移检查在 `scripts/`。三者必须对齐。
 
 > 设计：把"绝对红线"钉进 hook 地板（不可调，bypass/自主窗口也拦得住），只把"有人在就确认"留在 `ask`（可调）。于是放宽 permission 才安全——致命动作不在可放宽的那层。详见 `autonomous-window.md`。
 
@@ -10,7 +10,7 @@
 - 递归删除（`rm -r`）受保护数据/产物、`.git`、绝对路径(非 `/tmp`)、`~`、仓库根、`..`；`mv`/`cp` 触碰受保护路径。（缓存/构建/临时目录可删——见"可做"。）
 - 提权与远程执行：`sudo`、`curl|sh`、`wget|sh`。
 - `pip install`（含 `python -m pip install`）：用 `uv add`。
-- push 到 `main`/`master`：除非命令带 `CLAUDE_ALLOW_PUSH_MAIN=1`（human 单次放行）。
+- push 到 `main`/`master`：除非命令带 `CLAUDE_ALLOW_PUSH_MAIN=1` 或 `CODEX_ALLOW_PUSH_MAIN=1`（human 单次放行）。
 - 派发无边界的 `general-purpose` 大 agent。
 
 ## 需问（ask，先说明意图与影响，等确认）
