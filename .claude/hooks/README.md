@@ -22,14 +22,18 @@ repo-local lifecycle hooks（可执行，以本机权限运行——保持小而
 主 agent 在任务边界判断（repo hook 无法可靠按 token 阈值自动压缩）。token% 精确来自 transcript
 `usage`（`input+cache_read+cache_creation`）。
 
-**窗口感知**（hook 对本会话窗口有感知，非写死 200k）：按优先级解析——
-`CLAUDE_CTX_WINDOW` 环境变量 > **本会话窗口缓存** > model id 推断（`[1m]`→1M）> **证据推断** > 默认 200k。
-难点：UserPromptSubmit hook 的 stdin 没有 model，transcript 又只存 base id（不带 `[1m]`）。解法：
-statusline 有 `.model.id`（含 `[1m]`）能即时认出窗口，把它写进 `$TMPDIR/claude_ctx_window_<session_id>`
-缓存；hook 据 session_id 读缓存，从而**自动**对 1M 等窗口有感知（statusline 高频渲染，通常先于 hook）。
-缓存缺失时用证据兜底（transcript 观测到的上下文一旦超过 200k，窗口显然更大 → snap 到 1M）。都没有才落
-200k（安全方向：宁早提醒不漏）。想强制指定，设 `CLAUDE_CTX_WINDOW=1000000`（`.claude/settings.local.json`
-的 `env` 块）即最高优先。
+**窗口感知（默认就是动态的，无需手配）**：hook 对本会话窗口的感知**主要靠 statusline 动态驱动**——
+statusline 每次渲染都读 `.model.id`（含 `[1m]`），认出当前模型的窗口并写进
+`$TMPDIR/claude_ctx_window_<session_id>` 缓存；hook 据 session_id 读缓存。于是**选了 1M 模型 → 下一帧
+statusline 就把 1M 传给 hook；切回 200k 模型 → statusline（权威，绕过旧缓存）改写 200k**，全程跟随模型动态变化，
+不需要人工设任何东西。之所以只能靠 statusline：`[1m]` 标记**只**出现在 statusline 的 `.model.id`——hook 的
+stdin 没有 model，transcript 又只存 base id（不带 `[1m]`），故 statusline 是唯一能动态感知窗口的源。
+
+完整优先级链（前者短路后者）：`CLAUDE_CTX_WINDOW` 环境变量 > 本会话窗口缓存（statusline 动态写）>
+model id 推断 > 证据推断（观测上下文一旦超过 200k → snap 到 1M）> 默认 200k（安全方向：宁早提醒不漏）。
+- **`CLAUDE_CTX_WINDOW` 是兜底、不是常规路径**：只在 statusline 不渲染的表面（某些 headless/嵌入 UI）才需要，
+  设在 `.claude/settings.local.json` 的 `env` 块，值固定不随模型变——所以能动态感知时优先靠 statusline，别写死它。
+- 前提就一条：**statusline 要渲染**（交互式 session 默认持续渲染，本就是使用 code agent 时该有的仪表盘）。
 
 **运行表面（Claude + Codex 已对等）**：
 - Claude：`.claude/settings.json` 注册 `UserPromptSubmit` + `SessionStart(compact|clear)`。
