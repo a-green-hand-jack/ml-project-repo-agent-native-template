@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import json
 import re
 import subprocess
 import sys
@@ -146,7 +147,8 @@ def sync_files(upstream: Path, rules: list[dict], dry: bool) -> Report:
                 continue
             if down_block != up_block:
                 if not dry:
-                    dst.write_text(down_text.replace(down_block, up_block), encoding="utf-8")
+                    # 只替换定位到的那一块（count=1），避免子串在文件他处重复时误伤。
+                    dst.write_text(down_text.replace(down_block, up_block, 1), encoding="utf-8")
                 rep.updated.append(rel)
     return rep
 
@@ -162,11 +164,13 @@ def read_template_toml() -> dict:
 
 
 def write_template_version(origin: str, version: str, extra: dict) -> None:
-    lines = ["[template]", f'origin = "{origin}"', f'version = "{version}"']
+    # 用 json.dumps 生成带正确转义的 TOML basic string（引号/反斜杠安全）。
+    lines = ["[template]", f"origin = {json.dumps(origin, ensure_ascii=False)}",
+             f"version = {json.dumps(version, ensure_ascii=False)}"]
     for k, v in extra.items():
         if k in ("origin", "version"):
             continue
-        lines.append(f'{k} = "{v}"')
+        lines.append(f"{k} = {json.dumps(str(v), ensure_ascii=False)}")
     (DOWNSTREAM / ".template.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -179,7 +183,6 @@ def closed_downstream_issues(origin: str) -> None:
         )
         if out.returncode != 0 or not out.stdout.strip():
             return
-        import json
         issues = json.loads(out.stdout)
         if issues:
             print("\n闭环回执 —— 上游已关闭的 from-downstream issue（核对你上报的是否已随本次追平进来）：")
@@ -253,12 +256,16 @@ def main() -> int:
         print(f"  WARN 未分类(补 template-manifest.toml): {u}")
 
     # 生成层：覆盖完 canonical 后重建 codex 适配。
+    codex_rc = 0
     if not args.dry_run:
         print("\n=== 重建 Codex 适配 ===", flush=True)
-        subprocess.run(
+        codex_rc = subprocess.run(
             [sys.executable, str(DOWNSTREAM / "scripts" / "sync-codex-adapters.py")],
             cwd=DOWNSTREAM,
-        )
+        ).returncode
+        if codex_rc != 0:
+            print(f"ERROR Codex 适配重建失败（exit {codex_rc}）：.codex/.agents 可能已 stale，"
+                  "别信任本次同步。检查 scripts/sync-codex-adapters.py。")
         write_template_version(origin, up_raw, meta)
         print(f"[template-sync] .template.toml version → {up_raw}")
 
@@ -268,8 +275,8 @@ def main() -> int:
 
     if rep.unclassified:
         print("\n提醒：有未分类文件，请在上游 template-manifest.toml 补规则后再发下一版。")
-    ok = rc == 0
-    print(f"\n[template-sync] {'OK' if ok else 'FAIL（validator 未过，需修）'}")
+    ok = rc == 0 and codex_rc == 0
+    print(f"\n[template-sync] {'OK' if ok else 'FAIL（codex 重建或 validator 未过，需修）'}")
     return 0 if ok else 1
 
 

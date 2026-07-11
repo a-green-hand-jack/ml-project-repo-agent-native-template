@@ -315,6 +315,9 @@ def check_merge_sentinels() -> None:
             errors.append(f"merge 文件缺 template:begin/end 哨兵块：{rel}")
         elif j < i:
             errors.append(f"merge 文件哨兵顺序错误（end 在 begin 前）：{rel}")
+        elif text.count(begin) != 1 or text.count(end) != 1:
+            # 重复哨兵对会让 template-sync 的块定位/替换有歧义（见 template-sync.sentinel_block）。
+            errors.append(f"merge 文件哨兵不唯一（begin/end 应各恰好一次）：{rel}")
 
 
 def check_tracked_bytes() -> None:
