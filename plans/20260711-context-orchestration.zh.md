@@ -67,6 +67,22 @@ Codex 独立查了一遍，确认「配置存在、`validate-governance.py --str
 
 **一句话**：现状是"compact 前提醒 + 人/主 agent 主动调用边界 subagent"，不是"后台自动压缩系统"。本方案不试图违背这条硬约束去"自动 compact"，而是把**信号做强、做可见、做早**，让主动压缩有据可依。
 
+## 探测结果（2026-07-11，回答未决问题 1）
+
+实测本 session 的 transcript JSONL（`~/.claude/projects/<slug>/<session>.jsonl`）：
+
+- **确定：context 占用有精确来源，不用字符估算。** 每条 assistant message 的 `message.usage` 含 `input_tokens` + `cache_read_input_tokens` + `cache_creation_input_tokens`，三者之和 = 当前上下文精确 token 数（实测某条 = 71,883 tokens）。读 transcript 最后一条 assistant usage 求和即可，零依赖、精确。
+- **statusline 自身 stdin 字段**：待回合边界重渲染时由临时 probe 捕获确认（statusline 不在回合中途渲染）。**但此项不阻塞**——即使 statusline stdin 不直接给 token，它按文档会给 `transcript_path`（退一步也能用 `cwd`+`session_id` 定位 transcript），块 1/2 都能自己读 transcript 求和。
+- **结论**：块 1/2 的 token 来源从"字符/4 近似"**升级为 transcript usage 精确值**。窗口大小按 model 取（Opus 4.8 [1m] = 1,000,000；常规 200k），可用 `CLAUDE_CTX_WINDOW` 覆盖。
+
+## Paseo 表面（2026-07-11，回答未决问题 5，已改配置）
+
+- `~/.paseo/config.json` 已改（备份 `~/.paseo/config.json.bak-20260711`）：
+  - `daemon.mcp.injectIntoAgents`: `false → true`（Paseo agent 拿到 Paseo MCP，可自我编排/参与上下文调配）
+  - `daemon.enableTerminalAgentHooks`: `false → true`（Paseo 给终端 agent 挂生命周期 hook 回调；印证于 `paseo hooks <agent> <event>` 子命令存在）
+- **注意**：改动需 `paseo daemon restart` 才生效（本次未重启——需 human 授权）。
+- **仍成立的边界**：Paseo 的这两个开关控的是 Paseo 自己的 MCP/hook 注入，不等同于子 CLI 是否 honor 项目 `.claude/settings.json` / `.codex/config.toml` hook——后者取决于 Paseo 是否以真正的 project session、在受信任 cwd/worktree 启动。因此方案覆盖面仍应声明"以 Claude/Codex project session 表面为准"，Paseo 表面靠这两个开关尽量对齐、但不保证逐一等价。
+
 ## 过渡缓解（实现前立即可用，来自 Codex 建议）
 
 在长任务开头固定加一句提示，把"主动调配"从模型自觉临时抬成显式协议：
@@ -85,7 +101,7 @@ Codex 独立查了一遍，确认「配置存在、`validate-governance.py --str
 ### 块 1：statusline context 表（最高杠杆）
 
 - **做什么**：`statusline.sh` 增一段，从 stdin JSON 的 `transcript_path` 读当前 session transcript，估算已用 token，换算成占窗口百分比，拼进现有 ` | ` 面板。
-- **估算法**：累加 transcript 里各 message 的字符数 / 4 近似 token（零依赖、够用于阈值判断），或若 JSON 已含 `.cost` 之外的 token 字段则优先用官方字段。窗口大小从环境/常量取（可配 `CLAUDE_CTX_WINDOW`，默认按当前 model）。
+- **估算法（已由探测确定）**：读 transcript 最后一条 assistant message 的 `message.usage`，取 `input_tokens + cache_read_input_tokens + cache_creation_input_tokens` = 精确上下文 token（非字符近似）。窗口大小可配 `CLAUDE_CTX_WINDOW`，默认按 model（[1m]=1e6 / 常规=2e5）。
 - **展示**：`🧠 62%`；≥60% 黄、≥75% 红（终端色码，无色环境降级为 `[!]` 前缀）。
 - **降级**：无 `jq`、无 transcript、解析失败 → 不显示这段，绝不报错阻断（沿用现有防御式风格）。
 - **对应精神**：#4/#16「没有仪表盘就别开长途」。
@@ -126,17 +142,18 @@ Codex 独立查了一遍，确认「配置存在、`validate-governance.py --str
 
 - 不硬限窗口，走主动调配。（human 已定）
 - 本轮只出方案文档，不写实现。（human 已选）
-- token 估算走零依赖字符近似，除非确认 statusline/hook JSON 提供官方 token 计数。（初稿默认，待批注）
+- token 来源 = transcript 最后一条 usage 的三项求和（精确），非字符近似。（探测已定，见「探测结果」）
 - 三块定位为"信号/提示"，不追求 hook 自动执行 compact（Codex 硬约束：按下 compact 需宿主 CLI）。（复核已定）
+- Paseo 两开关已置 true（injectIntoAgents / enableTerminalAgentHooks），需 daemon restart 生效。（已改配置，待授权重启）
 - 本文件所在分支：`feat/context-orchestration`（已从 `main` 拉出，不含 template-upstream-sync 的改动）。
 
 ## 未解决问题
 
-1. statusline / hook 的 stdin JSON 是否直接提供 context token 计数？若提供则块 1/2 不必自己估算——**实现前需实测一次 JSON 字段**。
-2. 阈值取值：60/75 vs 65/80？
-3. 三块的落地顺序：建议 块1 → 块3 → 块2（先仪表盘、再连续性、最后信号注入），还是并行？
-4. 这套能力是否回流上游 template（走 `template-feedback`）？
-5. **运行表面**：这三块只在 Claude/Codex 真正的 project session 下才生效。Paseo 启动的 agent（`injectIntoAgents=false`）默认接不上——是否需要在方案里显式声明"仅覆盖 Claude/Codex project session 表面"，Paseo 表面另作说明或改配置？
+1. ~~statusline/hook JSON 是否给 token 计数~~ → **已探测**：transcript usage 有精确 token；块 1/2 走 transcript_path。statusline 自身字段待回合边界 probe 确认（不阻塞）。
+2. 阈值取值：60/75 vs 65/80？（**待批注**）
+3. 三块的落地顺序：建议 块1 → 块3 → 块2（先仪表盘、再连续性、最后信号注入），还是并行？（**待批注**）
+4. 这套能力是否回流上游 template（走 `template-feedback`）？（**待批注**）
+5. ~~Paseo 表面~~ → **已改配置**（两开关置 true，待 daemon restart）。仍需批注：是否接受"覆盖面以 Claude/Codex project session 为准、Paseo 尽量对齐不保证等价"的声明？
 
 ## 验证标准（实现阶段）
 
@@ -154,3 +171,4 @@ Codex 独立查了一遍，确认「配置存在、`validate-governance.py --str
 
 - 2026-07-11 初稿（诊断 + 三块方案 + 未决问题）
 - 2026-07-11 并入 Codex 复核（硬约束：hook 只发信号不执行 compact；运行表面不等价 / Paseo injectIntoAgents=false；.codex 侧 hook 对等已确认）+ 过渡缓解句 + 未决问题 5
+- 2026-07-11 探测：确认 transcript usage 提供精确 token（块 1/2 改用精确值）；statusline 自身字段待回合边界 probe。改 Paseo 配置（injectIntoAgents / enableTerminalAgentHooks → true，待 restart）。收敛未决问题 1、5。
