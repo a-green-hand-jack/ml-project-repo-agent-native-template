@@ -6,8 +6,9 @@
 ## 当前 objective
 
 把模板从 Claude-Code-native 扩展为 Claude Code + Codex 都可直接使用的 agent-native 模板。
-本轮已补齐 Codex project config、custom-agent adapters、repo skills adapters、command adapters、
-共享 hook 适配与 validator 检查；验证已通过。
+最新一轮新增 `coding-agent-quota` repo-local skill，用本地 usage snapshot 读取 Codex /
+Claude Code 当前窗口与周额度，并把 `subagent-routing` / `subagent-router-agent` 升级为
+配额感知的 provider/model 路由；验证已通过。
 
 ## Constraints
 
@@ -33,6 +34,11 @@
 - `.claude/commands/*.md`
 - `.claude/hooks/*.py`
 - `.claude/settings.json`
+- `.claude/skills/coding-agent-quota/SKILL.md`
+- `.claude/skills/coding-agent-quota/scripts/read_agent_quota.py`
+- `.claude/skills/subagent-routing/SKILL.md`
+- `.claude/agents/subagent-router-agent.md`
+- `.agent/model-routing-policy.md`
 - `scripts/check-agent-harness.py`
 - OpenAI/Codex docs：AGENTS.md、skills、subagents、hooks、config、rules
 
@@ -50,6 +56,16 @@
 - `ANATOMY.md`、`.claude/ANATOMY.md`、`.codex/ANATOMY.md`、`.agents/ANATOMY.md`、`scripts/ANATOMY.md`：
   同步结构路由。
 - `memory/change-control.yaml`、`memory/current-status.md`、`memory/session-tree.md`：记录本次能力变更。
+- `.claude/skills/coding-agent-quota/`：新增 canonical quota skill、UI metadata 与读取脚本。
+- `.agents/skills/coding-agent-quota/SKILL.md`：由 `scripts/sync-codex-adapters.py` 生成的 Codex adapter。
+- `.claude/skills/subagent-routing/SKILL.md`、`.claude/agents/subagent-router-agent.md`：
+  派发 child agent 前必须读取 quota snapshot，并把 provider/model/effort 推荐写进 launch packet。
+- `.agent/model-routing-policy.md`、`.agent/templates/launch-packet.md`：
+  增加 role、quota snapshot、usage velocity、Paseo preference、recommended provider 字段。
+- `.agents/skills/subagent-routing/SKILL.md`、`.codex/agents/subagent-router-agent.toml`：
+  由 `scripts/sync-codex-adapters.py` 同步更新。
+- `.claude/ANATOMY.md`、`DESIGN.md`：登记新增 skill 与能力数量。
+- `scripts/check-agent-harness.py`：将本地 `.omx/` runtime state 视作工具状态忽略，避免 strict gate 因本机 runtime 目录失败。
 
 ## Decisions
 
@@ -58,6 +74,11 @@
 - Codex skills 使用 `.agents/skills/`；Claude slash commands 生成 `command-*` skills，作为 Codex 的等价入口。
 - Codex custom agents 使用 `.codex/agents/*.toml`；不写死 model，保留"预算不是身份"原则。
 - 共享 hook 地板继续放在 `.claude/hooks/`，Codex 通过 `.codex/config.toml` 调用同一批脚本。
+- `coding-agent-quota` 优先读 `~/.claude/.search-index/usage.db` 的 `api_usage_snapshots`；
+  Codex 额外 fallback 扫 `~/.codex/sessions/**/*.jsonl` 与 archived sessions 的 `rate_limits`。
+  脚本不读取 credential 文件。
+- `~/.paseo/orchestration-preferences.json` 当前未发现；quota 脚本会显式标注 `missing/defaulted`，
+  并使用内置保守默认，不会假装已经读到本地偏好。
 
 ## Commands + results
 
@@ -86,6 +107,12 @@
 | `python scripts/check-anatomy-drift.py` | 通过：扫描 41 个 ANATOMY.md，0 漂移。 |
 | `python scripts/validate-governance.py --strict` | 通过：0 error / 0 warning。 |
 | `git diff --check` | 通过。 |
+| `python .claude/skills/coding-agent-quota/scripts/read_agent_quota.py --format table --codex-jsonl-files 50` | 通过：输出 Codex 与 Claude Code 当前窗口/周额度、reset、source 与 capacity hint。 |
+| `python .claude/skills/coding-agent-quota/scripts/read_agent_quota.py --role impl --tier 2 --format table --codex-jsonl-files 50` | 通过：输出 route recommendation、Paseo preference 状态与 provider/model/effort 推荐。 |
+| `python .claude/skills/coding-agent-quota/scripts/read_agent_quota.py --role audit --tier 3 --format json --codex-jsonl-files 50` | 通过：JSON 含 providers、usage_velocity、paseo_preferences、route_recommendation。 |
+| `python /home/user/.codex/skills/.system/skill-creator/scripts/quick_validate.py .claude/skills/coding-agent-quota` | 通过：Skill is valid。 |
+| `python scripts/sync-codex-adapters.py --check` | 通过：0 issue。 |
+| `PYTHONDONTWRITEBYTECODE=1 python -m py_compile scripts/check-agent-harness.py .claude/skills/coding-agent-quota/scripts/read_agent_quota.py` | 通过。 |
 
 ## Subagent reports
 
@@ -97,13 +124,17 @@
 - `.claude/worktrees/case+agent-r1-adoption-replay/` 与 `.claude/worktrees/case+elf-template-replay/`
   仍是本地 worktree checkout；它们在 main 视角显示为 untracked 是嵌套 worktree 的正常表现。
 - Codex project hooks 需要用户信任本 repo 的 `.codex/` layer 后才会加载；新增/修改 hook 后 Codex 也需要按其 hook trust flow 审核。
+- `coding-agent-quota` 的 Claude 数据来自本地 usage DB/cache；若 Claude Code 将来改变 `/usage` 存储 schema，脚本会降级为 unavailable/stale，需要按新 schema 更新。
 
 ## Exact next steps
 
 1. 如需要发布这次双 surface 支持，由 human 决定是否 commit/push main。
 2. 后续改 `.claude/agents`、`.claude/skills` 或 `.claude/commands` 时，先跑
    `python scripts/sync-codex-adapters.py`，再跑 validator。
-3. 若要进一步压测，可用 Codex fresh session 明确调用 `$worktree-pr-flow`、`$command-checkpoint`
+3. 调度 agent 前可运行
+   `python .claude/skills/coding-agent-quota/scripts/read_agent_quota.py --format table`
+   或显式调用 `$coding-agent-quota`。
+4. 若要进一步压测，可用 Codex fresh session 明确调用 `$worktree-pr-flow`、`$command-checkpoint`
    和一个 `.codex/agents/*` custom agent 做端到端 smoke。
 
 ## Do-not-forget
