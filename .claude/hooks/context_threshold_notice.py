@@ -50,6 +50,8 @@ def main() -> None:
         payload = json.load(sys.stdin)
     except (ValueError, TypeError):
         sys.exit(0)  # 读不了 stdin → 保守放行
+    if not isinstance(payload, dict):
+        sys.exit(0)  # 合法但非对象的 stdin（如 `42`）不能 .get —— 守住「绝不抛异常」契约
 
     transcript = payload.get("transcript_path")
     session_id = payload.get("session_id", "")

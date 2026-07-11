@@ -81,11 +81,18 @@ def write_window_cache(session_id: str | None, window: int) -> None:
     path = _window_cache_path(session_id)
     if not path or window <= 0:
         return
+    # 原子写：写临时文件后 rename，避免高频写与 hook 读之间读到半写入脏值。
+    tmp = f"{path}.{os.getpid()}.tmp"
     try:
-        with open(path, "w") as fh:
+        with open(tmp, "w") as fh:
             fh.write(str(window))
+        os.replace(tmp, path)
     except OSError:
-        pass  # 缓存是尽力而为，写不了不致命
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        # 缓存是尽力而为，写不了不致命
 
 
 def resolve_window(
@@ -217,10 +224,11 @@ def statusline_segment(
     if tokens is None:
         return ""  # 无数据 → 不展示这段（降级，不报错）
     mid = model_id or transcript_model
-    win = resolve_window(window, mid, session_id, max_tokens)
-    # statusline 有 `.model.id`（含 `[1m]`）能认出本会话窗口 → 写缓存，让无 model 的 hook 据此感知
+    # statusline 是权威源（持 `.model.id` 含 `[1m]`）：解析时**绕过缓存**（session_id=None），
+    # 以本帧 model 为准，避免会话中途换 model 时被陈旧缓存挟持（粘滞误报）；再用新值刷新缓存。
+    win = resolve_window(window, mid, None, max_tokens)
     if session_id:
-        write_window_cache(session_id, win)
+        write_window_cache(session_id, win)  # 刷新缓存供无 model 的 hook 读
     if win <= 0:
         return ""
     pct = min(999, round(100 * tokens / win))
