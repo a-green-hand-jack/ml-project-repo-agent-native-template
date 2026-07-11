@@ -1,36 +1,46 @@
 #!/usr/bin/env python3
-"""Context usage helper —— 从 transcript 算「精确」上下文占用。
+"""Context usage helper —— 从 transcript 算「精确」上下文占用，并对本会话的**窗口大小**有感知。
 
-单一真源：块 1（statusline 仪表盘）与块 2（阈值提醒 hook）共用本模块，避免两处
-各写一套估算逻辑而漂移。
+单一真源：块 1（statusline 仪表盘）与块 2（阈值提醒 hook）共用本模块，避免两处各写一套
+估算逻辑而漂移。
 
 精确来源（已由探测确认，见 plans/20260711-context-orchestration.zh.md）：
-transcript JSONL 最后一条 assistant message 的 `message.usage`：
+transcript JSONL 最后一条带 usage 的 message 的 `message.usage`：
     context_tokens = input_tokens + cache_read_input_tokens + cache_creation_input_tokens
-这是当前上下文的精确 token 数，不是字符/4 近似。
 
-窗口大小：显式 --window > 环境 CLAUDE_CTX_WINDOW > 按 model_id 推断 > 默认 200000。
-Opus [1m] 类 1M 窗口的 session，statusline 会带 model_id 让本模块推出 1e6；
-不带 model 信息的 hook 路径可用 CLAUDE_CTX_WINDOW 覆盖。
+窗口感知（关键：hook stdin 无 model，transcript 又只存 base id 不带 `[1m]`）——按优先级：
+  1. 显式 --window / window 参数
+  2. 环境 CLAUDE_CTX_WINDOW
+  3. 本会话窗口缓存（statusline 从 `.model.id` 认出 `[1m]`→写缓存；hook 据 session_id 读）
+  4. model id 推断（`[1m]`→1M；否则 base 表，默认 200k）
+  5. 证据推断（transcript 观测到的最大上下文 > 某档 → 窗口至少那么大，snap 到已知档）
+statusline 有 `.model.id`（含 `[1m]`）能即时认出并写缓存，让**无 model 信息的 hook** 也据此感知；
+缓存缺失时用证据兜底；证据不足才落回 200k（安全方向：宁早提醒不漏）。
 
 无第三方依赖。可 import，也可 CLI：
-    python3 context_usage.py --tokens     <transcript>            -> 打印 token 数或空
-    python3 context_usage.py --percent    <transcript> [--window N|--model ID] -> 打印整数百分比或空
-    python3 context_usage.py --statusline <transcript> [--window N|--model ID] -> 打印 "🧠 NN%"（阈值着色）
-所有失败路径都静默降级（打印空 + exit 0），绝不阻断调用方。
+    python3 context_usage.py --tokens     <transcript>
+    python3 context_usage.py --percent    <transcript> [--window N|--model ID|--session SID]
+    python3 context_usage.py --statusline <transcript> [--window N|--model ID|--session SID]
+所有失败路径静默降级（打印空 / 返回 None）+ exit 0，绝不抛异常冒泡、绝不阻断调用方。
 """
 import argparse
 import json
 import os
 import sys
+import tempfile
 
 DEFAULT_WINDOW = 200_000
+KNOWN_WINDOWS = (200_000, 1_000_000)  # 已知窗口档，证据推断 snap 到这些档
 YELLOW_AT = 65  # ≥ 黄
 RED_AT = 80     # ≥ 红
 
 
 def window_for_model(model_id: str | None) -> int:
-    """按 model id 粗判窗口。识别 1M 上下文（如 opus-4-8[1m]）。"""
+    """按 model id 推窗口。识别 1M 上下文（如 opus-4-8[1m]）；否则默认 200k。
+
+    注意：transcript 存 base id（`claude-opus-4-8`，无 `[1m]`）→ 从 transcript 认不出 1M；
+    只有 statusline 的 `.model.id` 带 `[1m]` 标记，故 1M 感知主要靠 statusline + 缓存 + 证据。
+    """
     if not model_id:
         return DEFAULT_WINDOW
     mid = model_id.lower()
@@ -39,8 +49,52 @@ def window_for_model(model_id: str | None) -> int:
     return DEFAULT_WINDOW
 
 
-def resolve_window(window: int | None = None, model_id: str | None = None) -> int:
-    """显式 window > env CLAUDE_CTX_WINDOW > model 推断 > 默认。"""
+def _snap_up(tokens: int) -> int:
+    """把观测 token 数向上 snap 到最小的已知窗口档；超过所有档则用 token 本身。"""
+    for w in KNOWN_WINDOWS:
+        if tokens <= w:
+            return w
+    return tokens
+
+
+def _window_cache_path(session_id: str | None) -> str | None:
+    if not session_id:
+        return None
+    safe = "".join(c for c in session_id if c.isalnum() or c in "-_")
+    if not safe:
+        return None
+    return os.path.join(tempfile.gettempdir(), f"claude_ctx_window_{safe}")
+
+
+def read_window_cache(session_id: str | None) -> int | None:
+    path = _window_cache_path(session_id)
+    if not path:
+        return None
+    try:
+        v = int(open(path).read().strip())
+        return v if v > 0 else None
+    except (OSError, ValueError):
+        return None
+
+
+def write_window_cache(session_id: str | None, window: int) -> None:
+    path = _window_cache_path(session_id)
+    if not path or window <= 0:
+        return
+    try:
+        with open(path, "w") as fh:
+            fh.write(str(window))
+    except OSError:
+        pass  # 缓存是尽力而为，写不了不致命
+
+
+def resolve_window(
+    window: int | None = None,
+    model_id: str | None = None,
+    session_id: str | None = None,
+    observed_tokens: int | None = None,
+) -> int:
+    """按优先级解析本会话有效窗口（见模块 docstring）。"""
     if window and window > 0:
         return window
     env = os.environ.get("CLAUDE_CTX_WINDOW", "").strip()
@@ -51,29 +105,41 @@ def resolve_window(window: int | None = None, model_id: str | None = None) -> in
                 return v
         except ValueError:
             pass
-    return window_for_model(model_id)
+    cached = read_window_cache(session_id)
+    if cached:
+        return cached
+    base = window_for_model(model_id)
+    # 证据兜底：若观测到的上下文已超过 base，窗口显然更大 → snap 到能容纳它的已知档
+    if observed_tokens and observed_tokens > base:
+        base = _snap_up(observed_tokens)
+    return base
 
 
 def _int(v: object) -> int:
     return v if isinstance(v, int) and v >= 0 else 0
 
 
-def _scan_transcript(transcript_path: str | None) -> tuple[int | None, str | None]:
-    """单次遍历 transcript，返回 (上下文精确 token, 最后 model id)。
+def _usage_sum(usage: dict) -> int:
+    return (
+        _int(usage.get("input_tokens"))
+        + _int(usage.get("cache_read_input_tokens"))
+        + _int(usage.get("cache_creation_input_tokens"))
+    )
 
-    单遍是刻意的：percent() 的默认路径（无 window/model/env）既要 token 又要 model 推窗口，
-    合并成一次读避免大 transcript（接近满时可达数十 MB、每轮 UserPromptSubmit 触发）被读两遍。
 
-    token = 最后一条带 usage 的 message 的 input+cache_read+cache_creation。
-    model = 最后一条带 model 的 message 的 id（transcript 存 base id，不带 `[1m]`——
-    故 1M 窗口从此认不出，仍靠 CLAUDE_CTX_WINDOW；statusline 走 `.model.id` 才含 `[1m]`）。
-    找不到 / 读不了 → (None, None)。对非 dict 行（半写入/畸形产出的合法标量）显式跳过，
-    确保「所有失败路径静默降级、绝不抛异常冒泡」的契约不被 obj.get 破坏。
+def _scan_transcript(transcript_path: str | None) -> tuple[int | None, str | None, int]:
+    """单次遍历 transcript，返回 (当前上下文 token, 最后 model id, 历史观测最大上下文 token)。
+
+    单遍是刻意的：percent 默认路径既要 token 又要 model / 证据，合并成一次读避免大 transcript
+    （接近满时可达数十 MB、每轮 UserPromptSubmit 触发）被反复读。
+    对非 dict 行（半写入/畸形产出的合法标量，如 `42`、`"x"`）显式跳过，确保「绝不抛异常
+    冒泡」的契约不被 obj.get 破坏。找不到/读不了 → (None, model 或 None, 0)。
     """
     if not transcript_path or not os.path.isfile(transcript_path):
-        return (None, None)
+        return (None, None, 0)
     last_usage = None
     last_model = None
+    max_tokens = 0
     try:
         with open(transcript_path, encoding="utf-8") as fh:
             for line in fh:
@@ -85,7 +151,7 @@ def _scan_transcript(transcript_path: str | None) -> tuple[int | None, str | Non
                 except (ValueError, TypeError):
                     continue
                 if not isinstance(obj, dict):
-                    continue  # 合法但非对象的行（如 `42`、`"x"`）不能 .get，跳过
+                    continue  # 合法但非对象的行不能 .get，跳过
                 msg = obj.get("message")
                 if not isinstance(msg, dict):
                     continue
@@ -95,39 +161,36 @@ def _scan_transcript(transcript_path: str | None) -> tuple[int | None, str | Non
                     for k in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
                 ):
                     last_usage = usage  # 取最后一条 —— 最贴近当前上下文
+                    max_tokens = max(max_tokens, _usage_sum(usage))
                 model = msg.get("model")
                 if isinstance(model, str):
                     last_model = model
     except OSError:
-        return (None, None)
-    if last_usage is None:
-        return (None, last_model)
-    tokens = (
-        _int(last_usage.get("input_tokens"))
-        + _int(last_usage.get("cache_read_input_tokens"))
-        + _int(last_usage.get("cache_creation_input_tokens"))
-    )
-    return (tokens, last_model)
+        return (None, last_model, max_tokens)
+    tokens = None if last_usage is None else _usage_sum(last_usage)
+    return (tokens, last_model, max_tokens)
 
 
 def context_tokens(transcript_path: str | None) -> int | None:
-    """读 transcript 求上下文精确 token（找不到/无 usage → None）。"""
+    """读 transcript 求当前上下文精确 token（找不到/无 usage → None）。"""
     return _scan_transcript(transcript_path)[0]
 
 
 def model_from_transcript(transcript_path: str | None) -> str | None:
-    """从 transcript 取最后 model id，作为窗口推断的兜底（见 _scan_transcript）。"""
+    """从 transcript 取最后 model id（见 _scan_transcript）。"""
     return _scan_transcript(transcript_path)[1]
 
 
-def percent(transcript_path: str | None, window: int | None = None, model_id: str | None = None) -> int | None:
-    tokens, transcript_model = _scan_transcript(transcript_path)  # 单遍拿齐 token + model
+def percent(
+    transcript_path: str | None,
+    window: int | None = None,
+    model_id: str | None = None,
+    session_id: str | None = None,
+) -> int | None:
+    tokens, transcript_model, max_tokens = _scan_transcript(transcript_path)  # 单遍拿齐
     if tokens is None:
         return None
-    # 无显式 window / model / env 时，兜底用 transcript 认出的 model 推窗口。
-    if window is None and model_id is None and not os.environ.get("CLAUDE_CTX_WINDOW", "").strip():
-        model_id = transcript_model
-    win = resolve_window(window, model_id)
+    win = resolve_window(window, model_id or transcript_model, session_id, max_tokens)
     if win <= 0:
         return None
     return min(999, round(100 * tokens / win))
@@ -144,10 +207,23 @@ def _colorize(text: str, pct: int) -> str:
     return text
 
 
-def statusline_segment(transcript_path: str | None, window: int | None = None, model_id: str | None = None) -> str:
-    pct = percent(transcript_path, window, model_id)
-    if pct is None:
+def statusline_segment(
+    transcript_path: str | None,
+    window: int | None = None,
+    model_id: str | None = None,
+    session_id: str | None = None,
+) -> str:
+    tokens, transcript_model, max_tokens = _scan_transcript(transcript_path)
+    if tokens is None:
         return ""  # 无数据 → 不展示这段（降级，不报错）
+    mid = model_id or transcript_model
+    win = resolve_window(window, mid, session_id, max_tokens)
+    # statusline 有 `.model.id`（含 `[1m]`）能认出本会话窗口 → 写缓存，让无 model 的 hook 据此感知
+    if session_id:
+        write_window_cache(session_id, win)
+    if win <= 0:
+        return ""
+    pct = min(999, round(100 * tokens / win))
     return _colorize(f"🧠 {pct}%", pct)
 
 
@@ -159,15 +235,16 @@ def _cli() -> int:
     ap.add_argument("--statusline", action="store_true")
     ap.add_argument("--window", type=int, default=None)
     ap.add_argument("--model", type=str, default=None)
+    ap.add_argument("--session", type=str, default=None)
     args = ap.parse_args()
     try:
         if args.tokens:
             t = context_tokens(args.transcript)
             print("" if t is None else t)
         elif args.statusline:
-            print(statusline_segment(args.transcript, args.window, args.model))
+            print(statusline_segment(args.transcript, args.window, args.model, args.session))
         else:  # 默认 --percent
-            p = percent(args.transcript, args.window, args.model)
+            p = percent(args.transcript, args.window, args.model, args.session)
             print("" if p is None else p)
     except Exception:  # 兜底：绝不让调用方因本模块崩溃
         print("")

@@ -22,15 +22,20 @@ repo-local lifecycle hooks（可执行，以本机权限运行——保持小而
 主 agent 在任务边界判断（repo hook 无法可靠按 token 阈值自动压缩）。token% 精确来自 transcript
 `usage`（`input+cache_read+cache_creation`）。
 
-**窗口大小**：默认 200000（标准 Claude Code 窗口）。statusline 从 `.model.id`（含 `[1m]`）能自动
-认出 1M 上下文；但 UserPromptSubmit hook 的 stdin 没有 model，transcript 又只存 base id（不带
-`[1m]`）——所以**跑 1M 上下文（Opus 4.8 [1m]）的项目要显式设 `CLAUDE_CTX_WINDOW=1000000`**（放
-`.claude/settings.json` 的 `env` 块或 `.claude/settings.local.json`），否则 hook 会按 200k 早报警。
-默认偏 200k 是刻意的**安全方向**：宁可早提醒，也不漏（反过来用 1M 默认会漏掉 200k session 的真阈值）。
+**窗口感知**（hook 对本会话窗口有感知，非写死 200k）：按优先级解析——
+`CLAUDE_CTX_WINDOW` 环境变量 > **本会话窗口缓存** > model id 推断（`[1m]`→1M）> **证据推断** > 默认 200k。
+难点：UserPromptSubmit hook 的 stdin 没有 model，transcript 又只存 base id（不带 `[1m]`）。解法：
+statusline 有 `.model.id`（含 `[1m]`）能即时认出窗口，把它写进 `$TMPDIR/claude_ctx_window_<session_id>`
+缓存；hook 据 session_id 读缓存，从而**自动**对 1M 等窗口有感知（statusline 高频渲染，通常先于 hook）。
+缓存缺失时用证据兜底（transcript 观测到的上下文一旦超过 200k，窗口显然更大 → snap 到 1M）。都没有才落
+200k（安全方向：宁早提醒不漏）。想强制指定，设 `CLAUDE_CTX_WINDOW=1000000`（`.claude/settings.local.json`
+的 `env` 块）即最高优先。
 
-**运行表面**：`context_threshold_notice`（UserPromptSubmit）与 `context_continuity`（SessionStart）目前只注册在
-Claude Code 表面（`.claude/settings.json`）。Codex 侧 `.codex/config.toml` 是否支持这两个事件未确认，故未加，
-以免塞入 Codex 不认的事件破坏配置——`PreCompact` 落盘提醒已在两个表面对等。待确认 Codex 事件支持后再补对等注册。
+**运行表面（Claude + Codex 已对等）**：
+- Claude：`.claude/settings.json` 注册 `UserPromptSubmit` + `SessionStart(compact|clear)`。
+- Codex：`.codex/config.toml` 注册 `UserPromptSubmit` + `SessionStart(clear)` + `PostCompact`。Codex 把压缩
+  拆成独立 `PostCompact` 事件（其 SessionStart matcher 只含 startup|resume|clear），故 continuity 两处挂载；
+  `context_continuity.py` 内也认 `hook_event_name=="PostCompact"`。`PreCompact` 落盘提醒本就两表面对等。
 
 ## 协议
 

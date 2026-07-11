@@ -53,7 +53,8 @@ def main() -> None:
 
     transcript = payload.get("transcript_path")
     session_id = payload.get("session_id", "")
-    pct = context_usage.percent(transcript)
+    # 传 session_id：让 percent 读 statusline 写下的本会话窗口缓存，从而对 1M 等窗口有感知
+    pct = context_usage.percent(transcript, session_id=session_id)
     if pct is None:
         sys.exit(0)  # 无数据 → 不打扰
 
