@@ -145,8 +145,15 @@ Codex 独立查了一遍，确认「配置存在、`validate-governance.py --str
 - [x] 收口：`.claude/hooks/README.md` hook 表 + `settings.json` 注册（Claude 表面）+ DESIGN.md §10 hooks 5→8
 - [~] `.codex/config.toml` 对等：**暂缓**——Codex 是否支持 UserPromptSubmit/SessionStart 事件未确认，不塞死配置；PreCompact 已对等。待确认后补。
 - [x] manifest：新 hook 落 `.claude/hooks/**` 自动归框架层，无需改 `template-manifest.toml`。
+- [x] fresh reviewer 审查（code-reviewer，结论 COMMENT，无 CRITICAL/HIGH）→ 4 项发现全修，commit `22356e1`。
 - [ ] 发版收口：`bump-template-version.py --level minor`（**merge 到 main 后再做**，避免在 feature 分支打 tag）。
-- [ ] fresh reviewer 审查（进行中）→ 修问题 → 走 PR（human gate）。
+- [ ] 走 PR（human gate）→ merge → 发版 → sync 下游。
+
+### reviewer 发现与处置（commit `22356e1`）
+- [MEDIUM] 非 dict 的合法 JSON 行 → `obj.get` 抛 AttributeError 冒泡，破坏「绝不抛异常」契约 → 加 `isinstance(obj,dict)` 守卫（按 reviewer 复现验证 exit=0）。
+- [MEDIUM] percent() 默认 200k 路径全量读 transcript 两遍 → 合并 `_scan_transcript` 单遍。
+- [LOW] 删未用 `import os`；[LOW] `_colorize` docstring 对齐实现。
+- 一致性/边界/去重升级/statusline 降级等项 reviewer 已核对无误。
 
 ## Human 批注区
 
@@ -193,3 +200,4 @@ Codex 独立查了一遍，确认「配置存在、`validate-governance.py --str
 - 2026-07-11 探测：确认 transcript usage 提供精确 token（块 1/2 改用精确值）；statusline 自身字段待回合边界 probe。改 Paseo 配置（injectIntoAgents / enableTerminalAgentHooks → true，待 restart）。收敛未决问题 1、5。
 - 2026-07-11 human 定调：阈值 65/80、三块并行（共用 helper）、发版走 ②b 模板源 MINOR bump + manifest 登记（不用 template-feedback skill）；statusline probe 未捕获（本 session 未调用 statusline）已移除、改用官方 schema 记录；分支 rebase 到最新 main（含模板发版基建）。未决问题收敛至仅 1 处（Paseo 覆盖面声明，human 已接受）。
 - 2026-07-11 实现落地 commit `a5435c6`：三块 + 共用 helper + statusline + settings 注册 + DESIGN/README。全部 validator（governance/harness/anatomy/codex-adapters）OK，定向测试通过。发现并处理一个真 bug 方向：hook stdin 无 model、transcript 只存 base id（无 `[1m]`）→ 1M session 会按 200k 早报警；定为安全方向 + `CLAUDE_CTX_WINDOW` 覆盖 + 文档说明。已派 fresh code-reviewer 审查（作者/审查分离）。
+- 2026-07-11 reviewer 结论 COMMENT（无 CRITICAL/HIGH）；4 项发现（2 MEDIUM + 2 LOW）全修 commit `22356e1`，复测 + validator 全绿。**实运行确认**：本 session settings.json 生效后 UserPromptSubmit hook 已真实触发（1M session 按 200k 报 ~76-83%，印证 CLAUDE_CTX_WINDOW 提示的必要）。剩余仅 PR/merge/发版（human gate）。
