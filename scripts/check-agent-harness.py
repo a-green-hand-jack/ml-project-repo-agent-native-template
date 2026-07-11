@@ -42,7 +42,7 @@ ROOT_WHITELIST = {
 # 工具 / VCS 产物：忽略，不告警。
 ROOT_IGNORE = {
     ".git", ".venv", "__pycache__", ".DS_Store", ".ruff_cache",
-    ".mypy_cache", ".pytest_cache", ".idea", ".vscode", ".env",
+    ".mypy_cache", ".pytest_cache", ".idea", ".vscode", ".env", ".omx",
 }
 
 # 需要完整四件套的目录。

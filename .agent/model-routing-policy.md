@@ -17,6 +17,7 @@ tier 4  strong model / high effort / fresh context：final verifier、paper clai
 ```
 human 说「开 subagent 做 X」
 → main 读本文件；明显就直接选 tier
+→ 运行 `coding-agent-quota` 的 quota snapshot（带 role/tier）
 → 不明显就用 subagent-router-agent 生成 launch packet
 → main 用选定 model/effort/tools 派发 child
 → 结果后 main 记录预算过低/过高/合适
@@ -32,6 +33,29 @@ human 说「开 subagent 做 X」
 - 因此 `inherit` 是「无固定身份、等派发时定预算」的默认，不是「永远继承 main 的最高档」。若某次派发不带覆盖，child 才回退到继承——这只应发生在 tier 与 main 同档的任务上。
 
 `fast / standard / strong` 是**抽象档**，不是 model id：低成本查找 / 常规实现 / 高风险决策。落到当前可用模型由派发方决定，稳定后可在本 policy 记映射并定期复校（同 recipe 防漂移）。
+
+## Provider / model 选择必须配额感知
+
+每次要启动 child agent（Claude subagent、Codex custom agent、Paseo agent 或 OMX team lane）前，先拿一份 quota snapshot：
+
+```
+python .claude/skills/coding-agent-quota/scripts/read_agent_quota.py --role <impl|ui|research|planning|audit> --tier <0-4> --format json
+```
+
+Launch packet 必须记录：
+
+- Codex / Claude Code 当前窗口剩余额度与周剩余额度；
+- usage velocity（近期 token / message burn proxy，不等同于真实订阅计费）；
+- Paseo role preference（`~/.paseo/orchestration-preferences.json`，缺失时标注 defaulted）；
+- 推荐 provider / model / effort 与理由。
+
+默认倾向：
+
+- `impl` / `research` / `planning`：Codex 优先，除非当前窗口或周额度明显吃紧。
+- `ui` / 高风险 `audit`：Claude Opus/Fable 值得考虑；常规 audit/review 优先 Sonnet 或 quota 更充足的一方。
+- tier 1 用 fast/low，tier 2 用 standard/medium，tier 3-4 才允许 strong/high+。
+
+硬约束优先于 quota：例如 transfer experiment 要证明跨 provider 时，provider/model/policy 必须在启动前冻结，启动后不因后续 quota 变化临时切换。
 
 ## 已知例外（`model: inherit` 不适用的情况）
 

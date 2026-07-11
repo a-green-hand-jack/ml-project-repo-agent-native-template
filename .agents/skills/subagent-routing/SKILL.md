@@ -7,7 +7,7 @@ description: 当要为一个 child task 派 subagent 时，用来选定 model/ef
 
 # subagent-routing
 
-为一个待派发的 child task 挑选 model、reasoning effort、允许的 tools，并落成一份 launch packet。核心原则：**派发前先路由**，不直接甩一个广义 general-purpose worker 上去。
+为一个待派发的 child task 挑选 provider、model、reasoning effort、允许的 tools，并落成一份 launch packet。核心原则：**派发前先路由**，不直接甩一个广义 general-purpose worker 上去。
 
 ## 适用边界
 
@@ -23,6 +23,7 @@ description: 当要为一个 child task 派 subagent 时，用来选定 model/ef
 
 - `.agent/model-routing-policy.md`（tier 0-4 的 model/effort/tool 预算）。
 - `.agent/tool-skill-interface.md`（何时 shell / skill / subagent / MCP）。
+- `.claude/skills/coding-agent-quota/SKILL.md`（provider quota / token burn / Paseo preference 证据）。
 - 当前 `memory/session-tree.md`（避免与已在跑的分支冲突）。
 
 ## 允许修改的路径
@@ -33,18 +34,22 @@ description: 当要为一个 child task 派 subagent 时，用来选定 model/ef
 
 ## 步骤
 
-1. 归类 tier：按 model-routing-policy 的 tier 0-4 判定任务难度与风险（0=最轻只读检索，4=高风险高推理）。
-2. 选 model + effort：按该 tier 的预算取默认值；越高 tier 才允许越贵的 model / 更高 effort。
-3. 收紧 tools：只授予完成该 task 必需的工具；只读任务不给 Edit/Write。
-4. 明确 scope 与 forbidden：写清允许写路径、禁止触碰的文件、验收标准与回报格式。
-5. 用 `.agent/templates/launch-packet.md` 填出 launch packet；确认没有隐含的 general-purpose 兜底授权。
-6. 派发，并在 `memory/branches/<slug>.md` 记一行引用。
+1. 归类 role：`impl` / `ui` / `research` / `planning` / `audit`。
+2. 归类 tier：按 model-routing-policy 的 tier 0-4 判定任务难度与风险（0=最轻只读检索，4=高风险高推理）。
+3. 读取 quota 证据：运行
+   `python .claude/skills/coding-agent-quota/scripts/read_agent_quota.py --role <role> --tier <tier> --format json`。
+4. 选 provider + model + effort：优先按 quota 脚本的 `route_recommendation`，同时检查任务是否有必须用某 provider 的实验约束。
+5. 收紧 tools：只授予完成该 task 必需的工具；只读任务不给 Edit/Write。
+6. 明确 scope 与 forbidden：写清允许写路径、禁止触碰的文件、验收标准与回报格式。
+7. 用 `.agent/templates/launch-packet.md` 填出 launch packet；必须包含 quota snapshot、usage velocity、Paseo preference status 与 route recommendation。确认没有隐含的 general-purpose 兜底授权。
+8. 派发，并在 `memory/branches/<slug>.md` 记一行引用。
 
 ## 验证命令
 
 ```
 python scripts/validate-governance.py
 python scripts/check-anatomy-drift.py
+python .claude/skills/coding-agent-quota/scripts/read_agent_quota.py --role impl --tier 2 --format json
 ```
 
 ## 失败时的 handoff
