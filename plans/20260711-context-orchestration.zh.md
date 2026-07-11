@@ -72,7 +72,7 @@ Codex 独立查了一遍，确认「配置存在、`validate-governance.py --str
 实测本 session 的 transcript JSONL（`~/.claude/projects/<slug>/<session>.jsonl`）：
 
 - **确定：context 占用有精确来源，不用字符估算。** 每条 assistant message 的 `message.usage` 含 `input_tokens` + `cache_read_input_tokens` + `cache_creation_input_tokens`，三者之和 = 当前上下文精确 token 数（实测某条 = 71,883 tokens）。读 transcript 最后一条 assistant usage 求和即可，零依赖、精确。
-- **statusline 自身 stdin 字段**：待回合边界重渲染时由临时 probe 捕获确认（statusline 不在回合中途渲染）。**但此项不阻塞**——即使 statusline stdin 不直接给 token，它按文档会给 `transcript_path`（退一步也能用 `cwd`+`session_id` 定位 transcript），块 1/2 都能自己读 transcript 求和。
+- **statusline 自身 stdin 字段**：临时 probe 跨一整个回合仍未捕获 → 本 session 表面根本没调用 statusline（probe 已移除，statusline.sh 复原）。按 Claude Code 官方 statusline schema，stdin 含 `session_id` / `transcript_path` / `cwd` / `model{id,display_name}` / `workspace{current_dir,project_dir}` / `version` / `output_style` / `cost{...}` / `exceeds_200k_tokens`(bool)——**给 `transcript_path`，不给精确 token 计数**。故块 1 走 `transcript_path` 读 usage 求和；`exceeds_200k_tokens` 可作 200k 窗口的兜底信号。此项**不阻塞**。
 - **结论**：块 1/2 的 token 来源从"字符/4 近似"**升级为 transcript usage 精确值**。窗口大小按 model 取（Opus 4.8 [1m] = 1,000,000；常规 200k），可用 `CLAUDE_CTX_WINDOW` 覆盖。
 
 ## Paseo 表面（2026-07-11，回答未决问题 5，已改配置）
@@ -82,6 +82,15 @@ Codex 独立查了一遍，确认「配置存在、`validate-governance.py --str
   - `daemon.enableTerminalAgentHooks`: `false → true`（Paseo 给终端 agent 挂生命周期 hook 回调；印证于 `paseo hooks <agent> <event>` 子命令存在）
 - **注意**：改动需 `paseo daemon restart` 才生效（本次未重启——需 human 授权）。
 - **仍成立的边界**：Paseo 的这两个开关控的是 Paseo 自己的 MCP/hook 注入，不等同于子 CLI 是否 honor 项目 `.claude/settings.json` / `.codex/config.toml` hook——后者取决于 Paseo 是否以真正的 project session、在受信任 cwd/worktree 启动。因此方案覆盖面仍应声明"以 Claude/Codex project session 表面为准"，Paseo 表面靠这两个开关尽量对齐、但不保证逐一等价。
+
+## 发版路径（2026-07-11，回答未决问题 4：回流 template）
+
+我们**就在 template repo 里**，所以这不是"下游回流"，而是 `template-versioning-policy.md` 的 **②b 模板源（template → template）**：
+
+- **不用 `template-feedback` skill**（它是下游专用，②a）。直接在本 repo 开发（可选打 `template-native` 标签的 issue）→ issue→PR→merge。
+- **判级 = MINOR**：三块是"新增 agent/skill/hook/validator、向后兼容、sync 干净落地、下游净得能力"，正落 semver 表的 MINOR 行。merge 后跑 `python scripts/bump-template-version.py --level minor` 写 `VERSION` + 打 tag。
+- **必须登记进 `template-manifest.toml` 框架层**：新 hook（threshold / continuity）、statusline 改动、settings.json 的 hook 注册要归到框架层受管路径，否则 `template-sync.py` 不会把它们同步到下游——等于下游拿不到这个能力。这是本方案能"惠及所有下游"的关键一步，实现时不能漏。
+- 混合文件（如 `.claude/settings.json`、statusline.sh 若被 manifest 判为混合）要遵守 `fb70fb1` 引入的哨兵结构（`template:begin/end` 块），改动只动模板拥有的块。
 
 ## 过渡缓解（实现前立即可用，来自 Codex 建议）
 
@@ -102,7 +111,7 @@ Codex 独立查了一遍，确认「配置存在、`validate-governance.py --str
 
 - **做什么**：`statusline.sh` 增一段，从 stdin JSON 的 `transcript_path` 读当前 session transcript，估算已用 token，换算成占窗口百分比，拼进现有 ` | ` 面板。
 - **估算法（已由探测确定）**：读 transcript 最后一条 assistant message 的 `message.usage`，取 `input_tokens + cache_read_input_tokens + cache_creation_input_tokens` = 精确上下文 token（非字符近似）。窗口大小可配 `CLAUDE_CTX_WINDOW`，默认按 model（[1m]=1e6 / 常规=2e5）。
-- **展示**：`🧠 62%`；≥60% 黄、≥75% 红（终端色码，无色环境降级为 `[!]` 前缀）。
+- **展示**：`🧠 62%`；≥65% 黄、≥80% 红（终端色码，无色环境降级为 `[!]` 前缀）。
 - **降级**：无 `jq`、无 transcript、解析失败 → 不显示这段，绝不报错阻断（沿用现有防御式风格）。
 - **对应精神**：#4/#16「没有仪表盘就别开长途」。
 - **未决**：token 估算精度 vs 复杂度；是否读官方 token 字段（需确认 statusline JSON 到底给不给 token 计数——见「未解决问题」）。
@@ -111,8 +120,8 @@ Codex 独立查了一遍，确认「配置存在、`validate-governance.py --str
 
 - **事件**：`UserPromptSubmit`（每轮用户输入时触发，能向上下文注入文本）。
 - **做什么**：读同一 transcript 估算占用；跨阈值时 `stderr`/stdout 注入建议，例如：
-  - ≥60%：`[context] 已用 ~62%。建议：派 checkpoint-writer 落盘 current-status.md；接近任务边界可考虑 /compact。`
-  - ≥75%：升级措辞为"现在就 checkpoint 并 compact/clear"。
+  - ≥65%：`[context] 已用 ~67%。建议：派 checkpoint-writer 落盘 current-status.md；接近任务边界可考虑 /compact。`
+  - ≥80%：升级措辞为"现在就 checkpoint 并 compact/clear"。
 - **纪律**：纯建议（不 block、不自动 compact）——压缩时机仍由主 agent 在任务边界判断，hook 只提供信号。避免每轮刷屏：同一 session 内每档阈值只提醒一次（用 transcript 目录旁的 marker 文件去重）。
 - **对应精神**：#4/#16 阈值操作、#5 在任务边界主动压缩。
 - **未决**：阈值数值（60/75 还是 65/80）；去重 marker 放哪（`.omc/` 已是忽略产物区，或 transcript 同目录）。
@@ -125,14 +134,17 @@ Codex 独立查了一遍，确认「配置存在、`validate-governance.py --str
 - **对应精神**：#5 compact 前更新 status、#11 handoff 文档、你说的「优化短上下文连续性」。
 - **未决**：是否只在 status 文件"新鲜"时回注（旧的可能误导）；注入长度上限（避免回注本身吃掉太多 context）。
 
-## 任务树（实现阶段，供本轮批注确认拆分）
+## 任务树（实现阶段——三块**并行**，human 已定）
 
-- [ ] Parent：主动上下文调配链
-  - [ ] 块 1 statusline context 表（独立、可先落地、最高杠杆）
-  - [ ] 块 2 UserPromptSubmit 阈值 hook（依赖块 1 的 token 估算，可抽公共函数）
-  - [ ] 块 3 SessionStart 连续性 hook（独立于 1/2）
-  - [ ] 更新 `.claude/hooks/README.md` 的 hook 表 + `settings.json` 注册
-  - [ ] （可选）纳入 validator / 补 `.agent/principles.md` 一条
+抽一个公共 `context_usage.py` helper（读 transcript_path → usage 三项求和 → 百分比），块 1/2 共用；三块之间无顺序依赖，可并行落地。
+
+- [ ] 公共 helper：`context_usage.py`（transcript → 精确 token% + 窗口按 model/`CLAUDE_CTX_WINDOW`）
+- [ ] 块 1 statusline context 表（🧠 NN%，≥65% 黄 / ≥80% 红）— 并行
+- [ ] 块 2 UserPromptSubmit 阈值 hook（65/80 注入建议，每档去重）— 并行
+- [ ] 块 3 SessionStart(compact/clear) 连续性回注 hook — 并行
+- [ ] 收口：`.claude/hooks/README.md` hook 表 + `settings.json` 注册 + `.codex/config.toml` 对等注册
+- [ ] 发版收口：登记 `template-manifest.toml` 框架层 + `bump-template-version.py --level minor`
+- [ ] （可选）纳入 validator / 补 `.agent/principles.md` 一条
 
 ## Human 批注区
 
@@ -144,16 +156,21 @@ Codex 独立查了一遍，确认「配置存在、`validate-governance.py --str
 - 本轮只出方案文档，不写实现。（human 已选）
 - token 来源 = transcript 最后一条 usage 的三项求和（精确），非字符近似。（探测已定，见「探测结果」）
 - 三块定位为"信号/提示"，不追求 hook 自动执行 compact（Codex 硬约束：按下 compact 需宿主 CLI）。（复核已定）
-- Paseo 两开关已置 true（injectIntoAgents / enableTerminalAgentHooks），需 daemon restart 生效。（已改配置，待授权重启）
+- Paseo 两开关已置 true（injectIntoAgents / enableTerminalAgentHooks），**由 human 稍后手动 `paseo daemon restart` 生效**（本次不重启，human 还有任务在跑）。
+- **阈值 = 65 / 80**（黄 / 红）。（human 已定）
+- **三块并行落地**，共用 `context_usage.py` helper。（human 已定）
+- 发版走 **②b 模板源 → MINOR bump**，不用 template-feedback skill；新能力须登记 manifest 框架层。（human 已定"回流 template"，据 policy 定型）
 - 本文件所在分支：`feat/context-orchestration`（已从 `main` 拉出，不含 template-upstream-sync 的改动）。
 
 ## 未解决问题
 
-1. ~~statusline/hook JSON 是否给 token 计数~~ → **已探测**：transcript usage 有精确 token；块 1/2 走 transcript_path。statusline 自身字段待回合边界 probe 确认（不阻塞）。
-2. 阈值取值：60/75 vs 65/80？（**待批注**）
-3. 三块的落地顺序：建议 块1 → 块3 → 块2（先仪表盘、再连续性、最后信号注入），还是并行？（**待批注**）
-4. 这套能力是否回流上游 template（走 `template-feedback`）？（**待批注**）
-5. ~~Paseo 表面~~ → **已改配置**（两开关置 true，待 daemon restart）。仍需批注：是否接受"覆盖面以 Claude/Codex project session 为准、Paseo 尽量对齐不保证等价"的声明？
+1. ~~token 来源~~ → 已探测：transcript usage 精确；statusline 给 transcript_path 不给 token 计数。**已定**。
+2. ~~阈值~~ → **65 / 80**。**已定**。
+3. ~~落地顺序~~ → **并行**（共用 helper）。**已定**。
+4. ~~回流 template~~ → **②b 模板源 → MINOR bump + manifest 登记**，不用 template-feedback。**已定**。
+5. ~~Paseo 表面~~ → 已改配置（待 human 手动 restart）。
+
+**剩余仅一处待批注**：是否接受方案中"覆盖面以 Claude/Codex project session 为准、Paseo 靠两开关尽量对齐但不保证逐一等价"的声明？（默认接受，除非批注否决）
 
 ## 验证标准（实现阶段）
 
@@ -172,3 +189,4 @@ Codex 独立查了一遍，确认「配置存在、`validate-governance.py --str
 - 2026-07-11 初稿（诊断 + 三块方案 + 未决问题）
 - 2026-07-11 并入 Codex 复核（硬约束：hook 只发信号不执行 compact；运行表面不等价 / Paseo injectIntoAgents=false；.codex 侧 hook 对等已确认）+ 过渡缓解句 + 未决问题 5
 - 2026-07-11 探测：确认 transcript usage 提供精确 token（块 1/2 改用精确值）；statusline 自身字段待回合边界 probe。改 Paseo 配置（injectIntoAgents / enableTerminalAgentHooks → true，待 restart）。收敛未决问题 1、5。
+- 2026-07-11 human 定调：阈值 65/80、三块并行（共用 helper）、发版走 ②b 模板源 MINOR bump + manifest 登记（不用 template-feedback skill）；statusline probe 未捕获（本 session 未调用 statusline）已移除、改用官方 schema 记录；分支 rebase 到最新 main（含模板发版基建）。未决问题收敛至仅 1 处（Paseo 覆盖面声明）。
