@@ -1,5 +1,7 @@
 # Claude Code 入口
 
+<!-- template:begin -->
+
 > 薄路由。真正的 doctrine 在 `AGENTS.md` 与 `.agent/`，不要在这里堆第二套规则。
 
 ## 先读
@@ -15,6 +17,7 @@
 - `.claude/skills/` — 项目专属 workflows
 - `.claude/commands/` — 项目专属 slash commands
 - `.claude/hooks/` + `.claude/settings.json` — lifecycle 约束与权限
+- `.codex/` + `.agents/` — 从 `.claude/` 生成的 Codex adapters（改 canonical 后跑 `python scripts/sync-codex-adapters.py`）
 
 除非 human 明确要求，不要用 user 全局的 agents/skills/hooks 承载本项目行为。
 
@@ -22,7 +25,7 @@
 
 - 不编辑/删除 `lab/data/`、`lab/runs/`、`lab/models/` bytes、checkpoints、wandb、远端产物、`lab/infra/private/`，除非明确要求。
 - 不启动/kill/restart 长训练或远端作业。
-- 不开 PR / merge / release / 改远端基础设施，除非拿到 human 批准。`git push`：topic/实验分支 `allow`，`main`/`master` 需 `CLAUDE_ALLOW_PUSH_MAIN=1` 显式放行。
+- 不开 PR / merge / release / 改远端基础设施，除非拿到 human 批准。`git push`：topic/实验分支 `allow`，`main`/`master` 需 `CLAUDE_ALLOW_PUSH_MAIN=1` / `CODEX_ALLOW_PUSH_MAIN=1` 显式放行。
 - 不无理由新增依赖。
 
 ## 验证
@@ -34,3 +37,7 @@
 ## Python
 
 - 优先用 `uv`（`uv run` / `uv add` / `uv sync`）。
+
+<!-- template:end -->
+
+<!-- 项目自定义区（template:end 之后，sync 不碰）：下游在此追加本项目特定内容；template:begin/end 块内是模板拥有的内容，如需改动请走 template-feedback 上报，勿在此直接改块内。 -->

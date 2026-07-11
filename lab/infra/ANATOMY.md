@@ -19,7 +19,7 @@ Children:
 
 | 子目录 | 职责 | 文档 |
 | --- | --- | --- |
-| `permissions/` | 记录 `.claude/settings.json` deny/ask/allow 的 owner + 理由 + 验证 | README only |
+| `permissions/` | 记录 `.claude/settings.json` 与 `.codex/rules` 权限策略的 owner + 理由 + 验证 | README only |
 | `paths/` | 路径约定 | README only |
 | `storage/` | 存储后端与配额 | README only |
 | `launch/` | 可复现启动命令（人类闸门）；已迁入 ELF-template-case 的 `envs/{local,cluster.yaml.example}` 与 `submit/slurm/README.md` | README only |
@@ -31,7 +31,7 @@ Children:
 ## Connections（意图）
 
 - `../code/src/` 通过 `paths/`、`storage/` 解析运行时位置，不硬编码。
-- `permissions/` 解释根 `.claude/settings.json` 的每条高危能力为何 deny/ask/allow。
+- `permissions/` 解释根 `.claude/settings.json` / `.codex/rules` 的每条高危能力为何 deny/ask/allow/prompt。
 - `launch/` 的命令由 human 执行；产出流向 `../runs/`、`../models/`（bytes gitignore）。
 
 ## State

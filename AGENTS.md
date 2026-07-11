@@ -1,5 +1,7 @@
 # AGENTS
 
+<!-- template:begin -->
+
 > 所有编码/研究 agent 的 repo 级入口与硬规则。Claude Code 见 `CLAUDE.md`（薄路由指向此处）。
 
 ## 进入 repo 先读
@@ -25,11 +27,11 @@
 - 开 PR / merge / release / 改远端基础设施。
 - 未经理由地新增依赖。
 
-`git push` 到 topic/实验分支是 `allow`（agent 可做）；push 到 `main`/`master` 由 hook 拦，需 human 显式放行 `CLAUDE_ALLOW_PUSH_MAIN=1`。其余外部副作用一律走 human gate，见 `.agent/human-gates.md` 与 `.agent/autonomous-window.md`。
+`git push` 到 topic/实验分支是 `allow`（agent 可做）；push 到 `main`/`master` 由 hook 拦，需 human 显式放行 `CLAUDE_ALLOW_PUSH_MAIN=1` 或 `CODEX_ALLOW_PUSH_MAIN=1`。其余外部副作用一律走 human gate，见 `.agent/human-gates.md` 与 `.agent/autonomous-window.md`。
 
 ## 能力是 repo-local 的
 
-项目相关的 agent / skill / command / hook 放在 `.claude/`，不装到 user 全局。行为契约放 `.agent/`，结构地图放 `ANATOMY.md`，门禁放 `scripts/`。
+项目相关的 agent / skill / command / hook canonical 源放在 `.claude/`，Codex adapters 放在 `.codex/` 与 `.agents/`，不装到 user 全局。行为契约放 `.agent/`，结构地图放 `ANATOMY.md`，门禁放 `scripts/`。
 
 ## 验证纪律
 
@@ -48,3 +50,7 @@
 - 模型/effort 路由：`.agent/model-routing-policy.md`
 - 工具/skill 接口：`.agent/tool-skill-interface.md`
 - human gates：`.agent/human-gates.md`
+
+<!-- template:end -->
+
+<!-- 项目自定义区（template:end 之后，sync 不碰）：下游在此追加本项目特定内容；template:begin/end 块内是模板拥有的内容，如需改动请走 template-feedback 上报，勿在此直接改块内。 -->

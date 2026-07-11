@@ -8,6 +8,38 @@ repo-local lifecycle hooks（可执行，以本机权限运行——保持小而
 | `pre_compact_memory_check.py` | `PreCompact` | 提醒落盘 `memory/current-status.md` | 仅提醒（exit 0） |
 | `subagent_report_index.py` | `SubagentStop` | 向 `agent-reports/index.md` 追加时间线 | 仅记录（exit 0） |
 | `zh_review_advisory.py` | `PostToolUse(Edit\|Write)` | 命中 `human/reviews/**`、`human/decisions/**`、`lab/docs/audits/**`、`DECISIONS.md` 时，用中日韩字符占比启发检查是否忘了用中文；不做翻译判断，只提醒派发 `zh-review-gate` | 仅提醒（exit 0） |
+| `context_threshold_notice.py` | `UserPromptSubmit` | 上下文 ≥65%/≥80% 时向本轮注入「派 checkpoint-writer + 考虑 compact」建议；每 session 每档只提醒一次 | 仅注入建议（exit 0） |
+| `context_continuity.py` | `SessionStart(compact\|clear)` | compact/clear 后把 `memory/current-status.md` 摘要回注新上下文，接续不断档 | 仅注入（exit 0） |
+| `context_usage.py` | —（库/CLI，非注册 hook） | 共用 helper：读 transcript `usage` 求精确上下文 token%，供 statusline 与上面阈值 hook 调用 | N/A |
+
+## 上下文调配（信号层，见 `plans/20260711-context-orchestration.zh.md`）
+
+`context_usage.py` / `context_threshold_notice.py` / `context_continuity.py` + `statusline.sh` 的
+`🧠 NN%` 段共同补齐「主动调配」链：statusline 让占用**可见**，UserPromptSubmit hook 在 65/80 档
+把建议**注入**，SessionStart hook 在压缩后**回注** status 保连续性。
+
+**硬边界**：这三者只发信号/注入文本，**不 block、不自动 `/compact`**——真正按下 compact 需宿主 CLI +
+主 agent 在任务边界判断（repo hook 无法可靠按 token 阈值自动压缩）。token% 精确来自 transcript
+`usage`（`input+cache_read+cache_creation`）。
+
+**窗口感知（默认就是动态的，无需手配）**：hook 对本会话窗口的感知**主要靠 statusline 动态驱动**——
+statusline 每次渲染都读 `.model.id`（含 `[1m]`），认出当前模型的窗口并写进
+`$TMPDIR/claude_ctx_window_<session_id>` 缓存；hook 据 session_id 读缓存。于是**选了 1M 模型 → 下一帧
+statusline 就把 1M 传给 hook；切回 200k 模型 → statusline（权威，绕过旧缓存）改写 200k**，全程跟随模型动态变化，
+不需要人工设任何东西。之所以只能靠 statusline：`[1m]` 标记**只**出现在 statusline 的 `.model.id`——hook 的
+stdin 没有 model，transcript 又只存 base id（不带 `[1m]`），故 statusline 是唯一能动态感知窗口的源。
+
+完整优先级链（前者短路后者）：`CLAUDE_CTX_WINDOW` 环境变量 > 本会话窗口缓存（statusline 动态写）>
+model id 推断 > 证据推断（观测上下文一旦超过 200k → snap 到 1M）> 默认 200k（安全方向：宁早提醒不漏）。
+- **`CLAUDE_CTX_WINDOW` 是兜底、不是常规路径**：只在 statusline 不渲染的表面（某些 headless/嵌入 UI）才需要，
+  设在 `.claude/settings.local.json` 的 `env` 块，值固定不随模型变——所以能动态感知时优先靠 statusline，别写死它。
+- 前提就一条：**statusline 要渲染**（交互式 session 默认持续渲染，本就是使用 code agent 时该有的仪表盘）。
+
+**运行表面（Claude + Codex 已对等）**：
+- Claude：`.claude/settings.json` 注册 `UserPromptSubmit` + `SessionStart(compact|clear)`。
+- Codex：`.codex/config.toml` 注册 `UserPromptSubmit` + `SessionStart(clear)` + `PostCompact`。Codex 把压缩
+  拆成独立 `PostCompact` 事件（其 SessionStart matcher 只含 startup|resume|clear），故 continuity 两处挂载；
+  `context_continuity.py` 内也认 `hook_event_name=="PostCompact"`。`PreCompact` 落盘提醒本就两表面对等。
 
 ## 协议
 

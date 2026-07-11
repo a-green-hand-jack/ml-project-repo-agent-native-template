@@ -14,7 +14,7 @@ ANATOMY.md   给 coding agent：组件、调用关系、持久状态、line-addr
 ## 优先拥有四件套的目录
 
 ```
-<repo>/   human/   .claude/   lab/   lab/code/   lab/code/src/
+<repo>/   human/   .claude/   .codex/   .agents/   lab/   lab/code/   lab/code/src/
 lab/infra/   lab/research/   lab/artifacts/   memory/   deliverables/   scripts/
 ```
 
@@ -25,7 +25,7 @@ lab/infra/   lab/research/   lab/artifacts/   memory/   deliverables/   scripts/
 除四件套外，repo 根有一份 `DESIGN.md`：模板设计地图与实现 rationale（架构、安全模型、能力清单、决策）。
 派生的真实 `ml-project-repo` 也应保留/更新它。规则：
 
-- 定位是**地图不是第二套 doctrine**：与 `.agent/` / `.claude/` / `scripts/` 冲突时以源文件为准。
+- 定位是**地图不是第二套 doctrine**：与 `.agent/` / `.claude/` / `.codex/` / `.agents/` / `scripts/` 冲突时以源文件为准。
 - 细粒度规则（具体 allow 条目、每条 doctrine）不在 `DESIGN.md` 复制，只指向源文件。
 - **能力清单（§10 的数量表）不靠人记**：`scripts/check-agent-harness.py` 校验 agents/skills/commands/hooks 的数量与实际一致，不符则告警（CI `--strict` 会红）。增删能力时同 commit 更新该表。
 - 维护职责归 `repo-doc-steward`：结构/能力改动时同步 `DESIGN.md`（尤其 §2 分层、§3 安全模型、§10 清单）。

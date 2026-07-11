@@ -6,8 +6,8 @@
 
 ```
 1. 直接 shell / grep / rg / glob   —— tier 0，最省 context
-2. repo-local skill (.claude/skills/) —— 反复出现的流程，按需加载
-3. subagent (.claude/agents/)      —— 需要隔离上下文 / 限制工具 / 并行
+2. repo-local skill (.claude/skills/ canonical；.agents/skills/ for Codex) —— 反复出现的流程，按需加载
+3. subagent (.claude/agents/ canonical；.codex/agents/ for Codex)      —— 需要隔离上下文 / 限制工具 / 并行
 4. MCP / connector / CLI           —— 外部系统访问
 ```
 
@@ -27,4 +27,5 @@
 
 ## 能力必须 repo-local + 有索引
 
-新能力先登记 contract / manifest，再写实现；没有索引的能力不算正式 surface。定义放 `.claude/`，验证进 `scripts/`。
+新能力先登记 contract / manifest，再写实现；没有索引的能力不算正式 surface。canonical 定义放 `.claude/`，
+Codex adapters 由 `scripts/sync-codex-adapters.py` 生成到 `.codex/` / `.agents/`，验证进 `scripts/`。

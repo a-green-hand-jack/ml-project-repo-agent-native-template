@@ -52,20 +52,31 @@ def _matches_chinese_by_default(rel_path: str) -> bool:
     return False
 
 
-def main() -> None:
-    raw = sys.stdin.read()
-    if not raw.strip():
-        sys.exit(0)
-    try:
-        event = json.loads(raw)
-    except json.JSONDecodeError:
-        sys.exit(0)  # 保守放行
+def _patch_paths(patch_text: str) -> list[str]:
+    paths: list[str] = []
+    for line in patch_text.splitlines():
+        for prefix in ("*** Add File: ", "*** Update File: ", "*** Move to: "):
+            if line.startswith(prefix):
+                paths.append(line[len(prefix) :].strip())
+                break
+    return paths
 
+
+def _candidate_paths(event: dict) -> list[str]:
     tool_input = event.get("tool_input", {}) or {}
-    path = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
-    if not path:
-        sys.exit(0)
+    paths: list[str] = []
+    for key in ("file_path", "notebook_path"):
+        value = tool_input.get(key)
+        if value:
+            paths.append(str(value))
+    if event.get("tool_name") == "apply_patch":
+        paths.extend(_patch_paths(tool_input.get("command", "") or ""))
+    return paths
 
+
+def _check_path(path: str) -> None:
+    if not path:
+        return
     try:
         abs_path = Path(path)
         if not abs_path.is_absolute():
@@ -73,19 +84,19 @@ def main() -> None:
         abs_path = abs_path.resolve()
         rel_path = str(abs_path.relative_to(REPO_ROOT))
     except (ValueError, OSError):
-        sys.exit(0)  # 不在仓库内 / 解析失败：不是本 hook 关心的路径
+        return  # 不在仓库内 / 解析失败：不是本 hook 关心的路径
 
     if not _matches_chinese_by_default(rel_path):
-        sys.exit(0)
+        return
 
     try:
         text = abs_path.read_text(encoding="utf-8", errors="replace")
     except OSError:
-        sys.exit(0)
+        return
 
     stripped = text.strip()
     if len(stripped) < MIN_LENGTH_TO_CHECK:
-        sys.exit(0)  # 太短，噪声大，不判断
+        return  # 太短，噪声大，不判断
 
     cjk_count = len(CJK_RE.findall(text))
     ratio = cjk_count / len(text) if text else 0.0
@@ -99,6 +110,19 @@ def main() -> None:
             "subagent 复核并按需翻译改写；若这个文件本来就有理由用非中文，可忽略本提醒。",
             file=sys.stderr,
         )
+
+
+def main() -> None:
+    raw = sys.stdin.read()
+    if not raw.strip():
+        sys.exit(0)
+    try:
+        event = json.loads(raw)
+    except json.JSONDecodeError:
+        sys.exit(0)  # 保守放行
+
+    for path in _candidate_paths(event):
+        _check_path(path)
 
     sys.exit(0)
 

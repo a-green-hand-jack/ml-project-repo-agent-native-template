@@ -26,3 +26,4 @@
 - Claude Code 读文件顺序：`CLAUDE.md`。
 - 大 bytes（checkpoint、run 输出、原始数据、wandb）**一律不进 Git**，Git 里只留 manifest / index / summary。
 - 任何治理相关改动后跑：`python scripts/validate-governance.py`。
+- 迁移已有 repo 的 smoke eval 在 `lab/evals/adoption/run-adoption-smoke.py`。

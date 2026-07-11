@@ -3,6 +3,8 @@ related_files:
   - human/ANATOMY.md
   - .agent/AGENTS.md
   - .claude/ANATOMY.md
+  - .codex/ANATOMY.md
+  - .agents/ANATOMY.md
   - lab/ANATOMY.md
   - memory/ANATOMY.md
   - deliverables/ANATOMY.md
@@ -14,6 +16,8 @@ maintenance: |
 ---
 
 # repo ANATOMY（root router）
+
+<!-- template:begin -->
 
 ## What this is
 
@@ -27,11 +31,13 @@ maintenance: |
 | 入口层 | `AGENTS.md` `CLAUDE.md` `PROJECT.md` `DESIGN.md` | agent/human 入口、项目描述、模板设计说明 | — |
 | 交互层 | `human/` | brief / review / decision / inbox | `human/ANATOMY.md` |
 | doctrine 层 | `.agent/` | 行为契约、边界、政策、协议 | `.agent/AGENTS.md` |
-| 能力层 | `.claude/` | subagents / skills / commands / hooks / settings | `.claude/ANATOMY.md` |
+| Claude 能力层 | `.claude/` | canonical subagents / skills / commands / hooks / settings | `.claude/ANATOMY.md` |
+| Codex 适配层 | `.codex/` `.agents/` | Codex config / custom agents / repo skills adapters | `.codex/ANATOMY.md` · `.agents/ANATOMY.md` |
 | 研究控制面 | `lab/` | code / infra / research / data / artifacts / runs / recipes | `lab/ANATOMY.md` |
 | 活状态层 | `memory/` | current-status / session-tree / practices | `memory/ANATOMY.md` |
 | 对外承诺层 | `deliverables/` | paper / slides / release | `deliverables/ANATOMY.md` |
 | 门禁层 | `scripts/` | harness / anatomy-drift / governance validators | `scripts/ANATOMY.md` |
+| 版本同步层 | `VERSION` `CHANGELOG.md` `template-manifest.toml` | 模板版本真源与上下游同步分类锚点（下游另持 `.template.toml`） | `.agent/template-versioning-policy.md` |
 
 ## 结构规则（详见 `.agent/anatomy-protocol.md`）
 
@@ -43,3 +49,7 @@ maintenance: |
 ## Notes
 
 - 大 bytes（`lab/data`、`lab/runs`、`lab/models`、checkpoints、wandb）不进 Git，repo 只留 index。
+
+<!-- template:end -->
+
+<!-- 项目自定义区（template:end 之后，sync 不碰）：下游在此追加本项目特定内容；template:begin/end 块内是模板拥有的内容，如需改动请走 template-feedback 上报，勿在此直接改块内。 -->
