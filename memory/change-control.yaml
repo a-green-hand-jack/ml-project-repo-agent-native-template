@@ -21,3 +21,10 @@ changes:
     anatomy_updated: true
     validator_passed: true
     human_approved: true
+  - id: chg-20260713-multi-agent-control-plane
+    date: 2026-07-13
+    kind: capability
+    summary: 多 agent 控制面（issue #14）：memory/agents+mailbox schema、agent-state/status/mailbox/check-agent-conflicts 四脚本、pre_tool_guard 冲突/写错-worktree 薄接线、spawn skill 并入 list/status 查询
+    anatomy_updated: true
+    validator_passed: true
+    human_approved: true

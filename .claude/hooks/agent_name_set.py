@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Agent self-naming setter —— agent 据 doctrine 选定名字后调用，做「机械」那部分：
 ① 写 worktree 根的 `.agent-identity`；② `paseo agent update <id> --name`（**默认开启**，清理
-垃圾 tab 名）；③ upsert `memory/agents-roster.md` 花名册一行。
+垃圾 tab 名）；③ upsert `memory/agents-roster.md` 花名册一行；④ 尽力初始化控制面状态文件
+`memory/agents/<name>.yaml`（经 `scripts/agent-state.py`，见 `.agent/multi-agent-control-plane.md`；
+roster 尾列 `state` 指向该文件——roster 管总览索引，yaml 管状态明细，不重复同一批字段）。
 
 命名 doctrine（`<persona>·<动作字>·<focus>`）见 `.agent/agent-identity.md`——**选名由 agent 做**
 （据真实任务），本脚本只负责落地。
@@ -37,9 +39,10 @@ ROSTER = REPO_ROOT / "memory" / "agents-roster.md"
 ROSTER_HEADER = (
     "# agents-roster —— 活 agent 花名册（运行时 · 项目层 · 不随 template sync）\n\n"
     "> 由 `.claude/hooks/agent_name_set.py` 维护；命名 doctrine 见 `.agent/agent-identity.md`。\n"
-    "> 每个 project 各自的活 agent，不继承、不同步。\n\n"
-    "| name | 做什么 | focus | branch/worktree | paseo-id | status | updated |\n"
-    "| --- | --- | --- | --- | --- | --- | --- |\n"
+    "> 每个 project 各自的活 agent，不继承、不同步。\n"
+    "> `state` 列指向 `memory/agents/<name>.yaml` 状态明细（`.agent/multi-agent-control-plane.md`）。\n\n"
+    "| name | 做什么 | focus | branch/worktree | paseo-id | status | updated | state |\n"
+    "| --- | --- | --- | --- | --- | --- | --- | --- |\n"
 )
 
 
@@ -106,9 +109,51 @@ def _cell(s: str) -> str:
     return s.replace("|", "\\|").replace("\n", " ").strip() or "-"
 
 
+def _state_helpers():
+    """尽力加载 scripts/agent-state.py（issue #14 控制面）；缺失/失败返回 None（不 block）。"""
+    script = REPO_ROOT / "scripts" / "agent-state.py"
+    if not script.is_file():
+        return None
+    try:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("agent_state", script)
+        if spec is None or spec.loader is None:
+            return None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:  # noqa: BLE001  控制面是增量层，任何失败不影响命名主流程
+        return None
+
+
+def _register_state(name: str, pid: str, worktree: str | None, branch: str | None) -> str:
+    """初始化/刷新 `memory/agents/<name>.yaml`（心跳+mailbox）。返回状态串（供日志）。"""
+    mod = _state_helpers()
+    if mod is None:
+        return "state-skip(no agent-state.py)"
+    try:
+        root = mod.control_plane_root(REPO_ROOT)
+        mod.register(root, name, paseo_id=pid or None, worktree=worktree, branch=branch)
+        return "state-registered"
+    except Exception:  # noqa: BLE001
+        return "state-failed"
+
+
+def _state_ref(name: str) -> str:
+    mod = _state_helpers()
+    if mod is None:
+        return "-"
+    try:
+        return f"memory/agents/{mod.sanitize_name(name)}.yaml"
+    except Exception:  # noqa: BLE001
+        return "-"
+
+
 def _upsert_roster(name: str, doing: str, focus: str, bw: str, pid: str) -> None:
     ts = time.strftime("%Y-%m-%d %H:%M")
-    row = f"| {_cell(name)} | {_cell(doing)} | {_cell(focus)} | {_cell(bw)} | {_cell(pid or '-')} | active | {ts} |\n"
+    row = (f"| {_cell(name)} | {_cell(doing)} | {_cell(focus)} | {_cell(bw)} | {_cell(pid or '-')} "
+           f"| active | {ts} | {_cell(_state_ref(name))} |\n")
     try:
         ROSTER.parent.mkdir(parents=True, exist_ok=True)
         text = ROSTER.read_text(encoding="utf-8") if ROSTER.is_file() else ROSTER_HEADER
@@ -145,10 +190,14 @@ def _upsert_roster(name: str, doing: str, focus: str, bw: str, pid: str) -> None
 
 
 def _register_child(name: str, pid: str, worktree: str) -> int:
-    """launcher 用：只把「已出生即命名」的子 agent 登记进 roster。不写自身文件、不 rename。"""
+    """launcher 用：把「已出生即命名」的子 agent 登记进 roster + 初始化控制面状态文件。
+    不写自身 `.agent-identity`、不 rename。worktree 参数是展示标签（`branch (wt)`），
+    子 agent 的实际 worktree 路径由它自己首次 register/heartbeat 时补。"""
     doing, focus = _split_name(name)
     _upsert_roster(name, doing, focus, worktree or "-", pid)
-    print(f"[agent-name] 已登记子 agent {name}（paseo-id={pid or '-'}；仅 roster）", file=sys.stderr)
+    state_status = _register_state(name, pid, None, None)
+    print(f"[agent-name] 已登记子 agent {name}（paseo-id={pid or '-'}；roster + {state_status}）",
+          file=sys.stderr)
     return 0
 
 
@@ -176,7 +225,7 @@ def main() -> int:
             return 0
         return _register_child(name, pid, args.worktree.strip())
 
-    # 自命名（本 agent）：① identity 文件 ② paseo rename（默认开启）③ roster
+    # 自命名（本 agent）：① identity 文件 ② paseo rename（默认开启）③ roster ④ 控制面状态文件
     try:
         IDENTITY_FILE.write_text(name + "\n", encoding="utf-8")
     except OSError:
@@ -185,7 +234,11 @@ def main() -> int:
     doing, focus = _split_name(name)
     pid = os.environ.get("PASEO_AGENT_ID", "").strip()
     _upsert_roster(name, doing, focus, _branch_worktree(), pid)
-    print(f"[agent-name] 已命名 {name}（{rename_status}；已写 .agent-identity + roster）", file=sys.stderr)
+    top = _git(["rev-parse", "--show-toplevel"])
+    branch = _git(["branch", "--show-current"])
+    state_status = _register_state(name, pid, top or None, branch or None)
+    print(f"[agent-name] 已命名 {name}（{rename_status}；已写 .agent-identity + roster + {state_status}）",
+          file=sys.stderr)
     return 0
 
 

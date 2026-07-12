@@ -15,6 +15,12 @@
 协议：Claude Code / Codex 通过 stdin 传 JSON（tool_name / tool_input）；exit 2 = 阻止，
 exit 0 = 放行。解析失败保守放行。无第三方依赖。push 到受保护分支需
 `CLAUDE_ALLOW_PUSH_MAIN=1` 或 `CODEX_ALLOW_PUSH_MAIN=1`（见 `.agent/autonomous-window.md`）。
+
+另挂多 agent 冲突/写错-worktree 机械拦截（issue #14，安全地板之外的协作完整性层）：对
+Edit/Write/NotebookEdit/apply_patch 的写入，调 scripts/check-agent-conflicts.py 的
+pretooluse_reason() 拦「写入其他活跃 agent 声明的 owned path / 自己声明的 forbidden path /
+declared worktree 与实际不符」这类可判定事实（见 .agent/multi-agent-control-plane.md）；
+判定层异常保守放行，human 显式绕过 AGENT_CONFLICT_SKIP=1。
 """
 import json
 import os
@@ -40,6 +46,11 @@ PROTECTED_FILES = (".env",)
 # 受保护分支：push 需 human 明确放行。
 PROTECTED_BRANCHES = {"main", "master"}
 PUSH_ESCAPE_ENVS = ("CLAUDE_ALLOW_PUSH_MAIN", "CODEX_ALLOW_PUSH_MAIN")
+
+# 多 agent 冲突/写错-worktree 机械拦截（issue #14）：判定本体在
+# scripts/check-agent-conflicts.py（runtime-neutral），这里只做薄接线 + 廉价预过滤。
+# human 显式绕过：AGENT_CONFLICT_SKIP=1（判定层内识别）。
+AGENT_CONFLICT_SCRIPT = REPO_ROOT / "scripts" / "check-agent-conflicts.py"
 
 # rm -r 允许递归删除的安全目标（缓存/构建/临时，可再生）。
 SAFE_RM_BASENAMES = {
@@ -269,6 +280,31 @@ def _check_bash(raw_cmd: str) -> None:
                 )
 
 
+def _agent_conflict_reason(tool: str, tool_input: dict) -> str | None:
+    """多 agent ownership/worktree 完整性拦截（见 plans/20260712-multi-agent-control-plane.zh.md
+    已决策 5/6）。只拦「写入其他活跃 agent 的 owned path / 自己的 forbidden path / 写错
+    worktree」这类可判定事实；判定层任何异常保守放行——绝不能反噬上面的安全地板逻辑。"""
+    try:
+        if not AGENT_CONFLICT_SCRIPT.is_file():
+            return None
+        # 廉价预过滤：本 checkout 没有 agent 状态文件、也不是 linked worktree（.git 是文件，
+        # 状态可能锚定在主 checkout）时，不加载判定模块。
+        agents_dir = REPO_ROOT / "memory" / "agents"
+        has_local_state = agents_dir.is_dir() and any(agents_dir.glob("*.yaml"))
+        if not has_local_state and not (REPO_ROOT / ".git").is_file():
+            return None
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("check_agent_conflicts", AGENT_CONFLICT_SCRIPT)
+        if spec is None or spec.loader is None:
+            return None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod.pretooluse_reason(tool, tool_input, REPO_ROOT)
+    except Exception:  # noqa: BLE001  判定层失败保守放行
+        return None
+
+
 def main() -> None:
     raw = sys.stdin.read()
     if not raw.strip():
@@ -289,6 +325,9 @@ def main() -> None:
             _block(
                 f"受保护路径不可写：{path}。bytes/私有/产物只留 index，删改走 human gate。"
             )
+        reason = _agent_conflict_reason(tool, tool_input)
+        if reason:
+            _block(reason)
     elif tool == "apply_patch":
         patch_text = tool_input.get("command", "") or ""
         for path in _patch_paths(patch_text):
@@ -296,6 +335,9 @@ def main() -> None:
                 _block(
                     f"受保护路径不可写：{path}。bytes/私有/产物只留 index，删改走 human gate。"
                 )
+        reason = _agent_conflict_reason(tool, tool_input)
+        if reason:
+            _block(reason)
 
     sys.exit(0)
 

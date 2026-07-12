@@ -25,6 +25,8 @@ doctrine 是分文件的，每个文件一个关注点，短而稳定、可 revi
     多 case 登记账定位。
 17. `template-versioning-policy.md` — 模板版本(semver)判级契约 + 上下游反馈同步四站闭环
     （下游上报 issue → 上游发版 → sync 追平）。
+18. `multi-agent-control-plane.md` — 多 agent 状态/mailbox/handoff/冲突检测控制面：
+    `memory/agents/<name>.yaml` + `memory/mailbox/` schema、heartbeat TTL、写入前拦截。
 
 ## 模板与清单
 

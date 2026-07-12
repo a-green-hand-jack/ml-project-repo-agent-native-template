@@ -10,6 +10,13 @@
 Claude Code 当前窗口与周额度，并把 `subagent-routing` / `subagent-router-agent` 升级为
 配额感知的 provider/model 路由；验证已通过。
 
+本分支（feat/14-multi-agent-control-plane）：多 agent 控制面第一版已实现——
+`.agent/multi-agent-control-plane.md` doctrine、`scripts/agent-{state,status,mailbox}.py` +
+`check-agent-conflicts.py` 四脚本（自带 --self-test）、`pre_tool_guard.py` 冲突/写错-worktree
+薄接线、spawn skill 并入 list/status 查询、`agent_name_set.py` 挂接控制面状态。
+详见 `memory/branches/14-multi-agent-control-plane.md`（含遗留：真实 Paseo-tab / Codex
+smoke 留给监控员在非沙箱环境跑）。
+
 ## Constraints
 
 - 遵守 `AGENTS.md` / `.agent/AGENTS.md` / `.agent/action-boundary.md`。

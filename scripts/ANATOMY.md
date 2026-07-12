@@ -9,6 +9,10 @@ related_files:
   - sync-codex-adapters.py
   - bump-template-version.py
   - template-sync.py
+  - agent-state.py
+  - agent-status.py
+  - agent-mailbox.py
+  - check-agent-conflicts.py
   - ../template-manifest.toml
   - ../VERSION
 maintenance: |
@@ -36,6 +40,10 @@ Codex adapter 同步脚本把 `.claude/` canonical 能力生成到 `.codex/` 与
 | `sync-codex-adapters.py` | 从 `.claude/agents` / `skills` / `commands` 生成并校验 Codex adapters | `.agent/tool-skill-interface.md` |
 | `bump-template-version.py` | 按 agent 判定的 level 递增 `VERSION`、更 `CHANGELOG.md`、打本地 git tag | `.agent/template-versioning-policy.md` |
 | `template-sync.py` | 下游按 `template-manifest.toml` 追平上游框架层：覆盖/保护/scaffold/merge + 重建适配 + 验收 | `.agent/template-versioning-policy.md` · `template-manifest.toml` |
+| `agent-state.py` | 多 agent 控制面状态文件（`memory/agents/<name>.yaml`）写侧 + 格式唯一 owner（解析/staleness/root 锚定 helpers） | `.agent/multi-agent-control-plane.md` |
+| `agent-status.py` | 只读 list/status：roster + 状态 yaml + 可选 `paseo ls` presence，30min TTL 派生 stale | `.agent/multi-agent-control-plane.md` |
+| `agent-mailbox.py` | agent 间消息/handoff 落盘（inbox/outbox 对、decision/handoff 强制 ref、ack 转移 ownership） | `.agent/multi-agent-control-plane.md` |
+| `check-agent-conflicts.py` | ownership 重叠扫描 + 写错-worktree 检测 + `pretooluse_reason()` 供 hook 写入前拦截 | `.agent/multi-agent-control-plane.md` |
 
 ## Connections
 
@@ -50,6 +58,10 @@ Outbound:
 - `validate-governance.py` 以 subprocess 调用另两个脚本（用 `sys.executable`）。
 - `check-adoption-integrity.py` 通过 `importlib` 加载 `adopt-existing-repo.py` 的
   `integrity_result()`，避免两份 hash 逻辑漂移。
+- `agent-status.py` / `agent-mailbox.py` / `check-agent-conflicts.py` 通过 `importlib` 加载
+  `agent-state.py` 的解析/staleness/root helpers（同一先例）；`.claude/hooks/pre_tool_guard.py`
+  与 `agent_name_set.py` 反向以 `importlib` 薄接线加载本目录的 `check-agent-conflicts.py` /
+  `agent-state.py`（冲突拦截与状态初始化）。
 
 ## Notes
 

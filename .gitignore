@@ -72,6 +72,13 @@ build/
 .agent-identity
 memory/agents-roster.md
 
+# 多 agent 控制面运行时状态（状态明细 + mailbox 内容，同 roster 先例——
+# 见 .agent/multi-agent-control-plane.md；schema/脚本在框架层，内容不入 git）
+memory/agents/*
+!memory/agents/README.md
+memory/mailbox/*
+!memory/mailbox/README.md
+
 # 编辑器 / OS
 .DS_Store
 .idea/

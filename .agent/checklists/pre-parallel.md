@@ -14,3 +14,11 @@
 适合并行：A 读论文 / B 读 repo；A 实现 dataset / B 写测试；边界清楚的 backend/frontend；A 跑 baseline / B 整理 table；A 实现 / B 在 fresh context review。
 
 真正能并行的前提：branch base、owned/forbidden paths、issue/PR target、anatomy impact、evidence/release-gate impact、validator command、merge order 都提前分清。
+
+并行开工前把边界变成机器可强制（见 `.agent/multi-agent-control-plane.md`）：
+
+```
+- 每个 agent：python scripts/agent-state.py register "<name>" --task "..." --owned <paths> --forbidden <paths>
+- 派发方：python scripts/check-agent-conflicts.py scan   # owned_paths 无重叠才开工
+- 之后写入其他活跃 agent 的 owned path 会被 pre_tool_guard 写入前拦截（AGENT_CONFLICT_SKIP=1 显式绕过）
+```
