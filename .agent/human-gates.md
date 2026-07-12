@@ -19,6 +19,25 @@
 > 或 `CODEX_ALLOW_PUSH_MAIN=1`（单次），见 `.agent/autonomous-window.md`。开 PR / merge /
 > release / 建远端 repo 仍是完整门禁。
 
+## launch 门禁（launch registry）
+
+「启动/kill/restart 训练或作业」这一行的机器层由 **launch registry** 承载：
+`lab/infra/launch/registry.yaml` 的 `gated_prefixes` 是「哪条命令算 launch/kill/restart」
+的单一真源，三层门禁同步消费：
+
+- 地板：共享 `pre_tool_guard.py` hook（经 `lab/infra/launch/launch_gate.py`）拦截命中前缀
+  的命令；human 单次放行用 `CLAUDE_ALLOW_LAUNCH=1` / `CODEX_ALLOW_LAUNCH=1`（与 push-main
+  同构，即使 bypass/自主窗口下仍生效）。
+- permission 层：`.claude/settings.json` 的 `ask` 与 `.codex/rules/default.rules` 的
+  `prompt`，与 registry 手工双写、同 commit 对齐。
+- 新增任何 launch 入口（含薄 wrapper）必须同 commit 登记进 registry 并补两侧规则，
+  否则等于绕过门禁。
+
+resume/recovery 的批准是**一次性、针对具体提案**的：human 在 ledger 对应 alert 条目里落
+`approved_by` / `approved_at` / `approved_action`（与 `proposal.command` 逐字一致）后，
+`experiment-orchestrator` 才可经 `python lab/infra/launch/expctl.py apply-recovery` 执行
+该条动作（当前仅限 fake/local job）；批准不自动延伸到其他提案或下一个上下文。
+
 ## 门禁形态
 
 - 机器层：`.claude/settings.json` 与 `.codex/rules/default.rules` 里对应 `ask` / `deny` / `prompt`；

@@ -56,6 +56,24 @@ prefix_rule(
 )
 
 prefix_rule(
+    pattern = [["scancel", "srun"]],
+    decision = "prompt",
+    justification = "Slurm job control/launch side effects need human approval (launch registry, issue #16).",
+)
+
+prefix_rule(
+    pattern = [["python", "python3"], "lab/infra/launch/fake_job.py", ["launch", "kill", "restart"]],
+    decision = "prompt",
+    justification = "Registered launch-registry entry (lab/infra/launch/registry.yaml): launch/kill/restart are human gates even for the local fake backend.",
+)
+
+prefix_rule(
+    pattern = [["python", "python3"], "lab/infra/launch/expctl.py", "apply-recovery"],
+    decision = "prompt",
+    justification = "Registered launch-registry entry: executes a human-approved recovery action; approval record is verified but the invocation itself stays gated.",
+)
+
+prefix_rule(
     pattern = ["gh", "pr", ["create", "merge"]],
     decision = "prompt",
     justification = "PR creation/merge is an external collaboration side effect.",

@@ -19,7 +19,7 @@ maintenance: |
 | --- | --- |
 | `claims.yaml` | 能力级 / 论文级主张 |
 | `evidence.yaml` | 分层证据：`log < metric < table < figure < paper claim` |
-| `experiment-ledger.yaml` | 实验台账 |
+| `experiment-ledger.yaml` | 实验台账（状态机 `planned→approved→running→done|failed→superseded` + `status_history` + `alerts`，由 `scripts/validate-experiment-state.py` 机器强制；字段约定见文件头注释） |
 | `regression-matrix.yaml` | 关键指标回归矩阵 |
 | `release-gates.yaml` | 发布/交付闸门 |
 
@@ -38,6 +38,9 @@ maintenance: |
 ## Notes
 
 - overclaim = claim 强度超出其 evidence，属违规；`validate-governance.py` 会拦截（引用可解析 + claim 强度 ≤ 最强证据）。
+- ledger 的非法状态转换（跳过 approved、done 回转 running）、approved 必填字段缺失、
+  done 闭环缺口（无 run summary / artifact index 条目）、alert 批准记录不完整或与提案
+  不匹配，均由 `validate-experiment-state.py`（validate-governance 拉起）拦截。
 - `release-gates.yaml` / `regression-matrix.yaml` 枚举字段与 claim 引用一致性，已由
   `validate-governance.py` 强制校验（占位默认状态天然通过，仅在 gate/regression 离开占位
   状态后才校验 claim 引用是否真实存在）。

@@ -347,6 +347,7 @@ def main() -> int:
     strict = "--strict" in sys.argv
     run_subcheck("check-agent-harness.py", strict)
     run_subcheck("check-anatomy-drift.py", strict)
+    run_subcheck("validate-experiment-state.py", strict)
 
     print("\n=== governance ===", flush=True)
     check_gitignore()

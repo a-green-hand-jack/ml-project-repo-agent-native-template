@@ -5,6 +5,9 @@ argument-hint: <run-id 或 log 路径>
 
 用 `experiment-monitor` subagent 监控 $ARGUMENTS。
 
+首选一次性快照 CLI（bounded，检查完即退出，不常驻）：
+`python lab/infra/launch/expctl.py watch --run-id <id> --workdir <dir>`
+
 只读：
 - log 最后 200 行
 - run dir 的 status 文件

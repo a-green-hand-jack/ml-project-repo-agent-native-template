@@ -22,7 +22,7 @@ Children:
 | `permissions/` | 记录 `.claude/settings.json` 与 `.codex/rules` 权限策略的 owner + 理由 + 验证 | README only |
 | `paths/` | 路径约定 | README only |
 | `storage/` | 存储后端与配额 | README only |
-| `launch/` | 可复现启动命令（人类闸门） | README only |
+| `launch/` | 可复现启动命令（人类闸门）+ 实验控制面：`registry.yaml`（adapter 描述 + launch 门禁前缀单一真源）、`expctl.py`（detect/plan/watch/apply-recovery）、`fake_job.py`（local-fake 后端）、`launch_gate.py`（供共享 hook 消费的门禁判定） | README + 脚本 |
 | `probes/` | 环境探针 | README only |
 | `private/` | 私密/密钥，永不进 Git | README only |
 
@@ -31,6 +31,9 @@ Children:
 - `../code/src/` 通过 `paths/`、`storage/` 解析运行时位置，不硬编码。
 - `permissions/` 解释根 `.claude/settings.json` / `.codex/rules` 的每条高危能力为何 deny/ask/allow/prompt。
 - `launch/` 的命令由 human 执行；产出流向 `../runs/`、`../models/`（bytes gitignore）。
+- `launch/registry.yaml` 的 `gated_prefixes` 被 `.claude/hooks/pre_tool_guard.py`（经
+  `launch/launch_gate.py`）、`.claude/settings.json` ask、`.codex/rules/default.rules` prompt
+  三层消费；`launch/expctl.py watch` 的 alert 并入 `../research/experiment-ledger.yaml`。
 
 ## State
 

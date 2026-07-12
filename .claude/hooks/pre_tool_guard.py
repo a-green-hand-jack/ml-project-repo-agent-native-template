@@ -207,6 +207,28 @@ def _patch_paths(patch_text: str) -> list[str]:
     return paths
 
 
+def _launch_gate_reason(raw_cmd: str) -> str | None:
+    """launch registry 门禁（薄接线）：判定逻辑与单一真源在 lab/infra/launch/。
+
+    launch/kill/restart 类命令（lab/infra/launch/registry.yaml 的 gated_prefixes）是
+    human gate；`CLAUDE_ALLOW_LAUNCH=1` / `CODEX_ALLOW_LAUNCH=1` 为单次放行（与
+    push-main 地板同构）。判定脚本缺失或异常时保守放行——本地板其余红线不受影响。
+    """
+    gate = REPO_ROOT / "lab" / "infra" / "launch" / "launch_gate.py"
+    if not gate.is_file():
+        return None
+    try:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("launch_gate", gate)
+        assert spec and spec.loader
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod.gate_reason(raw_cmd)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _block(reason: str) -> None:
     out = {
         "hookSpecificOutput": {
@@ -228,6 +250,11 @@ def _check_bash(raw_cmd: str) -> None:
     # 兜底：嵌套（find -exec 等）删受保护 bytes。去引号避免误伤字符串字面量。
     if DESTRUCTIVE_PROTECTED.search(_dequote(raw_cmd)):
         _block("破坏性命令触碰受保护数据/产物路径（含 find -exec 等嵌套）。删/移 bytes 走 human gate。")
+
+    # launch/kill/restart 类命令的 human gate 地板（registry 单一真源，薄接线）。
+    launch_reason = _launch_gate_reason(raw_cmd)
+    if launch_reason:
+        _block(launch_reason)
 
     session_escape = any(
         os.environ.get(env, "").strip().lower() in ("1", "true", "yes")
