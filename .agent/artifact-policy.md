@@ -17,11 +17,37 @@ deliverables/index.md              对外交付物
 
 ## 每个资产至少回答
 
-- 在哪里（storage path / URI）？怎么看？
-- 对应哪个 commit / config / run id？
+- 在哪里（`location`：路径 / URI）？怎么看（`how_to_inspect`）？
+- 对应哪个 commit / config / run id（可复现三元组）？
 - 支持哪个 claim / table / figure？
 - 状态：`active` / `superseded` / `archived` / `unknown`？
+- checksum 是什么？无法校验时为什么（见下）？
 - 缺哪些 metadata？何时该归档或删索引？
+
+## provenance 链（机器可检查）
+
+`run → artifact → evidence → claim → deliverable` 由 `scripts/check-provenance-chain.py`
+校验（`validate-governance.py` 拉起；三态输出 pass/fail/unknown，unknown 不算 pass）：
+
+- 各 index / ledger YAML 带 `schema_version`（整数，从 1 起，逐 index 独立计数）。
+- index 条目离开占位状态后，`commit`/`config`/`run_id` 非占位；`run_id` 指向
+  `experiment-ledger.yaml` 中已闭环 run（`status: done` + `run_summary` 已填）。
+- evidence 的 `metric_source`/`checkpoint`/`data_split` 指向 index 条目 id 时，
+  条目必须存在且未 `archived`。
+- deliverables 正文的 claim marker：`<!-- claim: id=<claim-id> evidence=<ev-id>,... -->`
+  （只覆盖 Markdown；非 Markdown 交付物走 `human/reviews/results/` 人工 review 兜底）。
+
+## checksum 政策
+
+- 算法统一 **sha256**（`checksum_algorithm` 唯一取值），进程内 `hashlib` 计算，不 shell-out。
+- 本地 bytes 可达：validator 真算比对；外部 URI / 集群路径：记录完备（checksum 或
+  manifest）即通过，不要求 bytes 进 Git。
+- 无法校验必须同时填 `checksum_unavailable_reason`（固定枚举：`external-uri-no-checksum`
+  / `pending-upload` / `legacy-untracked` / `oversized-defer-hash`）与
+  `checksum_unavailable_justification`（非空、非占位的人工具体理由）。枚举外的值或
+  TBD 类占位理由判 **fail**，不是 unknown——这两道关卡防止该字段沦为校验逃逸口。
+- 多文件产物可用 `manifest: lab/data/manifests/<id>.yaml`（`files:` 每条 `path`/`uri` +
+  `sha256` 或 reason+justification），checksum 落 manifest，不必逐条写进 index。
 
 ## 维护方式
 

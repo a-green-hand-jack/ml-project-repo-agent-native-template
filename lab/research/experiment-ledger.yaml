@@ -3,6 +3,9 @@
 #
 # status: planned | running | done | failed | superseded
 # promote: no | unclear | yes  （是否应升级为 evidence/paper claim；yes 走 human gate）
+# provenance：只有 status=done 且 run_summary 已填的「已闭环 run」才允许被
+# evidence / artifact index 引用为来源（scripts/check-provenance-chain.py 校验）。
+schema_version: 1
 
 experiments:
   - id: run-000

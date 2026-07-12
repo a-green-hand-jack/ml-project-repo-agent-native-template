@@ -5,6 +5,9 @@
 # status: proposed | partial | supported | refuted | retired
 # evidence: 指向 evidence.yaml 的 evidence id 列表（可为空表示尚无证据）
 # verified_by_fresh_reviewer: paper-grade claim 必须为 true
+# provenance：deliverables 正文用 <!-- claim: id=... --> marker 引用这里的 id，
+# 由 scripts/check-provenance-chain.py 校验（见 .agent/artifact-policy.md）。
+schema_version: 1
 
 claims:
   - id: claim-000

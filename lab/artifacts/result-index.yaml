@@ -1,16 +1,33 @@
 # 结果索引。让 future session 快速知道「哪些结果还活着」。由 artifact-librarian 维护。
 # 只存 index，不存 bytes。status: active | superseded | archived | unknown
+#
+# provenance 字段（见 .agent/artifact-policy.md，校验：scripts/check-provenance-chain.py）：
+# - location：统一的路径/URI 字段（bytes 不进 Git；repo 外路径与外部 URI 允许）。
+# - commit / config / run_id：可复现三元组，离开占位状态后必填；run_id 必须指向
+#   experiment-ledger.yaml 中 status=done 且有 run_summary 的已闭环 run。
+# - checksum + checksum_algorithm（唯一取值 sha256）：本地 bytes 可达时会真算比对。
+#   无法校验时改填 checksum_unavailable_reason（固定枚举：external-uri-no-checksum |
+#   pending-upload | legacy-untracked | oversized-defer-hash）+
+#   checksum_unavailable_justification（非空、非占位的人工理由，两者都要）。
+# - 多文件产物可改填 manifest: lab/data/manifests/<id>.yaml（每文件一条 sha256）。
+schema_version: 1
 
 results:
   - id: result-000
     summary: "<这个结果是什么>"
-    storage_path: "<路径或 URI，bytes 不进 Git>"
+    location: "<路径或 URI，bytes 不进 Git>"
     how_to_inspect: "<怎么看，例如打开命令>"
     commit: "<git sha>"
     config: "<config 路径>"
     run_id: "<run-id>"
     supports: "<claim/table/figure id>"
     status: unknown
+    checksum: "<sha256 hex；本地可算时必填>"
+    checksum_algorithm: sha256
+    # 无法校验时删掉上两行，改填（两者都要）：
+    # checksum_unavailable_reason: external-uri-no-checksum
+    # checksum_unavailable_justification: "<具体情境说明，禁 TBD/N-A 类占位>"
+    # manifest: "lab/data/manifests/<id>.yaml"   # 多文件产物可选
     missing_metadata: []
     archive_recommendation: "<何时可归档>"
     updated: "YYYY-MM-DD"

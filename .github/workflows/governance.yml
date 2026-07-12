@@ -20,6 +20,8 @@ jobs:
         run: pip install pyyaml
       - name: Validate governance (strict)
         run: python scripts/validate-governance.py --strict
+      - name: Provenance chain self-test (embedded fixtures)
+        run: python scripts/check-provenance-chain.py --self-test
       - name: Same-commit rule (structure <-> anatomy)
         run: |
           BASE=""
