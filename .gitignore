@@ -67,6 +67,9 @@ build/
 # 本地下载的参考文档（doctrine 快照，可选保留）
 # .reference-docs/
 
+# agent 运行时身份（每个活 agent 的名字值，非模板内容——见 .agent/agent-identity.md）
+.agent-identity
+
 # 编辑器 / OS
 .DS_Store
 .idea/
