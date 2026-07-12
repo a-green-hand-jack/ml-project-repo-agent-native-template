@@ -32,6 +32,12 @@ if git -C "$cur_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   [ -n "$top" ] && worktree="$(basename "$top")"
 fi
 
+# agent 身份（🤖 <name>）：多 agent 并行时一眼分清每个 tab 在做什么。
+# 委托 agent_identity.py 解析（AGENT_NAME env / .agent-identity 文件）。无名则空串降级。
+idseg=""
+idhelper="$(dirname "$0")/hooks/agent_identity.py"
+[ -f "$idhelper" ] && idseg="$(python3 "$idhelper" --statusline 2>/dev/null)"
+
 # context 占用表（🧠 NN%，≥65% 黄/≥80% 红）：委托共用 helper 读 transcript usage
 # 求精确 token%。无 transcript / 无 python / helper 失败 → 空串降级，绝不阻断。
 ctx=""
@@ -43,6 +49,7 @@ fi
 
 # --- 拼装：只展示拿到的字段 ---
 parts=()
+[ -n "$idseg" ]    && parts+=("$idseg")   # agent 名放最左，最易一眼扫到
 [ -n "$model" ]    && parts+=("$model")
 [ -n "$dir_name" ] && parts+=("📁 $dir_name")
 [ -n "$branch" ]   && parts+=("⎇ $branch")
