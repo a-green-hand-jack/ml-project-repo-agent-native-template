@@ -48,7 +48,8 @@ repo 里已经有好几套相邻但不统一的"状态/审批"机制，设计新
 本 issue 原文点名"不同 runtime 或后续 agent 误读阶段"，即 Claude Code 与 Codex 双 runtime 场景。设计时按以下证据处理：
 
 - **状态锚点走纯文本、runtime-neutral。** plan doc 正文里一行 `Status: ...` 是纯 Markdown，Claude 与 Codex 用完全相同的方式（读文件）解析，不依赖任何 runtime 专属的结构化注入。这是刻意选择：任何"靠 hook 往上下文注入当前状态"的方案都要在两侧各配一份，adapter 生成有已知损耗，反而制造分歧。**强制点（validator）是 `python scripts/...`，本身 runtime-neutral**——这一点应写进设计约束，作为不选"阻断类 hook"的额外理由（见非目标末条）。
-- **Codex 确有 SessionStart / UserPromptSubmit 等价物。** 证据：`.codex/config.toml` 已挂 `SessionStart(startup|resume|clear)` 与 `UserPromptSubmit`，其中 `context_continuity.py` 在 `SessionStart(clear)` 与 `PostCompact` 恢复状态连续性。所以"fresh session 感知当前 plan 状态"的接线在两侧都有挂点——**但这些 hook 实际会不会把「当前/superseded plan」surface 出来，取决于 `context_continuity.py` 读哪些文件**，本轮尚未核实（见未解决问题 10）。倾向：状态感知路径应收敛到已被两侧 hook 共享的 runtime-neutral 文件（`memory/current-status.md` 或新的 `plans/ANATOMY.md` 当前指针），而不是新增 runtime 专属注入。
+- **Codex 的 hook 事件存在，但当前接线不覆盖真正的 fresh startup。** 本次 Codex（gpt-5.6-sol, medium）一手读配置并实跑 hook：`.codex/config.toml:53-59` 挂了 `UserPromptSubmit`，`:61-68` 只挂 `SessionStart(clear)`，`:70-77` 另挂 `PostCompact`；并没有 `SessionStart(startup|resume)`。`context_continuity.py:23-25` 唯一读取 `memory/current-status.md`，`:37-42` 只接受 `source ∈ {compact, clear}` 或 `PostCompact`，不会读 `plans/`、`plans/ANATOMY.md`，也不会从 plan doc 提取 `Status`。定向探针进一步确认：`source=startup` 输出 0 bytes，`source=clear` 与 `PostCompact` 会回注 `memory/current-status.md`。因此现状只能保证 **clear/compact 后**的状态恢复，不能声称 fresh session 自动感知当前 plan；而且当前 `memory/current-status.md` 没有本 issue plan 的指针/状态，即使 clear/compact 触发也 surface 不出来。实现应把当前 plan 指针写入 `memory/current-status.md`（由现有共享 hook 回注），或另行明确扩展 startup/读取面；`plans/ANATOMY.md` 仅作为 schema/router 时不会被现有 hook自动读取。
+- **本次会话对 trust / 自动触发的证据边界。** 当前确为真实 Codex `codex exec` 会话（可见 `CODEX_THREAD_ID`、`CODEX_CI=1`，且项目级 AGENTS/skills 已进入会话），但没有可读的“project hook trust 已批准”状态字段，也没有 hook 执行日志；`UserPromptSubmit` 在低占用时本来就静默，故“未看到提示”既不能证明未触发，也不能单独证明已触发。上述结论依赖已加载的项目配置源码与对同一 hook 的定向实跑，不把 trust 状态或本次 startup 自动触发硬写成已证实。
 - **skill / command 是 canonical-in-`.claude/`、sync 到 Codex。** `interactive-plan-doc`、`worktree-pr-flow` 的 canonical 源在 `.claude/skills/`，Codex 侧消费的是 `sync-codex-adapters.py` 生成的 `.agents/skills/<name>/SKILL.md`（见 `scripts/sync-codex-adapters.py:106-115`）。**只要本 issue 改这两个 skill，就必须重跑 sync 并把 `--check` 纳入验证**，否则 Codex 侧拿到的是过期步骤——这是初稿遗漏的一步（已补进任务树与验证收口）。
 - **权限面是双份的。** Claude 走 `.claude/settings.json`，Codex 走 `.codex/config.toml` + `.codex/rules/default.rules`。若本 issue 需要把新 validator 脚本注册进 allowlist 或新增 hook，必须同时更新两侧，不能只改 Claude 侧（本轮默认不新增 hook，见非目标）。
 
@@ -110,7 +111,7 @@ repo 里已经有好几套相邻但不统一的"状态/审批"机制，设计新
   - [ ] 同 topic 出新版 plan 时：旧 plan 顶部标 `superseded` 并指向新文件（不删除、不移动，保留历史）
   - [ ] 改动上述两个 skill 后重跑 `python scripts/sync-codex-adapters.py`，同 commit 更新 `.agents/skills/**` 生成产物
 - [ ] 双 runtime 状态感知接线
-  - [ ] 确认 fresh session（Claude 与 Codex 各自）从哪个 runtime-neutral 文件读到"当前 plan / 已 superseded"——核实 `context_continuity.py` 是否 surface 该信息（见未解决问题 10），必要时把 `plans/` 当前指针接入 `memory/current-status.md` 或 `plans/ANATOMY.md`
+  - [ ] 把 fresh session 与 compact/clear 恢复拆开验收：已确认现有 `context_continuity.py` 只在 clear/compact 后回注 `memory/current-status.md`，且不读 plan；实现时把“当前 plan / 已 superseded”指针接入 `memory/current-status.md`，并另行决定是否扩展 Codex `SessionStart(startup|resume)`（见未解决问题 10）
   - [ ] 明确状态锚点格式对两 runtime 完全等价、不依赖 runtime 专属注入（写进 `plans/ANATOMY.md`）
 - [ ] 结构文档
   - [ ] 新建 `plans/ANATOMY.md`（状态枚举、必填字段、与 change-control/decisions/branch-status 的连接关系）
@@ -131,7 +132,7 @@ repo 里已经有好几套相邻但不统一的"状态/审批"机制，设计新
   - [ ] `python scripts/check-anatomy-drift.py`
   - [ ] `python scripts/sync-codex-adapters.py --check`（若改了 skill / 新增脚本，确认 Codex adapter 不 stale）
   - [ ] 若改了两侧权限面，`python scripts/check-agent-harness.py`（确认 Claude/Codex 权限/hook 对齐无漂移）
-  - [ ] 双 runtime 冒烟（若采纳未解决问题 11 的 smoke 选项）：human 在 Codex 侧起一个 fresh session，确认它能读到当前 plan 的 `Status` 且遵守同一 draft/approved/superseded 语义
+  - [ ] 双 runtime 冒烟：至少分别覆盖 fresh startup 与 compact/clear 恢复；确认两者读到同一当前 plan 指针与 `Status`，且遵守同一 draft/approved/superseded 语义（现状 Codex startup 探针已证明不会由 continuity hook 回注，不能用 clear/compact 冒烟替代）
 
 ## Human 批注区
 
@@ -157,22 +158,23 @@ repo 里已经有好几套相邻但不统一的"状态/审批"机制，设计新
 7. **fixtures 存放路径**：repo 目前没有 `tests/`/pytest 先例，现有 validator 脚本走"直接对 repo 本身 dogfood + 手工构造反例跑一次"的验证方式，没有外部 fixture 文件目录。新建 `scripts/fixtures/plan-lifecycle/` 放人造 plan doc 样本？还是像现有脚本一样把测试用例内联在校验脚本自身（docstring/self-test），不建外部目录？
 8. **存量迁移**：现有 `plans/*.zh.md`（如 `20260711-context-orchestration.zh.md`、adopt-existing-repo 的 plan）是否要回填 Status 锚点？如果要，回填成什么状态（多数已实现完成，应标 `verified` 还是 `implementing`）？这算不算触发 anatomy same-commit 规则？
 9. **状态转换的 owner**：`draft → in-review → approved` 由 human 批注驱动（清楚）。`approved → implementing` 是否需要 human 二次确认，还是 agent 进入 `worktree-pr-flow` 时可自主标记（现状 `worktree-pr-flow` 的 human gate 只卡在 push/PR/merge，implementing 阶段本身不属于外部副作用）？`implementing → verified` 由谁写、依据什么证据（merge 后自动写，还是要走 fresh reviewer 确认后才写）？
-10. **[Codex 侧] fresh session 的状态感知路径**：已知 `.codex/config.toml` 在 `SessionStart(clear)`/`PostCompact` 挂了 `context_continuity.py`，Claude 侧 `.claude/settings.json` 也有等价挂点。但**尚未核实 `context_continuity.py` 具体读哪些文件、会不会把"当前/已 superseded plan"surface 给 fresh session**。若它只读 `memory/current-status.md`，那 plan lifecycle 就应把"当前 plan 指针"写进 current-status（或让 hook 也读 `plans/ANATOMY.md`）；若两者都不读，则 Codex/Claude 的 fresh session 仍要靠 agent 主动去 `plans/` 找——这恰恰是本 issue 要消除的误读风险。需要在实现阶段读 hook 源码确认，并决定是否要小幅扩展该 hook 的读取面（注意：hook 是 canonical-in-`.claude/hooks/`、两 runtime 共用同一份 `.py`，改它是 runtime-neutral 的，但仍属改 hook 行为，需谨慎）。
-11. **[Codex 侧] 是否需要双 runtime 冒烟作为验收证据**：本 reviewer 没有 Codex 一手运行经验，只能从 `.codex/config.toml` 判断"挂点存在"。"Codex fresh session 真能读到并遵守同一套状态语义"这一点，是靠 (a) validator/adapter parity（runtime-neutral 的 `python scripts/...` + `sync --check` 通过即视为足够），还是 (b) 要 human 在 Codex 侧实跑一次 fresh session 冒烟确认？后者更硬但需 human 亲自操作。默认倾向 (a) + 一次性 (b) 抽查，请 human 拍板。
+10. **[Codex 侧，已一手核实事实；设计选择仍待 human] fresh session 的状态感知路径**：事实结论是：`context_continuity.py` 只读 `memory/current-status.md`，不读任何 plan 文件；Codex 配置只在 `SessionStart(clear)` 与 `PostCompact` 调它，真实 startup 不调用。定向实跑 `source=startup` 无输出，`clear`/`PostCompact` 才回注 status；当前 status 又没有本 plan 指针。因此“fresh Codex session 自动 surface 当前/superseded plan”目前**不成立**。待 human 选择最小修复：(a) 要求 session 入口纪律主动读 `memory/current-status.md`，plan workflow 同步维护其中的当前 plan 指针；或 (b) 在 (a) 基础上把 Codex `SessionStart(startup|resume)`、Claude 对等事件也接到共享 hook。不要把 `plans/ANATOMY.md` 当成已存在的注入源，除非同时改 hook 读取面。
+11. **[Codex 侧，已回答] 双 runtime 冒烟应作为验收证据。** 本次真实 Codex 审查已经证明“配置里有 hook”与“fresh startup 会获得状态”不是同一件事：静态 parity / `sync --check` 无法发现 matcher 未覆盖 startup，也无法证明运行时 trust 与注入结果。因此实现后至少做一次 Claude + Codex 的双 runtime 冒烟，并把 **fresh startup** 与 **compact/clear 恢复**分成两个 case；validator/adapter parity 仍必跑，但不能替代 runtime smoke。受本次会话边界限制，项目 hook trust 是否已批准、`UserPromptSubmit` 是否自动执行没有可读日志可实锤，冒烟记录应显式保存可见注入输出或 hook 日志，而不是以“session 能启动”代替。
 
 ## 验证标准（本轮：方案文档本身）
 
-- 本 plan doc 经至少一轮 human 批注收敛，未解决问题 1/2/3/6/10/11 有明确答案（覆盖范围、证据落点、#14 边界、是否要机械拦截、Codex 状态感知路径、是否要双 runtime 冒烟）。
+- 本 plan doc 经至少一轮 human 批注收敛，未解决问题 1/2/3/6/10 有明确答案（覆盖范围、证据落点、#14 边界、是否要机械拦截、Codex startup 状态感知的修复选项）；问题 11 已由本次真实 Codex 审查收敛为“必须做双 runtime、双边界冒烟”。
 - Allowed paths / Forbidden paths 从"实现阶段草案"收敛为确定清单（含 Codex 侧生成产物与权限面的处理约定）。
 - （进入实现阶段后追加，见任务树"验证收口"）：`python scripts/validate-governance.py` 通过；新校验对 fixtures 的正向/三类异常各自给出正确结果；`python scripts/check-anatomy-drift.py` 通过；若改了 skill/脚本/权限面，`python scripts/sync-codex-adapters.py --check` 与（视情况）`python scripts/check-agent-harness.py` 通过，Codex adapter 无 stale/漂移。
 
 ## 下一步
 
-- 等 human 在 Human 批注区落笔，优先回应未解决问题 1（覆盖范围）、2（证据落点）、3（#14 边界）、6（是否要机械拦截）、11（是否要双 runtime 冒烟）。
-- 实现阶段第一步先读 `.claude/hooks/context_continuity.py` 源码，落地未解决问题 10（Codex/Claude fresh session 的状态感知路径）。
+- 等 human 在 Human 批注区落笔，优先回应未解决问题 1（覆盖范围）、2（证据落点）、3（#14 边界）、6（是否要机械拦截）、10（采用主动入口纪律，还是同时扩展 startup hook）；问题 11 不再待拍板。
+- 实现阶段按问题 10 的选择接入当前 plan 指针；无需再把“读 `context_continuity.py` 源码”列为探索任务，本轮已完成源码核实与 startup/clear/PostCompact 定向探针。
 - 收敛后：决定是先出一个"仅状态模型 + 校验脚本"的最小实现 PR，还是把 skill 接线 / anatomy 更新一次性做完；随后转 `worktree-pr-flow`。
 
 ## Plan revision log
 
 - 2026-07-12 初稿。盘点现状（`DECISIONS.md` 状态枚举、`change-control.yaml`、`release-gates`/`regression-matrix` 的占位符容忍校验范式、`branch-status.md` 的 Plan doc 字段、`plans/` 目前无 ANATOMY/根路由），据此起草状态模型草案与任务树；未解决问题聚焦覆盖范围切分、证据落点三选一，以及与 #12/#14 的边界。
 - 2026-07-12 第二意见审查（Claude Opus 4.8，代替额度耗尽的 Codex gpt-5.6-sol 二审；人类最终批准仍待定）。补 Codex 侧缺口：新增「双 runtime 一致性」子节（状态锚点/validator 走 runtime-neutral、Codex SessionStart/UserPromptSubmit 挂点证据、skill canonical→`.agents/` sync 义务、两侧权限面对称）；Allowed/Forbidden paths 补 `.agents/skills/**` 生成产物与 `.codex/` 权限面处理约定；任务树加 sync 重生成、双 runtime 状态感知接线；验证收口加 `sync-codex-adapters.py --check` / `check-agent-harness.py` / 可选双 runtime 冒烟；新增未解决问题 10（`context_continuity.py` 是否 surface 当前 plan 状态，待读源码核实）、11（是否要双 runtime 冒烟作为验收证据）；强化"不加阻断类 hook"非目标的 runtime 论据。
+- 2026-07-12 Codex（gpt-5.6-sol, medium）真实二审（区别于上一轮 Opus 代打；人类最终批准仍待定）。一手核实 `context_continuity.py` 只读 `memory/current-status.md`，Codex 仅在 `SessionStart(clear)`/`PostCompact` 接线，startup 探针无输出且当前 status 无 plan 指针，故否定“fresh session 已自动感知 plan”的原推断；问题 10 收敛为两个待选修复路径，问题 11 收敛为必须分别验证 startup 与 compact/clear 的双 runtime smoke；同时记录本会话无法从可读日志实锤 hook trust 与静默 `UserPromptSubmit` 自动触发，避免过度声称。
