@@ -67,8 +67,10 @@ build/
 # 本地下载的参考文档（doctrine 快照，可选保留）
 # .reference-docs/
 
-# agent 运行时身份（每个活 agent 的名字值，非模板内容——见 .agent/agent-identity.md）
+# agent 运行时身份（活 agent 名字值 + 花名册内容，非模板内容——见 .agent/agent-identity.md）
+# 格式/机制在框架层（doctrine + hooks，随 sync 继承）；内容是每 project 运行时、不入 git。
 .agent-identity
+memory/agents-roster.md
 
 # 编辑器 / OS
 .DS_Store

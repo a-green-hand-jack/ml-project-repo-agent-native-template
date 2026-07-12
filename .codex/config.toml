@@ -58,6 +58,13 @@ command = 'python3 "$(git rev-parse --show-toplevel)/.claude/hooks/context_thres
 timeout = 30
 statusMessage = "Checking context usage"
 
+# agent 身份：首个 prompt 若未命名则注入自命名指令（对齐 Claude 表面）
+[[hooks.UserPromptSubmit.hooks]]
+type = "command"
+command = 'python3 "$(git rev-parse --show-toplevel)/.claude/hooks/agent_identity_hook.py"'
+timeout = 30
+statusMessage = "Agent self-naming"
+
 [[hooks.SessionStart]]
 matcher = "clear"
 
@@ -66,6 +73,16 @@ type = "command"
 command = 'python3 "$(git rev-parse --show-toplevel)/.claude/hooks/context_continuity.py"'
 timeout = 30
 statusMessage = "Restoring status continuity"
+
+# agent 身份：SessionStart 若已命名则重申「你是 <name>」（Codex matcher 含 startup|resume|clear）
+[[hooks.SessionStart]]
+matcher = "startup|resume|clear"
+
+[[hooks.SessionStart.hooks]]
+type = "command"
+command = 'python3 "$(git rev-parse --show-toplevel)/.claude/hooks/agent_identity_hook.py"'
+timeout = 30
+statusMessage = "Reasserting agent identity"
 
 [[hooks.PostCompact]]
 matcher = "^.*$"
