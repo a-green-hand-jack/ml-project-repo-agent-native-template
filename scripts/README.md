@@ -11,6 +11,7 @@ python scripts/check-same-commit.py --staged  # same-commit rule：结构改动 
 python scripts/sync-codex-adapters.py --check # Codex adapters 与 .claude canonical 能力是否同步
 python scripts/adopt-existing-repo.py <repo> --phase all  # 迁移已有 repo 到 template 形态
 python scripts/check-adoption-integrity.py <repo>         # 校验 adoption baseline bytes 仍存在
+python scripts/bootstrap-project.py <new-repo> --origin <owner/repo>  # 落地刚派生的新 repo（幂等）
 python scripts/bump-template-version.py --level minor --note "..."   # 发版：递增 VERSION + tag（上游）
 python scripts/template-sync.py --from /path/to/upstream             # 追平上游框架层（下游）
 ```
@@ -34,3 +35,9 @@ MAJOR 跨越需 `--allow-major` 人工确认。
 
 `adopt-existing-repo.py` 是迁移工具，不是 validator：它会在目标 repo 内写入
 `lab/docs/audits/template-adoption/` state/report，并按 conservative policy 保留原文件。
+
+`bootstrap-project.py` 是新项目落地工具，也不是 validator：它在目标 repo 内写
+`.template.toml`（origin+version 锚点，`--origin` 必须显式传，不推断）、跑
+`git config core.hooksPath`、同步 Codex adapters、跑 governance，并把
+`lab/docs/audits/template-bootstrap/` state/report 写进目标 repo。第二次以相同 `--origin`
+重跑是幂等的；origin 冲突默认报错停止，需要覆盖必须显式加 `--force`。
