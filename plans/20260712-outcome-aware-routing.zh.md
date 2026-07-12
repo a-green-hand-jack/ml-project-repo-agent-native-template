@@ -6,9 +6,10 @@
 ## 当前目标
 
 在现有 `coding-agent-quota`（额度快照 + provider preference）与 `subagent-routing`（launch packet 生成）之上，
-增量建立一层 **outcome-aware** 路由：让 route decision 除了 quota 之外，还能引用价格/速度来源和历史任务结果
-（成功率、延迟、返工、失败原因），在相同预算下给出可解释、可离线复现的候选路线比较，并在数据缺失/过期时
-保守回退到当前 quota-aware 行为。这是 issue #15 的第一版落地：可解释启发式 + 离线校准，不是在线学习调度器。
+增量建立一层 **outcome-aware** 路由：让 route decision 除了 quota 之外，还能引用历史任务结果（成功率、延迟、
+返工、失败原因），在相同预算下给出可解释、可离线复现的候选路线比较，并在数据缺失/过期时保守回退到当前
+quota-aware 行为。这是 issue #15 的第一版落地：可解释启发式 + 离线校准，聚焦 **quota + outcome 两维**（本版
+不引入 $/token 价格表，见「未解决问题 6：已决策」），不是在线学习调度器。
 
 **双 runtime 定位（issue #15「注意」条款）**：这层路由不只服务 Claude Code 派 subagent，也要能服务
 Codex 侧编排（`codex exec`、`codex-rescue`、`ccg` 这类跨 provider 场景）。因此 schema 从第一版起就必须
@@ -25,7 +26,8 @@ policy 演化，且其中 `xhigh` 是跨生态抽象值，不等同于所有 pro
 - 不实现在线强化学习 / 自适应 bandit 调度器；不在运行中根据实时反馈静默切换 policy（issue #15「边界」条款）。
 - 不改变 `coding-agent-quota` 现有 `route_recommendation` 字段的既有语义或默认输出（`--format table/json` 向后兼容），
   只做加法式扩展。
-- 不读取任何 credential / token / API key 文件；不新增需要联网认证的价格抓取（本版只做本地/公开、可标注来源与新鲜度的价格与速度表）。
+- 不读取任何 credential / token / API key 文件；不新增需要联网认证的价格抓取（本版**不引入价格/速度参考表**，
+  只做本地可复现的 quota + outcome 两维证据，见「未解决问题 6：已决策」）。
 - 不在本轮触碰 `lab/data/`、`lab/runs/`、`lab/models/` bytes、checkpoints、wandb、`lab/infra/private/`。
 - 不做「任务质量」的主观人工评分体系设计（第一版用可自动获取的代理信号，如 verifier pass/fail、测试通过率、返工次数），
   更精细的质量度量留待后续迭代。
@@ -63,7 +65,7 @@ policy 演化，且其中 `xhigh` 是跨生态抽象值，不等同于所有 pro
 
 - 任何 credential / token / secret 存放位置：`~/.codex/auth.json`、`~/.claude/**`（除已被 `coding-agent-quota` 白名单的
   `~/.claude/.search-index/usage.db` 只读路径外，不新增读取范围）、`.env*`、`~/.paseo/**` 中任何看起来像密钥的字段。
-  硬约束：脚本只读本地非敏感 usage/price/outcome 快照，不打印、不上传、不联网认证。
+  硬约束：脚本只读本地非敏感 usage/outcome 快照，不打印、不上传、不联网认证。
 - `lab/data/**`、`lab/runs/**`、`lab/models/**` 权重、`checkpoints/**`、`wandb/**`、`lab/infra/private/**`。
 - 不改 `coding-agent-quota/scripts/read_agent_quota.py` 中 `route_recommendation` 的既有打分逻辑与默认行为
   （只允许新增可选字段/参数），避免破坏依赖它的 `subagent-routing` 现有流程。
@@ -91,8 +93,11 @@ policy 演化，且其中 `xhigh` 是跨生态抽象值，不等同于所有 pro
         这才是真正稀缺、可解释的预算（`usage_velocity` 已明确 cost proxy「burn proxy, not metered billing」）。
         但共享订阅窗口内可能同时有其他 session 消耗，不能把窗口差值无条件归因给单次任务；应记录前后 snapshot、
         采样时间与 `attribution_confidence`，无法隔离时将其标为 estimate，而不是伪装成精确单次成本。
-      - `metered_price_estimate`（可选，含 `source`/`as_of`/货币）：只对**按量计费/假设 API 路线**有意义的
-        公开 $/token 估算，必须标为 estimate，不得和订阅额度相加或伪装成实际账单。
+        **本版唯一实现的成本字段。**
+      - `metered_price_estimate`**（已决策：本版不实现，见「未解决问题 6」）**：曾设想含 `source`/`as_of`/
+        货币的按量计费 $/token 估算字段，供假设 API 路线参考。本版 schema **不落地此字段**——两侧 runtime
+        目前都是订阅制，没有真实按量计费路线可对照，强行估价是 false precision 风险；留作未来扩展点，等
+        真有按量计费路线时再补。
     - **命名与 policy 来源分层**：`provider`/`model` 要对齐 `read_agent_quota.py::model_for()` 当前输出及
       `route_recommendation` 的 `codex/<model>` / `claude/<model>` 约定；`routing_tier` 保留跨生态抽象档，
       `effort` 记录实际传给 provider 的原生值。不要让 schema 的历史可读性依赖一个会随 policy 改动的函数；
@@ -105,18 +110,18 @@ policy 演化，且其中 `xhigh` 是跨生态抽象值，不等同于所有 pro
     - 输出：`.claude/skills/outcome-aware-routing/schema.md`（或 JSON Schema 文件）+ 至少 3 条示例记录，
       其中**至少 1 条为 Codex 生态路线**（如 `codex_exec` + `gpt-5.6-sol` + 某 `model_reasoning_effort`），
       证明 schema 不是只能装 Claude 记录。
-  - [ ] Child B：汇总价格/速度/历史 outcome 来源
-    - 本地/公开 provider 价格表 + 速度基准，每条来源必须带 `source`、`fetched_at`/`as_of`、
-      `staleness_policy`（超过多久算过期，过期后如何降级）。
-    - 输出：一份可版本化的价格/速度参考文件（如 `.claude/skills/outcome-aware-routing/price-speed-reference.yaml`），
-      与 outcome ledger 的历史统计口径分开存放，避免把「静态参考价」和「实测结果」混为一谈。
-    - **订阅 vs 计费的建模张力（rigor）**：本 repo 两侧 runtime 目前都是订阅/额度制，$/token 参考价对它们
-      不是真实边际成本。价格表要显式区分「订阅额度视角」（真实约束，来自 quota snapshot）与「按量计费估价」
-      （仅供假设/跨 provider 对照），并覆盖 Codex 模型行（`gpt-5.5`、`gpt-5.6-*`），别只列 Claude 三档。
-      候选路线比较的默认排序键应是 `quota_cost` 而非美元估价（见未解决问题 3）。
+  - [ ] Child B：本版不做价格表，只汇总 quota + outcome 两维证据（已决策，见「未解决问题 6」）
+    - **本版范围**：不引入 $/token 价格表或速度基准来源；只做两类证据——(1) quota 消耗（`quota_cost`，
+      来自 `read_agent_quota.py` snapshot）、(2) 历史任务结果（outcome ledger 里的 `outcome_quality`、
+      `rework_count`、`failure_reason` 等）。候选路线比较的默认且唯一排序键是 `quota_cost`，不涉及美元估价。
+    - 价格/速度参考文件（曾设想的 `.claude/skills/outcome-aware-routing/price-speed-reference.yaml`）本版
+      不做，留作未来扩展点：等两侧 runtime 出现真实按量计费路线、且有可靠公开价格来源时再单开任务评估。
+    - 原「订阅 vs 计费的建模张力」讨论已由 human 拍板收敛：缺数据时保守不引入，聚焦 quota + outcome 两维，
+      避免 false precision（理由详见「未解决问题 6：已决策」）。
   - [ ] Child C：离线 fixture + replay
-    - `.claude/skills/outcome-aware-routing/fixtures/` 下放冻结的 quota 快照 + price/speed 参考 + outcome ledger 样本。
-    - replay 脚本：输入同一份 fixture 应产出确定性相同的路由决策；改变价格/额度/成功率后能展示路线切换与理由差异。
+    - `.claude/skills/outcome-aware-routing/fixtures/` 下放冻结的 quota 快照 + outcome ledger 样本（不含
+      price/speed 参考，本版未引入该来源）。
+    - replay 脚本：输入同一份 fixture 应产出确定性相同的路由决策；改变额度/成功率后能展示路线切换与理由差异。
     - 固定 tie-break 次序、时间输入和浮点/序列化规范；确定性断言比较规范化结构或稳定 JSON，不依赖 map 遍历顺序。
     - 覆盖「验收标准」第 2 条。
   - [ ] Child D：与现有 quota-aware 路由整合
@@ -138,11 +143,13 @@ policy 演化，且其中 `xhigh` 是跨生态抽象值，不等同于所有 pro
       不得用缺失/过期数据伪装成精确数字。覆盖「验收标准」第 5 条。
   - [ ] Child F：正式 benchmark 冻结机制
     - 定义「冻结」产物：模型池、路由 policy 版本、预算上限、fixture 版本一次性锁定，运行期间不因中途
-      quota/价格变化切换（沿用 `.agent/model-routing-policy.md` 里 transfer experiment 的冻结先例）。
+      quota 变化切换（本版不涉及价格维度，沿用 `.agent/model-routing-policy.md` 里 transfer experiment 的
+      冻结先例）。
     - 输出：冻结记录落在哪（待定，见未解决问题），至少包含 policy 版本号/hash、冻结时间、涉及字段清单。
   - [ ] Child G：报告拆分
-    - 路由结果能分别报告 token、费用、wall-clock、昂贵模型（如 opus/xhigh effort）用量、任务结果，
-      不合并成单一「分数」掩盖构成。覆盖「验收标准」第 4 条。
+    - 路由结果能分别报告 token、quota 消耗（`quota_cost`）、wall-clock、昂贵模型（如 opus/xhigh effort）用量、
+      任务结果，不合并成单一「分数」掩盖构成。不含 $ 价格维度（本版未引入，见「未解决问题 6：已决策」）。
+      覆盖「验收标准」第 4 条。
   - [ ] Child H：Validator / tests
     - `scripts/check-outcome-ledger-schema.py`（只读、无第三方硬依赖，风格对齐现有三个 validator 脚本）：
       校验 ledger schema、fixture 可解析、fallback 路径确实触发、且脚本不读取 credential 文件。
@@ -160,6 +167,11 @@ policy 演化，且其中 `xhigh` 是跨生态抽象值，不等同于所有 pro
 
 ## 当前决策
 
+- **价格表本版不引入**（human 2026-07-12 拍板，采纳 Codex 三审建议）：只做 quota + outcome 两维，不做
+  $/token 价格表或速度基准来源；schema 里 `metered_price_estimate` 字段与
+  `price-speed-reference.yaml` 产物本版均不实现，留作未来扩展点。理由：两侧 runtime 都是订阅制、缺乏真实
+  按量计费路线和可靠公开价格数据，强行引入是 false precision 风险；聚焦 quota + outcome 两维更符合
+  「缺数据保守」的精神。详见「未解决问题 6：已决策」。
 - 默认新开 `.claude/skills/outcome-aware-routing/` 作为独立 skill，与 `coding-agent-quota` 组合而非合并进后者，
   理由：关注点分离（quota 是「还剩多少」，outcome 是「值不值得」），且 `coding-agent-quota` 现有 SKILL.md 已经
   相当聚焦，不希望把它变成大而全的路由脚本。**待 human 确认**（见未解决问题 1）。
@@ -177,16 +189,17 @@ policy 演化，且其中 `xhigh` 是跨生态抽象值，不等同于所有 pro
    (b) 完全镜像 `read_agent_quota.py` 的做法，落在 repo 外的用户目录（如 `~/.claude/.search-index/`）；
    (c) `memory/` 下（但 `memory/` 目前是全量入 Git 的活状态层，不适合放会持续增长的运行时日志）。
    默认倾向 (a) 或 (b)，需要 human 拍板。
-3. **价格/速度来源的更新方式**：第一版是否只允许人工维护的 YAML（无联网抓取），还是希望留一个可选的、
-   不涉及 credential 的公开价格页抓取脚本（若抓取失败则保守回退，标注 stale）？
+3. ~~价格/速度来源的更新方式~~ —— **已随「未解决问题 6」的决策一并作废**：本版不引入价格/速度参考文件，
+   此问题不再适用；等未来真的要做价格表时再重新提出。
 4. **benchmark 冻结产物落在哪**：是否需要类似 `.agent/templates/experiment-card.md` 的新模板
    （如 `.agent/templates/routing-benchmark-card.md`），还是直接用一份带版本号的 YAML/JSON 文件即可？
 5. **验收标准第 1 条「每次路由输出可追溯」的落地形式**：是否要求 launch packet 必须内嵌完整证据链
-   （quota snapshot + price/speed source + outcome 摘要），还是允许只给出可查询的 `decision_id` 由 ledger 另存明细？
-   影响 launch-packet 模板改动幅度。
-6. **成本口径以谁为准**：候选路线排序默认用订阅 `quota_cost`，`metered_price_estimate` 仅作参考——是否认可？
-   还是希望在两侧都是订阅制时，本版**根本不引入** $/token 价格表、只做 quota + outcome 两维，把「价格」推迟到
-   真有按量计费路线时再加（可能更贴合 issue #15「缺数据保守」的精神，也少一处 false precision 风险）？
+   （quota snapshot + outcome 摘要，本版不含 price/speed source），还是允许只给出可查询的 `decision_id`
+   由 ledger 另存明细？影响 launch-packet 模板改动幅度。
+6. **成本口径以谁为准**——**已决策（human 2026-07-12 拍板）：不引入价格表**。候选路线排序默认且唯一用订阅
+   `quota_cost`；`metered_price_estimate` 本版不实现，「价格」维度整体推迟到真有按量计费路线时再加。理由：
+   两侧 runtime 目前都是订阅/额度制，缺乏真实公开价格数据支撑 $/token 估算，强行引入是 false precision
+   风险；聚焦 quota + outcome 两维更贴合 issue #15「缺数据保守」的精神。此项不再是 open question。
 
 ## 已核实的 Codex / validator 结论
 
@@ -211,10 +224,11 @@ policy 演化，且其中 `xhigh` 是跨生态抽象值，不等同于所有 pro
 - `python scripts/validate-governance.py` 通过（含新增的 outcome ledger schema 检查）。
 - `python .claude/skills/coding-agent-quota/scripts/read_agent_quota.py --role impl --tier 2 --format json`
   行为不变（向后兼容回归）。
-- 新增的 replay 脚本：同一份冻结 fixture 两次运行输出完全相同（决策确定性）；改变 fixture 中的价格/额度/
-  成功率任一项后，输出的推荐路线与理由随之变化，且能指出是哪个信号导致变化。
-- 新增 validator 能检测出：(a) ledger 记录缺字段、(b) 价格/速度来源缺 `fetched_at`/`source`、
-  (c) fallback 未在过期数据场景下触发、(d) 脚本尝试读取 credential 类路径。
+- 新增的 replay 脚本：同一份冻结 fixture 两次运行输出完全相同（决策确定性）；改变 fixture 中的额度/成功率
+  任一项后，输出的推荐路线与理由随之变化，且能指出是哪个信号导致变化（本版不含价格维度）。
+- 新增 validator 能检测出：(a) ledger 记录缺字段、(b) fallback 未在过期数据场景下触发（复用
+  `read_agent_quota.py` 的 `freshness_warning` 思路判定 quota 数据过期）、(c) 脚本尝试读取 credential
+  类路径。**本版不做价格/速度来源校验**（本版未引入该来源，见「未解决问题 6：已决策」）。
 - 手工检查：`subagent-routing/SKILL.md` 更新后仍可无破坏地走完既有 launch packet 生成流程（quota-only 场景下
   行为等同现状）。
 - `python scripts/sync-codex-adapters.py --check` 通过（新 skill 的 `.agents/skills/outcome-aware-routing/SKILL.md`
@@ -229,7 +243,7 @@ policy 演化，且其中 `xhigh` 是跨生态抽象值，不等同于所有 pro
 
 ## 下一步
 
-- 等待 human 在本文件内批注，尤其是「未解决问题」1-6。
+- 等待 human 在本文件内批注「未解决问题」1、2、4、5（3 因价格表决策一并作废；6 已由 human 拍板落地，不再等待）。
 - 收敛后按任务树 Child A → H 顺序拆 launch packet，逐个交给 subagent-routing 派发实现（每个 child 独立 tier/scope）。
 
 ## Plan revision log
@@ -243,3 +257,6 @@ policy 演化，且其中 `xhigh` 是跨生态抽象值，不等同于所有 pro
   `-c model_reasoning_effort=medium` 启动和 Codex CLI 0.144.0 帮助/strict-config 验证，确认 effort 可逐次覆盖；
   核实 anatomy checker 边界并将真实 `codex exec` smoke 固化为实现后验收项；补充 decision/outcome 生命周期、
   policy 版本、原生 effort、确定性与 allowed paths 修订。人类最终批准仍待定。
+- 2026-07-12 human 亲自拍板（采纳 Codex 三审建议）：价格表本版不引入，聚焦 quota + outcome 两维。落地为
+  Child B 改写、`metered_price_estimate` 标记不实现、验证标准与 Child C/G 相应删改、未解决问题 6 标记
+  「已决策：不引入」、未解决问题 3 随之作废。此项决策不再是 open question。
