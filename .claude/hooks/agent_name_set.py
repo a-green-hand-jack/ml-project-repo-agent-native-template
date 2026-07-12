@@ -7,14 +7,20 @@
 （据真实任务），本脚本只负责落地。
 
 用法：
-    python3 agent_name_set.py "<persona·动作·focus>"
+    python3 agent_name_set.py "<persona·动作·focus>"                       # 自命名（本 agent）
+    python3 agent_name_set.py "<name>" --register --paseo-id <child-id> \
+        [--worktree "<branch (wt)>"]                                       # 登记子 agent（launcher 用）
 
 行为开关：
 - `AGENT_NO_AUTORENAME=1` → 跳过 `paseo rename`（仍写文件 + roster）。
 - 无 `PASEO_AGENT_ID`（非 Paseo 表面）→ 自动跳过 rename（runtime-agnostic）。
 
+`--register` 模式（供 spawn skill 的 Paseo-tab launcher）：只 upsert roster 一行（给定 name+id），
+**不**写自己的 `.agent-identity`、**不** rename——子 agent 已在 `paseo run --title/--env` 时出生即命名。
+
 尽力而为、失败不 raise、不 block。无第三方依赖。
 """
+import argparse
 import os
 import subprocess
 import sys
@@ -138,20 +144,44 @@ def _upsert_roster(name: str, doing: str, focus: str, bw: str, pid: str) -> None
         pass
 
 
+def _register_child(name: str, pid: str, worktree: str) -> int:
+    """launcher 用：只把「已出生即命名」的子 agent 登记进 roster。不写自身文件、不 rename。"""
+    doing, focus = _split_name(name)
+    _upsert_roster(name, doing, focus, worktree or "-", pid)
+    print(f"[agent-name] 已登记子 agent {name}（paseo-id={pid or '-'}；仅 roster）", file=sys.stderr)
+    return 0
+
+
 def main() -> int:
-    raw = sys.argv[1] if len(sys.argv) > 1 else ""
-    name = agent_identity._clean(raw)
+    ap = argparse.ArgumentParser(add_help=False)
+    ap.add_argument("name", nargs="?", default="")
+    ap.add_argument("--register", action="store_true",
+                    help="只登记给定 name+id 到 roster（launcher 用），不改自身")
+    ap.add_argument("--paseo-id", default="", help="--register 时要登记的子 agent id")
+    ap.add_argument("--worktree", default="", help="--register 时该 agent 的 branch/worktree 标签")
+    args, _ = ap.parse_known_args()
+
+    name = agent_identity._clean(args.name)
     if not name:
         print("[agent-name] 用法：agent_name_set.py \"<persona·动作·focus>\"（名字为空，未改动）", file=sys.stderr)
         return 0  # 不 raise
-    # ① identity 文件
+
+    if args.register:
+        pid = args.paseo_id.strip()
+        if not pid:
+            # 空 pid 说明 launcher 没取到子 agent id（run --json 形状异常/未起成功）。
+            # 不登记：否则无 pid 的行可能覆盖掉一条合法的、同名的自命名行（非 Paseo 表面）。
+            print("[agent-name] --register 缺 --paseo-id：疑似子 agent 未起成功，未登记（先排查 paseo run）",
+                  file=sys.stderr)
+            return 0
+        return _register_child(name, pid, args.worktree.strip())
+
+    # 自命名（本 agent）：① identity 文件 ② paseo rename（默认开启）③ roster
     try:
         IDENTITY_FILE.write_text(name + "\n", encoding="utf-8")
     except OSError:
         pass
-    # ② paseo rename（默认开启）
     rename_status = _paseo_rename(name)
-    # ③ roster
     doing, focus = _split_name(name)
     pid = os.environ.get("PASEO_AGENT_ID", "").strip()
     _upsert_roster(name, doing, focus, _branch_worktree(), pid)
