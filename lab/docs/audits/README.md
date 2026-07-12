@@ -21,3 +21,8 @@
 - `agent-r1-adoption-replay-report.md`——`adopt-existing-repo` 的真实 replay:
   将 AgentR1/Agent-R1 迁移成模板形态,验证 hash integrity、template governance
   与 root pollution 收敛。
+- `colorama-adoption-replay-report.md`——issue #12 任务树 C(统一 runtime/smoke 验证合同)的真实
+  replay:将 tartley/colorama 迁移成模板形态,新增验证 smoke 合同(`command_source`/`result`/
+  `unverified_reason`/显式 warning)在 exit code 与 tracked-byte integrity 解耦后仍然可读、
+  不被静默吞掉;与 Agent-R1 replay 是不同 repo 案例,覆盖不同的原生测试命令检测类型
+  (`Makefile` `test:` target,而非 undetected)。

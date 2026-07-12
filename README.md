@@ -99,6 +99,12 @@ python scripts/check-adoption-integrity.py /path/to/existing-repo
 root 会收敛到 `lab/code/imported/<slug>/`，proof 写入目标 repo 的
 `lab/docs/audits/template-adoption-report.md`。
 
+`prove`/`check-adoption-integrity.py` 的 exit code 只反映 adoption 工具自身的完整性（tracked-byte
+hash 是否一致、是否有未解决的 conflict/受保护路径 blocker）；被迁移项目自身原生测试命令的结果
+（`command_source`/`result`：`pass`/`fail`/`skipped`/`unknown`/`unverified_reason`）与这个 exit code
+解耦——测试未检测到或跑失败不会让这两个命令看起来"失败"，但会在 report 与
+`check-adoption-integrity.py --json` 的 `warnings`/`smoke_warnings` 字段里显式列出，不会被静默吞掉。
+
 ## 快速门禁
 
 ```bash
