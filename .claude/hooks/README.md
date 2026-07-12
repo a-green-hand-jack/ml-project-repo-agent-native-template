@@ -11,6 +11,9 @@ repo-local lifecycle hooks（可执行，以本机权限运行——保持小而
 | `context_threshold_notice.py` | `UserPromptSubmit` | 上下文 ≥65%/≥80% 时向本轮注入「派 checkpoint-writer + 考虑 compact」建议；每 session 每档只提醒一次 | 仅注入建议（exit 0） |
 | `context_continuity.py` | `SessionStart(compact\|clear)` | compact/clear 后把 `memory/current-status.md` 摘要回注新上下文，接续不断档 | 仅注入（exit 0） |
 | `context_usage.py` | —（库/CLI，非注册 hook） | 共用 helper：读 transcript `usage` 求精确上下文 token%，供 statusline 与上面阈值 hook 调用 | N/A |
+| `agent_identity.py` | —（库/CLI，非注册 hook） | 解析当前 agent 名字（`AGENT_NAME` env / `.agent-identity` 文件），供 statusline `🤖 <name>` 段；doctrine 见 `.agent/agent-identity.md` | N/A |
+| `agent_identity_hook.py` | `UserPromptSubmit` + `SessionStart` | 未命名时首个 prompt 注入「自命名」指令（每 session 一次）；已命名时 SessionStart 重申「你是 &lt;name&gt;」 | 仅注入（exit 0） |
+| `agent_name_set.py` | —（agent 调用的 setter） | agent 选定名后调用：写 `.agent-identity` + 默认 `paseo rename`（`AGENT_NO_AUTORENAME=1` 关）+ upsert `memory/agents-roster.md` | N/A |
 
 ## 上下文调配（信号层，见 `plans/20260711-context-orchestration.zh.md`）
 
