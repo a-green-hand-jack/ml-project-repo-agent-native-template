@@ -13,6 +13,8 @@ recommended effort:  <low | medium | high>
 quota snapshot:      <current/weekly remaining + reset for Codex and Claude Code>
 usage velocity:      <recent token/message burn proxy>
 paseo preference:    <role default provider or missing/defaulted>
+outcome decision id: <d-xxxx | none —— 走了 outcome 层就填 decision_id，完整证据链按 ID 查 outcome ledger，不在此内嵌>
+outcome degraded:    <false | true: <一行原因，已回退 quota-only 推荐>>
 allowed paths:       <可读/可写路径>
 forbidden paths:     <绝对不碰>
 tools:               <允许工具>

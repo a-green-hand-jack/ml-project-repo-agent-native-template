@@ -1,0 +1,56 @@
+{
+  "policy_version": "routing-policy-v1",
+  "frozen_at": "2026-07-12T00:00:00Z",
+  "source_notes": "Frozen model catalog for outcome-aware routing. Aligned with .agent/model-routing-policy.md tier table and read_agent_quota.model_for() as of template v1.3.0. model_for() is a heuristic that evolves with policy; this versioned catalog, not that function, is the permanent schema vocabulary. Vocab changes require a new policy_version. 'xhigh' is a cross-ecosystem abstraction in model_for(), NOT a verified provider-native effort value, so it is deliberately absent from effort_vocab; routing_tier carries the abstract level instead.",
+  "launch_surfaces": [
+    "claude_subagent",
+    "codex_exec",
+    "codex_rescue",
+    "ccg",
+    "paseo_lane",
+    "main_session"
+  ],
+  "roles": ["impl", "ui", "research", "planning", "audit"],
+  "expensive_routes": {
+    "models": ["claude-opus-4-8", "gpt-5.6-sol"],
+    "min_expensive_tier": 3
+  },
+  "providers": {
+    "codex": {
+      "effort_knob": "model_reasoning_effort",
+      "effort_vocab": ["low", "medium", "high"],
+      "launch_surfaces": ["codex_exec", "codex_rescue", "ccg", "paseo_lane", "main_session"],
+      "models": ["gpt-5.5", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"],
+      "tier_effort": {"0": "low", "1": "low", "2": "medium", "3": "high", "4": "high"},
+      "tier_model": {
+        "0": "gpt-5.6-luna",
+        "1": "gpt-5.6-luna",
+        "2": "gpt-5.6-terra",
+        "3": "gpt-5.5",
+        "4": "gpt-5.5"
+      },
+      "role_model_overrides": {
+        "planning": {"3": "gpt-5.6-sol", "4": "gpt-5.6-sol"},
+        "audit": {"3": "gpt-5.6-sol", "4": "gpt-5.6-sol"}
+      }
+    },
+    "claude_code": {
+      "effort_knob": "claude_thinking_effort",
+      "effort_vocab": ["none", "low", "medium", "high"],
+      "launch_surfaces": ["claude_subagent", "paseo_lane", "main_session"],
+      "models": ["claude-haiku-4-5", "claude-sonnet-5", "claude-opus-4-8"],
+      "tier_effort": {"0": "none", "1": "none", "2": "medium", "3": "high", "4": "high"},
+      "tier_model": {
+        "0": "claude-haiku-4-5",
+        "1": "claude-haiku-4-5",
+        "2": "claude-sonnet-5",
+        "3": "claude-sonnet-5",
+        "4": "claude-opus-4-8"
+      },
+      "role_model_overrides": {
+        "ui": {"3": "claude-opus-4-8", "4": "claude-opus-4-8"},
+        "audit": {"3": "claude-opus-4-8", "4": "claude-opus-4-8"}
+      }
+    }
+  }
+}

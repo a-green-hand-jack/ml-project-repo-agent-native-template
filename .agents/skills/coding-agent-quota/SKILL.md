@@ -1,13 +1,13 @@
 ---
 name: coding-agent-quota
-description: Read local Codex and Claude Code quota/rate-limit snapshots and produce routing evidence for agent work allocation. Use when deciding which coding agent/provider/model to use, balancing Codex vs Claude Code load, checking remaining 5-hour/session and weekly quota, estimating routing capacity before launching subagents, or preparing cross-provider experiments with frozen provider/model policy.
+description: Read local Codex and Claude Code quota/rate-limit snapshots and produce routing evidence for agent work allocation, plus outcome-aware routing on top of quota (historical success/rework/latency evidence, deterministic offline replay, degraded fallback, outcome ledger with decision_id traceability). Use when deciding which coding agent/provider/model to use, balancing Codex vs Claude Code load, checking remaining 5-hour/session and weekly quota, estimating routing capacity before launching subagents, comparing candidate routes on quota + outcome evidence, recording route decisions/outcomes, or preparing cross-provider experiments with frozen provider/model policy.
 ---
 
 > Codex adapter: generated from `.claude/skills/coding-agent-quota/SKILL.md`. Do not edit this copy by hand; run `python scripts/sync-codex-adapters.py`.
 
 # coding-agent-quota
 
-Use this skill before routing meaningful work between Codex and Claude Code when quota, reset time, provider load, or cost-control matters.
+Use this skill before routing meaningful work between Codex and Claude Code when quota, reset time, provider load, cost-control, or historical task outcomes matter. It covers two layers: (1) quota snapshot + quota-only recommendation (`read_agent_quota.py`, unchanged), and (2) an additive outcome-aware layer (`outcome_route.py` + `outcome_ledger.py`) that compares candidate routes on quota + outcome evidence and falls back conservatively when data is missing or stale.
 
 ## Quick Start
 
@@ -59,3 +59,52 @@ When routing a child agent, include these fields from JSON output in the packet:
 - `usage_velocity`: recent token/message burn proxy from the local usage DB.
 - `paseo_preferences`: role defaults, or `missing` if the local file does not exist.
 - `route_recommendation`: recommended provider/model/effort plus scoring notes.
+- When the outcome layer was used: `outcome_decision_id` (plus a one-line `degraded` hint if
+  the layer fell back). Only the id goes into the packet; the full evidence chain stays in the
+  ledger and is queried by id.
+
+## Outcome-Aware Routing (quota + outcome, no $ dimension)
+
+Scripts (plain `python` from the repo root; works identically from Claude Code and Codex):
+
+```bash
+# Recommend a route using live quota + the local outcome ledger; record the decision:
+python .claude/skills/coding-agent-quota/scripts/outcome_route.py \
+    --live --role impl --tier 2 --task-class bounded-implementation --record
+
+# Deterministic offline replay on frozen fixtures (same inputs => identical bytes):
+python .claude/skills/coding-agent-quota/scripts/outcome_route.py \
+    --quota-fixture .claude/skills/coding-agent-quota/fixtures/outcome/quota-snapshot.frozen.json \
+    --ledger .claude/skills/coding-agent-quota/fixtures/outcome/outcome-ledger.sample.jsonl \
+    --role impl --tier 2 --now 2026-07-12T08:30:00Z
+
+# Ledger maintenance / traceability:
+python .claude/skills/coding-agent-quota/scripts/outcome_ledger.py record-outcome \
+    --decision-id d-xxxx --status observed --quality pass --rework 0 \
+    --evidence-source "targeted tests exit 0" \
+    --actual-provider codex --actual-model gpt-5.6-terra --actual-effort medium
+python .claude/skills/coding-agent-quota/scripts/outcome_ledger.py show --decision-id d-xxxx
+python .claude/skills/coding-agent-quota/scripts/outcome_ledger.py summary
+```
+
+Rules:
+
+- The output adds `outcome_route_recommendation` NEXT TO the unchanged quota-only
+  `route_recommendation`; existing consumers keep working as-is.
+- Schema: see `schema.md`. Vocabulary (provider/model/native effort) is validated against the
+  frozen, versioned catalog `fixtures/outcome/model-catalog.v1.json`, not against `model_for()`.
+  `effort` holds provider-native values only (Codex knob: `-c model_reasoning_effort=<v>` per
+  launch); the abstract level lives in `routing_tier`.
+- Conservative fallback: stale quota snapshot or insufficient outcome evidence sets
+  `degraded: true` with a reason and falls back to the quota-only recommendation. Never dress
+  missing/expired data up as precise numbers.
+- Cost is quota-only in this version: candidate routes are compared/sorted by `quota_cost`
+  (subscription window burn, estimate). `metered_price_estimate` ($/token) is reserved and NOT
+  implemented (plan decision Q6). Reports keep dimensions separate (outcome / quota_cost /
+  tokens / wall-clock / expensive-route share) — no single merged score.
+- Real accumulated records live in the gitignored `.outcome-ledger/` directory (append-only
+  JSONL); only its README/.gitkeep are tracked. Frozen fixtures and the catalog are tracked.
+- Formal routing benchmarks: freeze model pool / policy_version / budget cap / fixture version
+  first via `.agent/templates/routing-benchmark-card.md`, register the card under `benchmarks/`.
+- Validation gate: `python scripts/check-outcome-ledger-schema.py` (also run by
+  `validate-governance.py`); targeted tests in `tests/test_outcome_routing.py`.

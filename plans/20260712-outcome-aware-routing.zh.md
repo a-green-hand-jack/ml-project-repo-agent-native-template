@@ -95,8 +95,8 @@ policy 演化，且其中 `xhigh` 是跨生态抽象值，不等同于所有 pro
 
 ## 任务树
 
-- [ ] Parent: 建立 outcome-aware 路由第一版（启发式 + 离线校准）
-  - [ ] Child A：定义 route decision + outcome ledger schema
+- [x] Parent: 建立 outcome-aware 路由第一版（启发式 + 离线校准）—— 2026-07-12 实现完成，见 Plan revision log 末条
+  - [x] Child A：定义 route decision + outcome ledger schema
     - 字段草案：`decision_id`、`decided_at`、`task_class`、`role`、`routing_tier`、`provider`、`model`、
       `effort`（provider 原生值）、`policy_version`、
       `orchestrator`/`launch_surface`（**新增，Codex 侧关键**：谁发起并执行——`claude_subagent` /
@@ -132,7 +132,7 @@ policy 演化，且其中 `xhigh` 是跨生态抽象值，不等同于所有 pro
       `coding-agent-quota` skill 内，见「未解决问题 1：已决策」）+ 至少 3 条示例记录，
       其中**至少 1 条为 Codex 生态路线**（如 `codex_exec` + `gpt-5.6-sol` + 某 `model_reasoning_effort`），
       证明 schema 不是只能装 Claude 记录。
-  - [ ] Child B：本版不做价格表，只汇总 quota + outcome 两维证据（已决策，见「未解决问题 6」）
+  - [x] Child B：本版不做价格表，只汇总 quota + outcome 两维证据（已决策，见「未解决问题 6」）
     - **本版范围**：不引入 $/token 价格表或速度基准来源；只做两类证据——(1) quota 消耗（`quota_cost`，
       来自 `read_agent_quota.py` snapshot）、(2) 历史任务结果（outcome ledger 里的 `outcome_quality`、
       `rework_count`、`failure_reason` 等）。候选路线比较的默认且唯一排序键是 `quota_cost`，不涉及美元估价。
@@ -140,13 +140,13 @@ policy 演化，且其中 `xhigh` 是跨生态抽象值，不等同于所有 pro
       不做，留作未来扩展点：等两侧 runtime 出现真实按量计费路线、且有可靠公开价格来源时再单开任务评估。
     - 原「订阅 vs 计费的建模张力」讨论已由 human 拍板收敛：缺数据时保守不引入，聚焦 quota + outcome 两维，
       避免 false precision（理由详见「未解决问题 6：已决策」）。
-  - [ ] Child C：离线 fixture + replay
+  - [x] Child C：离线 fixture + replay
     - `.claude/skills/coding-agent-quota/fixtures/`（或其下 `fixtures/outcome/` 子目录）放冻结的 quota 快照 +
       outcome ledger 样本（不含 price/speed 参考，本版未引入该来源）。
     - replay 脚本：输入同一份 fixture 应产出确定性相同的路由决策；改变额度/成功率后能展示路线切换与理由差异。
     - 固定 tie-break 次序、时间输入和浮点/序列化规范；确定性断言比较规范化结构或稳定 JSON，不依赖 map 遍历顺序。
     - 覆盖「验收标准」第 2 条。
-  - [ ] Child D：与现有 quota-aware 路由整合
+  - [x] Child D：与现有 quota-aware 路由整合
     - `route_agent_quota.py`（或新脚本，同落在 `coding-agent-quota` 内）在 `route_recommendation` 之外新增可选
       `outcome_route_recommendation` 字段（不改既有字段），说明其相对现有 quota-only 推荐的差异与理由。
     - `subagent-routing/SKILL.md` 步骤 3-4 更新：读取 quota 证据后，若 outcome 证据可用则一并读取，
@@ -164,11 +164,11 @@ policy 演化，且其中 `xhigh` 是跨生态抽象值，不等同于所有 pro
       的叙述里、更不能依赖 Claude 专属的 slash command 或 subagent 工具集，必须能由 CLI 直接跑脚本得到。
     - launch-packet 扩展字段要保持 provider-neutral：`recommended_provider` 已支持 `codex`，新增的
       `outcome_decision_id` 字段不能引入只有 Claude 才有的假设（如「必然经 Task subagent 派发」）。
-  - [ ] Child E：Fallback 与保守回退行为
+  - [x] Child E：Fallback 与保守回退行为
     - 明确「缺数据 / 数据过期」判定阈值（复用 `read_agent_quota.py` 现有 `freshness_warning` 思路）。
     - 触发条件下：outcome 层直接标注 `degraded: true` + 原因，路由结果回退为当前 quota-aware 推荐，
       不得用缺失/过期数据伪装成精确数字。覆盖「验收标准」第 5 条。
-  - [ ] Child F：正式 benchmark 冻结机制
+  - [x] Child F：正式 benchmark 冻结机制
     - 定义「冻结」产物：模型池、路由 policy 版本、预算上限、fixture 版本一次性锁定，运行期间不因中途
       quota 变化切换（本版不涉及价格维度，沿用 `.agent/model-routing-policy.md` 里 transfer experiment 的
       冻结先例）。
@@ -178,11 +178,11 @@ policy 演化，且其中 `xhigh` 是跨生态抽象值，不等同于所有 pro
       模型池快照、预算上限、fixture 版本、冻结时间、涉及字段清单。实际填写的 card 存放位置沿用该模板注释里
       指定的路径约定（参照 experiment card 存 `lab/code/experiments/<id>.md` 并登记 ledger 的模式，具体登记
       文件留给 Child F 实现时确定，例如落在 `.claude/skills/coding-agent-quota/` 下）。
-  - [ ] Child G：报告拆分
+  - [x] Child G：报告拆分
     - 路由结果能分别报告 token、quota 消耗（`quota_cost`）、wall-clock、昂贵模型（如 opus/xhigh effort）用量、
       任务结果，不合并成单一「分数」掩盖构成。不含 $ 价格维度（本版未引入，见「未解决问题 6：已决策」）。
       覆盖「验收标准」第 4 条。
-  - [ ] Child H：Validator / tests
+  - [x] Child H：Validator / tests
     - `scripts/check-outcome-ledger-schema.py`（只读、无第三方硬依赖，风格对齐现有三个 validator 脚本）：
       校验 ledger schema、fixture 可解析、fallback 路径确实触发、且脚本不读取 credential 文件。
     - **新增校验：provider/model/effort 词表不得漂移为 Claude-only**：取值不得越出 fixture 冻结的、带
@@ -332,3 +332,18 @@ policy 演化，且其中 `xhigh` 是跨生态抽象值，不等同于所有 pro
   而是留给实现阶段的一条具体提示：route decision ledger 在记录"为什么选了这条路线"时，若目标 agent 是走
   Paseo 起的（比如 #14 的 Paseo-first 多 agent 控制面），应该把该文件的角色偏好也纳入可解释性证据链，
   不要只看 `model-routing-policy.md` 一侧。是否要据此新增字段，留给实现者按证据判断。
+
+- 2026-07-12 实现完成（Child A-H 全部落地，worker：干将·改·路由）。要点：(1) schema + 示例落
+  `.claude/skills/coding-agent-quota/schema.md`，词表冻结在 `fixtures/outcome/model-catalog.v1.json`
+  （`routing-policy-v1`；codex `effort_vocab` 不含 `xhigh`，抽象档走 `routing_tier`）；(2) 脚本
+  `scripts/outcome_ledger.py`（append-only JSONL、生命周期校验、summary 分维报告）与
+  `scripts/outcome_route.py`（确定性 replay、degraded 回退、`outcome_route_recommendation` 加在
+  `route_recommendation` 之外、`--record` 落 decision）；(3) 真实明细落 gitignored
+  `.outcome-ledger/`（.gitignore 已加条目）；(4) launch-packet 模板只加 `outcome decision id` +
+  `outcome degraded` 两行；(5) 新增 `.agent/templates/routing-benchmark-card.md` 与
+  `benchmarks/README.md` 登记索引；(6) validator `scripts/check-outcome-ledger-schema.py` 接入
+  `validate-governance.py`；(7) 监控员记录的 Paseo 偏好提示已落为 decision 记录的
+  `paseo_preference: {status, role_default}` 字段（复用 `read_agent_quota.py` 既有读取逻辑，文件缺失时
+  status=missing 优雅降级，不新增读取面）。验证：14/14 targeted unittest、validate-governance OK、
+  `sync-codex-adapters.py --check` OK、真实 `codex exec -c model_reasoning_effort=medium` smoke
+  exit 0（gpt-5.6-terra/medium/degraded=false，deterministic decision_id）。

@@ -3,6 +3,7 @@ related_files:
   - ../ANATOMY.md
   - check-agent-harness.py
   - check-anatomy-drift.py
+  - check-outcome-ledger-schema.py
   - validate-governance.py
   - adopt-existing-repo.py
   - check-adoption-integrity.py
@@ -29,8 +30,9 @@ Codex adapter 同步脚本把 `.claude/` canonical 能力生成到 `.codex/` 与
 | --- | --- | --- |
 | `check-agent-harness.py` | 结构/必需文件/根污染/四件套/能力索引/settings/DESIGN 清单 校验 | `.agent/repo-editing-guardrails.md` · `repo-documentation-topology.md` |
 | `check-anatomy-drift.py` | ANATOMY related_files 与 line citation 漂移 + 120 行硬上限 | `.agent/anatomy-protocol.md` |
-| `validate-governance.py` | 聚合上两者 + gitignore/YAML/tracked-bytes + 证据链一致性(overclaim 拦截) | `.agent/action-boundary.md` · `artifact-policy.md` · `principles.md` |
+| `validate-governance.py` | 聚合 harness/anatomy/outcome-ledger 三个子检查 + gitignore/YAML/tracked-bytes + 证据链一致性(overclaim 拦截) | `.agent/action-boundary.md` · `artifact-policy.md` · `principles.md` |
 | `check-same-commit.py` | same-commit rule：结构改动(A/D/R)未同变更集更新对应 ANATOMY → 拦。diff 驱动，不进 governance；由 `.githooks/pre-commit` + CI 调用 | `.agent/anatomy-protocol.md` |
+| `check-outcome-ledger-schema.py` | outcome ledger/fixture schema、decision↔outcome 生命周期、跨 provider 词表不漂移、stale fallback 与 replay 确定性、credential 防线；经 importlib 复用 skill 内 `outcome_ledger.py` | `.agent/model-routing-policy.md` · `plans/20260712-outcome-aware-routing.zh.md` |
 | `adopt-existing-repo.py` | 分 phase 迁移已有 Git repo：discover/baseline/scaffold/normalize/prove | `plans/20260709-adopt-existing-repo.zh.md` · `.claude/skills/adopt-existing-repo/SKILL.md` |
 | `check-adoption-integrity.py` | 读取 adoption baseline，按 hash 证明原 tracked bytes 仍存在 | `.claude/skills/adopt-existing-repo/SKILL.md` |
 | `sync-codex-adapters.py` | 从 `.claude/agents` / `skills` / `commands` 生成并校验 Codex adapters | `.agent/tool-skill-interface.md` |
