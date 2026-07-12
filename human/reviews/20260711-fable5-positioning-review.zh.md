@@ -1,6 +1,7 @@
 # 对论文定位 v3 的独立批判性审核（fable5）
 
-> **审核对象**：`plans/20260711-paper-positioning-v3.zh.md`
+> **审核对象（历史固定 revision）**：[论文定位 v3](https://github.com/a-green-hand-jack/ml-project-repo-agent-native-template/blob/415f865b2b3222727532d173b729a5d581e98655/plans/20260711-paper-positioning-v3.zh.md)
+> **当前状态**：v3 已从当前 tree 删除并由 `plans/20260711-paper-positioning-v5.zh.md` supersede；本文件只保留为审稿过程证据。
 > **审核人立场**：独立资深审稿人（agent 系统 / 软件工程 / 研究方法）。本审核先给独立判断，末节说明与
 > `human/reviews/20260711-codex-positioning-review.zh.md`（针对 v1 的上一轮审核）的增量与分歧。
 > **已核对制品**：`DESIGN.md`、`AGENTS.md`、`.agent/principles.md`、`.reference-docs/claude_code_optimization_spirit_zh.md`

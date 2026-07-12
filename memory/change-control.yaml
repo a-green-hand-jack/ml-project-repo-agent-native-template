@@ -21,3 +21,10 @@ changes:
     anatomy_updated: true
     validator_passed: true
     human_approved: true
+  - id: chg-20260712-paper-positioning-single-source
+    date: 2026-07-12
+    kind: structure
+    summary: 删除旧版论文定位与替代投稿 outline，仅保留 v5 为当前 paper 计划真源
+    anatomy_updated: true
+    validator_passed: true
+    human_approved: true

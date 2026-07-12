@@ -1,10 +1,13 @@
 # 对“环境编码治理”论文定位的批判性审核
 
+> **审核对象（历史固定 revision）**：[早期论文定位草稿](https://github.com/a-green-hand-jack/ml-project-repo-agent-native-template/blob/415f865b2b3222727532d173b729a5d581e98655/plans/20260711-paper-positioning.zh.md)
+> **当前状态**：该草稿已从当前 tree 删除并由 `plans/20260711-paper-positioning-v5.zh.md` supersede；本文件只保留为审稿过程证据。
+
 ## 总评
 
 这份定位抓住了一个真实且重要的问题：长时程、多 session、多 agent 的研究型工作空间，不能只依赖模型自律或一次性自然语言指令；仓库内的权限、证据、状态、结构和验证机制应被视为一等治理对象。仓库本身也确有比单个 `AGENTS.md` 更完整的制品链：doctrine、settings/rules/hooks、validator、人机接口和研究台账形成了分层架构（`DESIGN.md:32-44`），权限与 hook 地板有明确分工（`DESIGN.md:61-96`），证据升级和结构漂移也有机器检查（`DESIGN.md:124-145`）。因此，论文并非完全从口号出发。
 
-但以当前文本投稿，我的总体判断是：**问题重要，系统制品扎实，方法定位尚未成立；workshop 可作为诚实的 position/design paper，正会版本目前会被强拒。** 最大问题不是 science/quant 工程量，而是论文把“一个设计良好的研究仓库”过早提升为“领域无关方法”，并通过低估最接近竞品来制造差异。尤其 `plans/20260711-paper-positioning.zh.md:129-132` 对 *A Deterministic Control Plane for LLM Coding Agents* 的概括与其原始摘要直接冲突：该工作不仅有 10,008 个仓库的 prevalence study，还有 injected-violation conformance tests，并从一个 canonical definition 编译到七个 IDE target；所以“无实证”“单 harness”“无跨 provider”均不能照现文继续写。[原论文摘要](https://arxiv.org/abs/2606.26924)
+但以当前文本投稿，我的总体判断是：**问题重要，系统制品扎实，方法定位尚未成立；workshop 可作为诚实的 position/design paper，正会版本目前会被强拒。** 最大问题不是 science/quant 工程量，而是论文把“一个设计良好的研究仓库”过早提升为“领域无关方法”，并通过低估最接近竞品来制造差异。尤其[旧版定位文档第 129-132 行](https://github.com/a-green-hand-jack/ml-project-repo-agent-native-template/blob/415f865b2b3222727532d173b729a5d581e98655/plans/20260711-paper-positioning.zh.md#L129-L132)对 *A Deterministic Control Plane for LLM Coding Agents* 的概括与其原始摘要直接冲突：该工作不仅有 10,008 个仓库的 prevalence study，还有 injected-violation conformance tests，并从一个 canonical definition 编译到七个 IDE target；所以“无实证”“单 harness”“无跨 provider”均不能照现文继续写。[原论文摘要](https://arxiv.org/abs/2606.26924)
 
 当前最可守的贡献不是“第三种治理编码位置”或“跨 provider”，而是更窄、更具体的一项：**面向高风险、长时程研究工作空间，把研究证据、会话连续性、不可逆资产边界与治理完整性联结为一套可执行的仓库级 assurance profile，并给出跨域实例化与测量方法。** 这应被写成 artifact-centered 的系统/方法混合论文，而不是先宣称领域无关、再用三个案例追认。
 
