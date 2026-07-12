@@ -21,6 +21,8 @@ State files:      current-status / session-tree / plan doc / branch
 
 非几分钟小任务，先让 `interactive-plan-writer` 写 `plans/<YYYYMMDD>-<slug>.zh.md`（模板见 `.agent/templates/plan-doc.zh.md`）。human 在文件里批注 → Claude 读 diff → 收敛 plan → 必要时小 commit。plan doc 是当前 session 的锚点。
 
+plan doc 带生命周期状态（顶部 `Status:` 锚点 + `memory/doc-lifecycle.yaml` 注册表，语义见 `plans/ANATOMY.md`）：session 开始先查 `memory/current-status.md` 的当前 plan 指针与注册表，确认自己接的是哪个 approved/implementing plan；实现只能从 `approved` 之后开始。
+
 ## 3. 探索（read-only first）→ 4. 计划（先拆边界）→ 5. 实现（小步）→ 6. 验证（fresh evidence）
 
 - 探索用只读模式 / `repo-researcher`，返回证据与 plan，不改。

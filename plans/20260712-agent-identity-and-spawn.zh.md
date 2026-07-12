@@ -1,5 +1,7 @@
 # Agent 身份/命名 + 更易唤起 subagent —— 交互式计划
 
+Status: verified · 2026-07-12 · 已实现并合入 main（PR #20/#21，v1.2/v1.3）；存量回填（issue #13 doc-lifecycle）
+
 > 这是 human 与 Claude Code 的协商界面：Claude 写初稿 → human 在「Human 批注区」批注 → Claude 读 diff、收敛 → 每次采纳的修订做一个小 commit。实现只在 scope / forbidden paths / verification 清楚后开始。
 >
 > 触发背景：human 用 Paseo 多 agent 并行工作，每个「标签页」≈ 一个需与 human 交互的 agent。痛点：①Paseo 自动用「开场 prompt 前缀」命名 → 标签列表全是噪音（实测：`终于知道codex5.6额度不耐用的原因了`、`".claude/worktrees/...` 这类）；②唤起 subagent 不够方便。

@@ -1,8 +1,12 @@
 # <topic> 交互式计划
 
+Status: draft · <YYYY-MM-DD> · <ref：approval 证据/初稿说明>
+
 > 复制到 `plans/<YYYYMMDD>-<topic>.zh.md`。这是 human 与 Claude Code 的协商界面：
 > Claude 写初稿 → human 在文件里批注 → Claude 读 diff、收敛计划 → 每次采纳的修订做一个小 commit。
 > 实现只在 scope / forbidden paths / verification 清楚后开始。
+> 状态锚点（上面一行）+ `memory/doc-lifecycle.yaml` 注册表登记，语义见 `plans/ANATOMY.md`；
+> 起草即登记，human 批准后才可转 approved。
 
 ## 当前目标
 

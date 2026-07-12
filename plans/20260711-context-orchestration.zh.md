@@ -1,5 +1,7 @@
 # 主动上下文调配（context orchestration）交互式计划
 
+Status: verified · 2026-07-12 · 已实现并合入 main（PR #10）；存量回填（issue #13 doc-lifecycle）
+
 > 这是 human 与 Claude Code 的协商界面：Claude 写初稿 → human 在「Human 批注区」批注 → Claude 读 diff、收敛 → 每次采纳的修订做一个小 commit。实现只在 scope / forbidden paths / verification 清楚后开始。
 >
 > 触发背景：GPT-5.6 在 Codex 里因窗口变大更容易越过 272K 长上下文计费线（全请求 2× 输入 / 1.5× 输出）。结论是**不硬限窗口**，而是靠"主动调配"把 context 稳在合适区间。本模板本就按 [gist optimization spirit](https://gist.github.com/a-green-hand-jack/c5ffc265f41763f2c58837e1a0b8b037) 建立，但"主动调配"那半边缺失。

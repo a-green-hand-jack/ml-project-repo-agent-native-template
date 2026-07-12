@@ -155,7 +155,8 @@
       "Bash(rm -rf dist*)",
       "Bash(python scripts/check-agent-harness.py *)",
       "Bash(python scripts/validate-governance.py *)",
-      "Bash(python scripts/check-anatomy-drift.py *)"
+      "Bash(python scripts/check-anatomy-drift.py *)",
+      "Bash(python scripts/check-doc-lifecycle.py *)"
     ]
   },
   "statusLine": {

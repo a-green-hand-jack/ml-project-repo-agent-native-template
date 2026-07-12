@@ -19,6 +19,19 @@
 > 或 `CODEX_ALLOW_PUSH_MAIN=1`（单次），见 `.agent/autonomous-window.md`。开 PR / merge /
 > release / 建远端 repo 仍是完整门禁。
 
+## 四类文档的 approved 证据（doc-lifecycle，issue #13）
+
+brief / plan / review / decision 的 `draft → in-review → approved` 由 human 批注驱动，
+**approved 是 human gate**。机器只强制可判定事实（hook `pre_tool_guard.py` + validator
+`scripts/check-doc-lifecycle.py`，状态语义见 `plans/ANATOMY.md`）：
+
+- 标 `approved`/`implementing` 前：plan 的 Allowed paths / Forbidden paths / 验证标准 非空、非占位；
+  Human 批注区无 `[?]`/`[改]` 未决批注。
+- `memory/doc-lifecycle.yaml` 的 `approval` 字段引用真实批准证据（批注 diff / 拍板记录 / PR）；
+  upstream/downstream/path 引用不悬空；上游被 `superseded` 则本条 approval 过期，需重新走 gate。
+- `approved → implementing → verified` 由 agent 据证据自主标记，human 审 PR 时复核。
+- human 明示例外可 `DOC_LIFECYCLE_SKIP=1` 绕过 hook（validator 仍事后校验）。
+
 ## 门禁形态
 
 - 机器层：`.claude/settings.json` 与 `.codex/rules/default.rules` 里对应 `ask` / `deny` / `prompt`；

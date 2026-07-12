@@ -1,0 +1,105 @@
+# doc-lifecycle.yaml — brief/plan/review/decision 四类文档生命周期注册表（issue #13）
+#
+# 由 agent 维护，human 不手填复杂 YAML；文档正文的状态锚点行（Status: <enum> · <date> · <ref>）
+# 是人类可读锚，本文件是机器可解析的关联/证据。两处必须一致（validator 在 commit 粒度强制）。
+#
+# 校验：scripts/check-doc-lifecycle.py（由 validate-governance.py 拉起）。
+# 机械拦截：.claude/hooks/pre_tool_guard.py 经 pretooluse_reason() 复用同一份判定逻辑。
+# schema 与状态语义详见 plans/ANATOMY.md。
+#
+# 状态枚举：draft → in-review → approved → implementing → verified；superseded 为终态。
+# 字段（每条 docs[]）：
+#   id / path / kind(brief|plan|review|decision) / status
+#   issue / branch / worktree —— 关联坐标（自由文本，可为 null）
+#   approval —— human gate 证据引用（approved/implementing/verified 必填、非占位）
+#   upstream / downstream —— 注册表内其他条目 id（必须真实存在；上游被标 superseded
+#     时，本条 approved/implementing 视为过期 approval，需重新走 human gate）
+#   superseded_by —— 被取代时指向新条目 id
+#
+# 格式约定（保证无 PyYAML 时受限解析器可读）：两空格缩进；条目以 `- id:` 开头；
+# 列表用块列表或行内 `[a, b]`；不用行内注释、不用制表符。
+
+docs:
+  - id: plan-20260709-adopt-existing-repo
+    path: plans/20260709-adopt-existing-repo.zh.md
+    kind: plan
+    status: verified
+    issue: null
+    branch: worktree-adopt-existing-repo
+    worktree: null
+    approval: "已实现并合入 main（commit 93fabae：adopt-existing-repo.py + check-adoption-integrity.py + skill）"
+    upstream: []
+    downstream: []
+    superseded_by: null
+
+  - id: plan-20260711-context-orchestration
+    path: plans/20260711-context-orchestration.zh.md
+    kind: plan
+    status: verified
+    issue: null
+    branch: feat/context-orchestration
+    worktree: null
+    approval: "已实现并合入 main（PR #10：statusline 上下文表 + 阈值 hook + continuity hook）"
+    upstream: []
+    downstream: []
+    superseded_by: null
+
+  - id: plan-20260712-agent-identity-and-spawn
+    path: plans/20260712-agent-identity-and-spawn.zh.md
+    kind: plan
+    status: verified
+    issue: null
+    branch: feat/agent-identity + feat/agent-spawn
+    worktree: null
+    approval: "已实现并合入 main（PR #20 identity Phase 1-2 · PR #21 spawn Phase 3，v1.2.0/v1.3.0）"
+    upstream: []
+    downstream: []
+    superseded_by: null
+
+  - id: plan-20260712-plan-lifecycle-state
+    path: plans/20260712-plan-lifecycle-state.zh.md
+    kind: plan
+    status: implementing
+    issue: "#13"
+    branch: feat/13-plan-lifecycle-state
+    worktree: .claude/worktrees/13-plan-lifecycle-state
+    approval: "human 逐条拍板（plan doc「当前决策」1–11，Plan revision log 2026-07-12 末三条）"
+    upstream: []
+    downstream: []
+    superseded_by: null
+
+  - id: decision-00000000-adopt-template
+    path: human/decisions/00000000-adopt-template.md
+    kind: decision
+    status: approved
+    issue: null
+    branch: null
+    worktree: null
+    approval: "DECISIONS.md 索引 accepted（human）"
+    upstream: []
+    downstream: []
+    superseded_by: null
+
+  - id: decision-20260709-doc-language-default-chinese
+    path: human/decisions/20260709-doc-language-default-chinese.md
+    kind: decision
+    status: approved
+    issue: null
+    branch: null
+    worktree: null
+    approval: "DECISIONS.md 索引 accepted（human）"
+    upstream: []
+    downstream: []
+    superseded_by: null
+
+  - id: decision-20260709-lab-docs-reference-and-external-vendor-placement
+    path: human/decisions/20260709-lab-docs-reference-and-external-vendor-placement.md
+    kind: decision
+    status: approved
+    issue: null
+    branch: null
+    worktree: null
+    approval: "DECISIONS.md 索引 accepted（human）"
+    upstream: []
+    downstream: []
+    superseded_by: null
