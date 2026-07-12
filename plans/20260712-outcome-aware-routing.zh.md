@@ -323,3 +323,12 @@ policy 演化，且其中 `xhigh` 是跨生态抽象值，不等同于所有 pro
   按 ID 存 ledger 查询，不在 launch packet 内嵌完整证据链。落地范围：当前目标、Allowed paths、任务树
   Child A/C/D/F/H、当前决策、未解决问题 1/2/4/5、验证标准均相应改写。未解决问题 1-6 至此全部收敛，本文件
   不再有待拍板的 open question。
+
+- 2026-07-12 分支同步 + 新增信号来源提示（监控员编排）：把 main 最新进展（PR #20/#21、v1.2.0/v1.3.0）merge
+  进本分支，确认 `.claude/skills/coding-agent-quota/`（本计划扩展目标）现状不受影响。另外记录一条本轮从
+  Paseo 操作中发现、本计划尚未纳入的信号来源：**`~/.paseo/orchestration-preferences.json`** 是 Paseo 官方
+  按角色（impl/ui/research/planning/audit）定默认 provider 的偏好文件，`coding-agent-quota`/本计划新增的
+  outcome-aware 路由目前完全没有读取它。这不是本轮决策范围内的新 open question（不影响此前已收敛的 6 条），
+  而是留给实现阶段的一条具体提示：route decision ledger 在记录"为什么选了这条路线"时，若目标 agent 是走
+  Paseo 起的（比如 #14 的 Paseo-first 多 agent 控制面），应该把该文件的角色偏好也纳入可解释性证据链，
+  不要只看 `model-routing-policy.md` 一侧。是否要据此新增字段，留给实现者按证据判断。
