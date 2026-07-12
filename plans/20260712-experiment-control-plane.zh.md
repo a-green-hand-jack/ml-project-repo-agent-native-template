@@ -79,7 +79,7 @@
   - [ ] E. bounded watcher
     - [ ] E1. 检查项：日志尾部（有界行数）、最新 metric、checkpoint 新鲜度、资源/进程存活、config drift、failure signal（复用 experiment-card 里的 `failure_signals` 列表）
     - [ ] E2. bounded 保证：日志只 tail 固定行数、不无限轮询（一次性快照检查或有超时的有限循环）、输出摘要不贴长日志
-    - [ ] E3. 明确 watcher 与现有 `experiment-monitor` agent 的关系：是扩展其职责，还是拆出新的 `experiment-watcher` agent（保持只读、无 kill/restart 权限不变）。**Codex 对等性**：`sync-codex-adapters.py` 按 tools 是否含 Edit/Write/NotebookEdit 决定 `sandbox_mode`——纯 `Read/Bash/Grep` 的 agent 会映射成 `read-only` sandbox（`experiment-monitor` 现状即是）。所以只读 watcher 的「不 kill/restart」在 Codex 侧靠 read-only sandbox + 共享 hook + execpolicy `prompt` 三层，而**不是**靠 Claude 的 tools 白名单（adapter 不强制 tools 白名单，只作行为边界）。设计新 watcher 时若给它 Bash，要确认 read-only sandbox 下它仍只做只读检查。
+    - [ ] E3. 明确 watcher 与现有 `experiment-monitor` agent 的关系：是扩展其职责，还是拆出新的 `experiment-watcher` agent（保持只读、无 kill/restart 权限不变）。**Codex 对等性（本轮实核）**：`sync-codex-adapters.py:47-51` 按 tools 是否含 Edit/Write/NotebookEdit 生成 `sandbox_mode`；纯 `Read/Bash/Grep` 的现有 monitor 已生成 `sandbox_mode = "read-only"`（`.codex/agents/experiment-monitor.toml:4`）。但 `read-only` 主要约束文件系统写入，不能据此宣称它必然阻止进程信号；共享 `pre_tool_guard.py` 当前也不拦 `kill/sbatch/runai`。Codex 侧真正可实测的命令门禁是 execpolicy：三者均命中 `prompt`。因此 watcher 的不干预边界应由「read-only 限制写文件 + execpolicy 对已登记副作用命令 prompt/forbidden + agent 行为契约」共同承担，不能把它描述成三层都独立拦 kill/restart；新增 wrapper/launch 入口还必须显式登记，避免绕过前缀规则。
   - [ ] H. Codex 适配层同步与对等验证（每次动 canonical agent/skill 后必做）
     - [ ] H1. 改完 `.claude/agents/*.md`、`.claude/skills/experiment-workflow/SKILL.md`、新增 agent 后，跑 `python scripts/sync-codex-adapters.py`，把生成的 `.codex/agents/*.toml`、`.agents/skills/**` 与 canonical 同 commit 提交。
     - [ ] H2. 跑 `python scripts/check-agent-harness.py` 确认 adapter 同步（内含 `--check`）+ 受保护路径权限地板 + hook 脚本存在；若新增 agent/hook/skill，同步更新 `DESIGN.md` §10 能力清单计数。
@@ -104,6 +104,8 @@
 - 领域训练命令识别（issue 提到"任意领域训练命令也难以仅靠字符串 hook 识别"）在本轮不解决具体识别算法，只保证 adapter contract 层面能描述"这是一条 launch 命令"，具体领域 launch 命令注册机制留给下游（对齐"边界"一节）。
 - **控制面走 runtime-neutral 主干（二审新增）**：状态机、校验、adapter contract、watcher、alert/resume 都以 CLI 脚本 + repo 内 YAML 文件 + validator 实现，Claude 与 Codex 调用同一入口。Claude 专属的 subagent/skill/hook 只是这套 CLI/文件的**调用者与包装**，不是唯一入口——保证 Codex 侧经 `.codex/agents/*.toml` 拿到的等价角色能走同一条路。
 - **Codex adapter 同步是硬步骤（二审新增）**：任何 canonical agent/skill 改动都要跑 `sync-codex-adapters.py` 并同 commit 提交生成物；`check-agent-harness.py` 会 gate 这一点。权限规则（settings.json / execpolicy）不在 sync 范围，需两侧手工对齐。
+- **新增 launch 入口必须先补双侧显式门禁（Codex 真实二审确认）**：本轮 `codex execpolicy check` 证明 `kill 123`、`sbatch train.sh`、`runai submit ...` 都返回 `prompt`；但示例 `python scripts/launch-experiment.py ...` 与 `bash lab/infra/launch/run-local.sh ...` 均为 `matchedRules: []`。共享 `pre_tool_guard.py` 也没有 launch/kill 检查。因此不能用「控制面只生成草案」替代机器门禁：一旦选定可执行入口，先把精确命令前缀加入 `.claude/settings.json` 的 `ask` 与 `.codex/rules/default.rules` 的 `prompt`，再允许 fake smoke。
+- **recovery-advisor 保持只读（Codex 真实二审收敛）**：若拆分该角色，它只输出结构化 recovery proposal，不直接落文件、更不执行命令；由已有 workspace-write orchestrator 校验并持久化提案。这样不会仅因“写一份建议”把 advisor 升到 `workspace-write`，也缩小 wrapper 命令绕过简单前缀规则时的风险面。
 
 ## 未解决问题
 
@@ -114,9 +116,8 @@
 5. **agent 组织方式**：是扩展现有 `experiment-orchestrator` / `experiment-monitor` 两个 agent 的职责，还是拆出新的 `experiment-watcher`（bounded 监控 + alert 生成）与 `experiment-recovery-advisor`（resume 提案，仍无执行权）？倾向后者以保持每个 agent 职责单一、可审计，但需要 human 确认是否值得多开 agent 文件。
 6. **现有 `run-000` 占位条目**：本次改动是否需要同步把 `lab/research/experiment-ledger.yaml` 里的占位条目升级为新 schema 的样例，还是只更新模板/文档，留待第一个真实实验时再落地新字段？
 7. **校验脚本落点**：新校验逻辑是整合进 `scripts/validate-governance.py`（单一入口，风险是让该脚本变大），还是新增独立 `scripts/validate-experiment-state.py` 并在 `validate-governance.py` 里调用（更符合单一职责，但要注意别在 `scripts/ANATOMY.md` 里遗漏登记）？
-8. **（二审新增）双 runtime smoke 到什么程度**：验收「fake/local job 启动审批→监控→告警→停止→恢复 smoke」是只在 Claude 侧跑一遍（因控制面是 CLI+文件，理论 runtime-neutral），还是需要在 Codex 侧也实跑一遍确认 execpolicy `prompt` 与共享 hook 真的拦住 fake launch/kill？我没有 Codex 一手运行证据，无法断言 Codex 侧一定等价——倾向至少静态核对「settings.json 的 ask 规则」与「execpolicy 的 prompt 规则」都覆盖 fake launch 命令模式，实跑 Codex smoke 是否纳入本 issue 由 human 拍板。
-9. **（二审新增）launch 门禁是否需要新增权限规则**：现状 execpolicy 只有 `kill|sbatch|runai → prompt`，settings.json 侧对应 `ask`。若控制面引入新的 launch 入口脚本（如 `lab/infra/launch/run-*.sh` 或某个 `python scripts/launch-*.py`），是否需要为该模式在两侧各加一条 `ask`/`prompt`？若需要，就触发权限地板改动（超出常规 Allowed paths，需单列 gate）。还是坚持「launch 只由人手动执行、控制面永不代跑」从而不需要新规则？
-10. **（二审新增）recovery-advisor 的 sandbox 语义**：若拆出 recovery-advisor 来写 resume 提案文件，它需要 Write → Codex adapter 会映射成 `workspace-write` sandbox，「不执行 kill/restart」就只能靠 execpolicy `prompt` + 共享 hook 兜底，而非 sandbox 只读。是否接受这一层差异，还是让 advisor 也保持纯只读（只输出文本提案、由 orchestrator 落文件）？
+8. **双 runtime 的完整业务 smoke 仍待实现后验证**：本轮已经在真实 Codex session 里验证现有 policy，而不是继续保留“缺 Codex 一手证据”的泛问：`kill/sbatch/runai` 均命中 `prompt`，两个假设的 fake launch 入口均未命中规则。由于控制面脚本、registry 与 fake adapter 尚未实现，现在无法诚实地跑「审批→监控→告警→停止→恢复」端到端 smoke。实现后应对同一 CLI/文件流程跑一次业务 smoke，并分别对 Claude/Codex 做权限层定向测试；不需要仅为 runtime 名称重复两套完全相同的业务测试。
+9. **read-only sandbox 的进程干预边界仍需实现期定向验证**：本轮能确认生成器与产物把 monitor 配成 `read-only`，也能确认当前 Codex App 根 session 是 `workspace-write`，不能冒充 monitor 子 agent 的端到端运行证据。更重要的是，文件系统 read-only 不等价于“不能发 signal”。实现期应启动真实 `experiment-monitor` custom agent，分别验证工作区写入失败、`kill` 触发门禁且未执行；测试只针对受控 fake process，不触达真实训练。当前结论只写到已证明的配置生成与 execpolicy 判定，不硬凑 sandbox 的 syscall 结论。
 
 ## 验证标准
 
@@ -128,12 +129,12 @@
 - scheduler adapter fallback：在未安装/检测不到 Slurm、RunAI 等 CLI 的环境下（本仓库当前环境即是），adapter 层能优雅降级为 local-only 模式，不报错、不阻断其余流程、不引入新的 Python 依赖。
 - 运行 `python scripts/validate-governance.py`（以及新增的针对性校验脚本/测试）全部通过，并在报告中给出确切命令与输出。
 - **（二审新增）Codex 适配层验证**：跑 `python scripts/sync-codex-adapters.py`（重生成）+ `python scripts/check-agent-harness.py`（内含 `--check`），确认 `.codex/agents/*.toml`、`.agents/skills/**` 与 canonical `.claude/` 同步、无 stale/unexpected/missing adapter；新增 agent/hook/skill 时 `DESIGN.md` §10 计数无 WARN。
-- **（二审新增）双 runtime 门禁对等**：静态核对 fake launch/kill 命令模式在 `.claude/settings.json`（`ask`）与 `.codex/rules/default.rules`（execpolicy `prompt`/`forbidden`）**两侧都被覆盖**，不存在「一侧拦、另一侧放行」。若 human 决定要 Codex 侧实跑 smoke（见未解决问题 8），补充该证据。
+- **双 runtime 门禁对等（本轮改严）**：为最终确定的 fake/local launch、kill、restart 入口逐条做权限测试；Claude 侧应命中 `.claude/settings.json` 的 `ask`，Codex 侧应由 `codex execpolicy check --pretty --rules .codex/rules/default.rules -- <command>` 明确返回 `prompt`/`forbidden`。`matchedRules: []` 视为验收失败。共享 `pre_tool_guard.py` 只作为红线地板，不得误报成已覆盖这些计算副作用命令。
 - 结构性改动（ledger schema、agent 职责、脚本新增）同 commit 更新相关 `ANATOMY.md`。
 
 ## 下一步
 
-- 等待 human 在本文件「Human 批注区」/ 各章节内批注，重点确认：未解决问题 1-7、非目标是否有遗漏或过严的地方。
+- 等待 human 在本文件「Human 批注区」/ 各章节内批注，重点确认：未解决问题 1-7、9，以及非目标是否有遗漏或过严的地方；问题 8 已缩小为实现后必做的验收，不再要求 human 决定是否需要 Codex 证据。
 - 收到批注后 Read diff + `git status`，收敛计划为 v2，若涉及范围变化同步更新 Allowed/Forbidden paths 与任务树。
 - 计划收敛且 human 明确批准后，再进入实现阶段（不在本轮 plan 文档任务中开始写代码）。
 
@@ -141,3 +142,4 @@
 
 - 2026-07-12 初稿（基于 issue #16 + `.agent/action-boundary.md`、`.claude/skills/experiment-workflow/SKILL.md`、`.claude/agents/experiment-orchestrator.md`、`.claude/agents/experiment-monitor.md`、`.agent/templates/{experiment-card,run-summary}.md`、`.agent/human-gates.md`、`.agent/artifact-policy.md`、`lab/research/experiment-ledger.yaml`、`lab/infra/launch/README.md`、`lab/infra/AGENTS.md` 现状梳理）
 - 2026-07-12 二审修订（由 Claude Opus 4.8 代替额度耗尽的 Codex gpt-5.6-sol 做第二意见审查）。重点补 Codex 侧对等缺口：runtime-neutral 控制面主干、`sync-codex-adapters.py` 硬同步步骤（新增任务 H）、`check-agent-harness.py`/`DESIGN.md §10` 验证、权限地板两侧手工对齐、launch 命令识别以 registry 为单一真源供共享 hook 消费、只读 watcher 的 Codex `read-only` sandbox 语义；新增 open questions 8-10（双 runtime smoke 深度、launch 门禁新规则、recovery-advisor sandbox）。人类最终批准仍待定。
+- 2026-07-12 Codex（gpt-5.6-sol, medium）真实二审：实测 `kill/sbatch/runai` 的 execpolicy 均为 `prompt`，而两个示例 fake launch 入口均未命中规则；据此把新增 launch 双侧显式门禁定为前置条件，纠正“read-only sandbox + hook + execpolicy 都能拦 kill”的过强表述，收敛 recovery-advisor 为只读提案角色，并把暂时无法完成的 custom-agent sandbox / 全业务 smoke 明确推迟到实现期受控 fake process 验证。人类最终批准仍待定。
