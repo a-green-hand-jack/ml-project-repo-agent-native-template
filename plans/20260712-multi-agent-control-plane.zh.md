@@ -15,7 +15,7 @@
 5. **写错 worktree 可自动检测**：有负向 fixture 覆盖，不只靠 prompt 自检（`launch-packet.md` 里的 `self-check` 字段目前只是文档提醒，不是机器检查）。
 6. **Paseo 优先接入，但通过 adapter 边界**：list/status/message/handoff 走统一接口，Paseo 是第一个 adapter 实现，为后续 runtime（如 LingTai）预留同一 contract。
 
-> **runtime-neutral 在本 repo 的具体含义（issue #14 标题即「runtime-neutral」，是硬约束不是口号）**：本模板同时被 Claude Code 与 Codex 两个 runtime 消费，canonical 能力在 `.claude/`，Codex 侧 `.codex/agents/*.toml`、`.agents/skills/**` 由 `python scripts/sync-codex-adapters.py` 生成，`.codex/config.toml`、`.codex/rules/default.rules` 则是手维护。因此「runtime-neutral」在这里**不只**指「不依赖 Paseo」，还必须满足：(a) 控制面的核心是**纯 `python scripts/...` + repo 文件读写**，Claude 与 Codex 都能等价调用，不走 Claude 专属的 Task/subagent 机制；(b) 任何机器强制（hook 层冲突/写错 worktree 检测）要么折进两侧**已共享**的 `.claude/hooks/pre_tool_guard.py`（`.codex/config.toml` 已挂同一脚本，一处改两侧生效），要么新起 hook 时**必须同时**手工接进 `.claude/settings.json` 与 `.codex/config.toml`；(c) 新增 skill 必须跑生成器同步出 `.agents/skills/**`，否则 `check-agent-harness.py` 会 FAIL；(d) 至少有一次「控制面在 Codex 表面也能跑通」的证据（真实 smoke 或明确标注的人工核对）。本审查（Claude Opus 4.8 代 Codex 二审）重点即补齐这条线上的缺口。
+> **runtime-neutral 在本 repo 的具体含义（issue #14 标题即「runtime-neutral」，是硬约束不是口号）**：本模板同时被 Claude Code 与 Codex 两个 runtime 消费，canonical 能力在 `.claude/`，Codex 侧 `.codex/agents/*.toml`、`.agents/skills/**` 由 `python scripts/sync-codex-adapters.py` 生成，`.codex/config.toml`、`.codex/rules/default.rules` 则是手维护。因此「runtime-neutral」在这里**不只**指「不依赖 Paseo」，还必须满足：(a) 控制面的核心是**纯 `python scripts/...` + repo 文件读写**，Claude 与 Codex 都能等价调用，不走 Claude 专属的 Task/subagent 机制；(b) 任何机器强制（hook 层冲突/写错 worktree 检测）要么折进两侧**已共享**的 `.claude/hooks/pre_tool_guard.py`（`.codex/config.toml` 已挂同一脚本，一处改两侧生效），要么新起 hook 时**必须同时**手工接进 `.claude/settings.json` 与 `.codex/config.toml`；(c) 新增 skill 必须跑生成器同步出 `.agents/skills/**`，否则 `check-agent-harness.py` 会 FAIL；(d) 控制面实现后至少有一次「真实 Codex 表面跑通」的 smoke 证据，不能只用合成 JSON 代替。本轮 Codex 真实二审已验证现有 Codex/Paseo/trust/hook 配置基座，但新控制面尚未实现，故功能级 smoke 仍属于步骤 6.4 的验收项。
 
 ## 非目标（明确推迟，不在本轮设计/实现）
 
@@ -97,14 +97,14 @@
   - [ ] 4.4 轻量 file lease 评估：heartbeat+TTL 是否足以防「陈旧 agent 误判为仍持有 ownership」；若不够，加一个最小锁文件（谁在写、何时过期），明确不做 merge queue
 - [ ] 5. Paseo adapter（对应验收标准 #5 的一部分）
   - [ ] 5.1 定义 adapter contract：list/status/send/handoff-notify 的统一输入输出接口（runtime-neutral，无 Paseo 时优雅降级——已有先例 `agent_name_set.py._paseo_rename`）
-  - [ ] 5.2 Paseo adapter 实现：复用 `paseo ls --json` / `paseo send` / `paseo agent update`。**环境变量对等性存疑（待核）**：`_paseo_rename` 依赖 `PASEO_AGENT_ID`；该 env 在 Claude-under-Paseo 有先例，但**在 Codex-under-Paseo 表面是否被同样注入，本审查无一手证据**（见 open question）。故 adapter 判定「当前是否在 Paseo 内」不要只认某一个 runtime 的 env 名；缺 env 时一律走 fallback，绝不 raise。
+  - [ ] 5.2 Paseo adapter 实现：复用 `paseo ls --json` / `paseo send` / `paseo agent update`。**本轮 Codex-under-Paseo 实测已确认**：当前真实 Codex companion session 同时有 `CODEX_THREAD_ID`、`CODEX_COMPANION_SESSION_ID` 与 `PASEO_AGENT_ID`，且 `CHROME_DESKTOP=Paseo.desktop`；因此该 env 在这一条 Codex/Paseo 启动路径会注入。但 adapter 仍不得把它当成所有 runtime/启动方式的唯一判据：缺 env 时走 fallback、不 raise，并用测试覆盖。
   - [ ] 5.3 Paseo integration smoke test + Paseo unavailable fallback test（fallback 路径即等价于「Codex 侧若无 Paseo env 也能跑」的证据，二者复用同一 no-Paseo 分支）
   - [ ] 5.4 为 LingTai 等后续 runtime 预留 adapter 接口文档（只写 contract 说明，不写实现）
 - [ ] 6. 多 agent 对抗测试 + 治理收尾
   - [ ] 6.1 对抗场景测试：两个 agent 同时声明同一 ownership 路径、其中一个 stale 后另一个接手、消息未读堆积等
   - [ ] 6.2 `ANATOMY.md`/`DESIGN.md`/`.agent/AGENTS.md` 同步；`memory/branches/14-multi-agent-control-plane.md` 落地。若新增了 skill：`python scripts/sync-codex-adapters.py` 生成 `.agents/skills/**`，并同步 `DESIGN.md §10` 能力清单计数（否则 `check-agent-harness` 告警）。
   - [ ] 6.3 `python scripts/validate-governance.py --strict` / `check-agent-harness.py --strict`（内部含 `sync-codex-adapters.py --check`，会捕获 Codex adapter 漂移）/ `check-anatomy-drift.py` 通过
-  - [ ] 6.4 **双 runtime 对等收尾**：(a) `python scripts/agent-status.py` 等新脚本以裸 `python` 跑通（证明不依赖任一 runtime 的 Task/subagent 机制）；(b) 若冲突/写错-worktree 走 hook 层，验证其在 `.codex/config.toml` 里已挂载、且对 `apply_patch` tool_input 形状能触发（可用喂 JSON 到 hook 的单元测试模拟，不需真起 Codex session）；(c) 记录一条「Codex 表面能跑通控制面」的证据——**真实 Codex smoke 若不可得，则明确标注为待人工在 Codex 下核对的 open item，不谎称已验证**（本 repo 无 Codex 一手运行证据，见 open question 与 `session-tree.md`「Codex hooks/config require project trust」风险）。
+  - [ ] 6.4 **双 runtime 对等收尾**：(a) `python scripts/agent-status.py` 等新脚本以裸 `python` 跑通（证明不依赖任一 runtime 的 Task/subagent 机制）；(b) 若冲突/写错-worktree 走 hook 层，验证其在 `.codex/config.toml` 里已挂载、且对 `apply_patch` tool_input 形状能触发（先用喂 JSON 到 hook 的定向测试证明路径解析/deny，再在真实 Codex session 做一次无副作用或临时 fixture 的 end-to-end deny smoke）；(c) 在本轮已证实 Codex/Paseo/trust 基座可用的前提下，记录一条「实现后的控制面在真实 Codex 表面跑通」的命令与输出。若届时环境确实不可得，才降级为明确 open item，不能用 Claude 或合成测试冒充。
   - [ ] 6.5 起草 PR（human gate，需明确批准才 `gh pr create`）
 
 ## Human 批注区
@@ -127,9 +127,9 @@
 ### Codex / 双 runtime 相关（本轮二审新增）
 
 7. **冲突/写错-worktree 检测的落点：折进 `pre_tool_guard.py` 还是新起独立 hook？** 前者一处改、`.claude/settings.json` 与 `.codex/config.toml` 都已挂它、两侧自动生效，但会让本已复杂的地板 hook 更重；后者关注点清晰，但必须记得**手工**在两个表面各挂一次（漏挂 Codex 侧就是「设计成 Claude-only」的典型坑）。倾向哪种？（本审查建议：写前实时检测折进 `pre_tool_guard`；全量检测放独立 validator 脚本，两侧都用 `python` 调。）
-8. **`PASEO_AGENT_ID` 在 Codex-under-Paseo 表面是否存在？** 身份/rename/adapter 都依赖它，Claude 侧有先例，但 Codex 侧本审查**无一手证据**。需 human 用一个真实 Codex-in-Paseo session `printenv | grep -i paseo` 确认；在确认前，adapter 一律「缺 env → fallback、不 raise」，不把某一 runtime 的 env 名写死成唯一判据。
-9. **是否要求真实 Codex smoke，还是接受「纯 python 脚本 + 喂 JSON 到 hook 的单元测试 + 明确标注待人工核对」作为 Codex 侧等价证据？** 我没有 Codex 一手运行环境，也不该谎称跑过；且 Codex 首次运行 hooks 需 project-trust 与 hook-trust review（见 `session-tree.md` 风险）。请 human 拍板验收口径：硬性要求真跑一次 Codex，还是接受降级证据 + open item。
-10. **statusline 呈现的不对等要不要在 doctrine 里显式写清？** 身份 `🤖` 段与「实时 presence」只在 Claude 表面（`.claude/settings.json` 的 `statusLine`）渲染，`.codex/config.toml` 无 statusLine 字段。控制面的「谁在跑」应以 **roster/状态文件 + `agent-status.py` 输出**为 runtime-neutral 单一真相源，statusline 只是 Claude 侧的便利视图——是否在 doctrine 明确这条，避免后人误把 presence 建在 statusline 上？
+8. **已由本轮 Codex 实测回答：`PASEO_AGENT_ID` 在 Codex-under-Paseo 表面存在。** 当前 session 的 `/home/user/.codex/sessions/.../<CODEX_THREAD_ID>.jsonl` 证明这是 Codex thread；同一进程环境同时含 `PASEO_AGENT_ID=6ab41037-...`、`CHROME_DESKTOP=Paseo.desktop`、`CODEX_COMPANION_SESSION_ID`。结论仅覆盖当前 Paseo desktop → Codex companion 启动路径，不外推到所有 Codex 启动方式；adapter 仍须「缺 env → fallback、不 raise」。
+9. **本轮审查结论：实现验收应要求一次真实 Codex smoke，合成测试只作为前置证据。** 当前真实 Codex session 已能读取 repo-local skills/config，并完成对本计划文件的 `apply_patch`，说明 Codex 表面和普通写路径可用；但普通允许写入不能证明 `pre_tool_guard.py` 的 deny 分支确实被 native hook 调用。现有实锤分三层：(a) 用户级 config 将项目根标为 `trusted`；(b) repo `.codex/config.toml` 把 `PreToolUse` 的 `apply_patch` 挂到 `pre_tool_guard.py`；(c) synthetic Codex JSON 对受保护路径返回 exit 2。三者仍不能替代实现后以临时 fixture 做一次真实 end-to-end deny smoke，因此步骤 6.4 保留该硬验收；若当时不可得，必须明确记录缺口及原因。
+10. **本轮审查结论：doctrine 应显式写清 statusline 不对等。** `.claude/settings.json` 有 `statusLine`，`.codex/config.toml` 没有对应展示面；故 roster/结构化状态文件 + `agent-status.py` 才是 presence 的 runtime-neutral 真相源，statusline 只能是 Claude 侧派生便利视图，不能参与 ownership、staleness 或 lease 判定。
 
 ## 验证标准
 
@@ -145,12 +145,12 @@
   - 新查询/检测脚本以裸 `python scripts/...` 跑通，输出与经 Claude/Codex 调用时一致（证明核心不绑任一 runtime）。
   - 若走 hook 层：喂 Codex 形状的 tool_input（`apply_patch` + `*** Update File:` patch 头）到 hook，能触发写前冲突/写错-worktree 检测；且 `.codex/config.toml` 里确有该 hook 的挂载条目（可用 `check-agent-harness` 的 Codex hook 脚本存在性检查兜底）。
   - 若新增 skill：`python scripts/sync-codex-adapters.py --check` 退出码 0（`.agents/skills/**` 与 canonical 同步）。
-  - Codex 真实 smoke：可得则记录命令/输出；不可得则在 `memory/branches/14-...md` 明确留一条「待人工在 Codex-in-Paseo 下核对」的 open item，**不以 Claude 侧结果冒充 Codex 侧验证**。
+  - Codex 真实 smoke：实现后在 Codex-in-Paseo 下记录命令/输出；至少覆盖查询脚本与一个临时 fixture 上的 hook deny 路径。只有环境客观不可得时才允许降级为 `memory/branches/14-...md` 中的 open item，并写明原因；**不以 Claude 侧或 synthetic JSON 结果冒充 Codex 端到端验证**。
 - **全局**：`python scripts/validate-governance.py --strict`、`python scripts/check-agent-harness.py --strict`（内部 `sync-codex-adapters.py --check`）、`python scripts/check-anatomy-drift.py` 通过；新增/改动的 Python 通过 `python -m py_compile`（或 repo 既有的 lint/format 钩子）。
 
 ## 下一步
 
-- 等 human 在本文件批注：storage 介质、TTL、拦截点顺序、Paseo 接入时机、mailbox 粒度、与 Phase 3 spawn skill 的关系；以及新增的 Codex/双 runtime open questions（#7–#10：hook 落点、`PASEO_AGENT_ID` 对等、是否要求真实 Codex smoke、statusline 呈现不对等是否入 doctrine）。
+- 等 human 在本文件批注：storage 介质、TTL、拦截点顺序、Paseo 接入时机、mailbox 粒度、与 Phase 3 spawn skill 的关系；Codex/双 runtime 项中 #8–#10 已由本轮真实审查给出证据或验收结论，#7 的最终落点仍待 human 与实现复杂度共同确认。
 - 批注收敛后，把「当前决策」补全，任务树按最终顺序做小步 commit 式实现，每步验证通过再进下一步。
 - 涉及新增依赖（如需要 YAML/JSON schema 校验库）先问，不无理由新增。
 
@@ -158,3 +158,4 @@
 
 - 2026-07-12 初稿：按 issue #14 收敛出 6 步任务树（schema → 只读 list/status → 双 agent 发现/消息/handoff smoke → 冲突检测/写错 worktree 检测 → Paseo adapter → 对抗测试/治理收尾）；非目标明确排除完整分布式调度、重型锁、merge queue 自动化、实时通信、LingTai 具体实现；6 个待 human 拍板的 open question（storage 介质、mailbox 粒度、TTL、拦截点顺序、Paseo 接入时机、与 Phase 3 spawn skill 的关系）。
 - 2026-07-12 二审修订（Claude Opus 4.8，代替额度耗尽的 Codex gpt-5.6-sol 二审；**人类最终批准仍待定**）：补齐 issue #14「runtime-neutral」硬约束下的 Codex 侧缺口——① 目标区新增 runtime-neutral 的四条具体含义（纯 python 核心 / hook 两侧共享挂载 / skill 须跑生成器 / 需 Codex 侧证据）；② Allowed/Forbidden paths 增列 `.codex/config.toml`（手维护）、`.agents/skills/**`（生成物）、`sync-codex-adapters.py`，并厘清生成物不手改；③ 任务树 1.5/4.2/4.3/5.2/6.2 补 Codex 侧要点（doctrine 用 runtime-neutral 语言、hook 折进 `pre_tool_guard` 或两侧手工挂载、覆盖 Codex `apply_patch` tool 形状、`PASEO_AGENT_ID` 对等存疑走 fallback、新增 skill 跑生成器）；④ 新增步骤 6.4「双 runtime 对等收尾」（PR 顺延为 6.5）；⑤ 验证标准新增「双 runtime 对等」小节（含 `sync-codex-adapters.py --check`、喂 `apply_patch` JSON 到 hook 的形状测试、不以 Claude 结果冒充 Codex 验证）；⑥ 新增 4 条 Codex/双 runtime open question（#7 hook 落点、#8 `PASEO_AGENT_ID` 对等、#9 是否要求真实 Codex smoke、#10 statusline 呈现不对等是否入 doctrine）。未改动初稿的核心任务分解与既有 6 个 open question。
+- 2026-07-12 Codex 真实二审（Codex gpt-5.6-sol，medium；区别于上一轮 Claude Opus 4.8 代打；**人类最终批准仍待定**）：在真实 Codex-under-Paseo companion session 核验并收敛 #8–#10——确认当前启动路径注入 `PASEO_AGENT_ID`，确认项目 trust 与 repo Codex hook 挂载配置存在，同时明确 synthetic hook deny 与普通 `apply_patch` 成功仍不足以冒充 native end-to-end deny；因此把实现后的真实 Codex 查询 + 临时 fixture deny smoke 设为硬验收，并将 statusline 明确降级为 Claude 侧派生视图。#7 保留 human/实现阶段最终选择，核心任务分解不变。
