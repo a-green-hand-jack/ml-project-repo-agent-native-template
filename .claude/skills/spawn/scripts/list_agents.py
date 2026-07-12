@@ -20,7 +20,11 @@ FIELDS = ("name", "description", "tools", "model")
 
 
 def _parse_frontmatter(text: str) -> dict:
-    """极简 YAML frontmatter 解析：取 `---` 块内的 `key: value`（够用即可，不引 yaml）。"""
+    """极简 YAML frontmatter 解析：取 `---` 块内的**单行** `key: value`（够用即可，不引 yaml）。
+
+    假设：agent frontmatter 用扁平单行值（本 repo 16 个 agent 均如此）。折叠标量（`key: >`）
+    或块列表（`tools:` 后跟 `- Read`）不会被展开——那种 agent 该表会显示截断值（非致命）。
+    """
     lines = text.splitlines()
     if not lines or lines[0].strip() != "---":
         return {}

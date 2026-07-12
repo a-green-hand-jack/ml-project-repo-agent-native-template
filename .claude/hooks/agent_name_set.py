@@ -169,7 +169,11 @@ def main() -> int:
     if args.register:
         pid = args.paseo_id.strip()
         if not pid:
-            print("[agent-name] --register 需要 --paseo-id <child-id>（未提供，仅按无 pid 登记）", file=sys.stderr)
+            # 空 pid 说明 launcher 没取到子 agent id（run --json 形状异常/未起成功）。
+            # 不登记：否则无 pid 的行可能覆盖掉一条合法的、同名的自命名行（非 Paseo 表面）。
+            print("[agent-name] --register 缺 --paseo-id：疑似子 agent 未起成功，未登记（先排查 paseo run）",
+                  file=sys.stderr)
+            return 0
         return _register_child(name, pid, args.worktree.strip())
 
     # 自命名（本 agent）：① identity 文件 ② paseo rename（默认开启）③ roster
