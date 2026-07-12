@@ -1,12 +1,21 @@
 # trace 索引。实验 trace / agent trace / human-cc trace 的逻辑索引。
 # human-cc trace 原始文件在 lab/traces/human-cc/，用于 recipe 提炼（见 .agent/claude-code-recipe-policy.md）。
+# 共同 provenance 字段见 .agent/artifact-policy.md；校验：scripts/check-provenance-chain.py。
+# trace 特例：human-cc/agent trace 可无 commit/config；run_id 填了才校验 run 闭环。
+schema_version: 1
 
 traces:
   - id: trace-000
     kind: human-cc        # experiment | agent | human-cc
-    path: "<lab/traces/human-cc/<date>/<session>/ 或其他>"
+    location: "<lab/traces/human-cc/<date>/<session>/ 或其他路径/URI>"
+    how_to_inspect: "<怎么看，例如打开命令>"
     summary: "<这个 trace 记录了什么>"
-    linked_run: "<run-id，若适用>"
+    run_id: "<run-id，若适用>"
     linked_recipe: "<lab/recipes/claude-code/<id>，若已提炼>"
     status: unknown        # active | superseded | archived | unknown
+    checksum: "<sha256 hex；本地可算时必填>"
+    checksum_algorithm: sha256
+    # 无法校验时删掉上两行，改填（两者都要）：
+    # checksum_unavailable_reason: external-uri-no-checksum
+    # checksum_unavailable_justification: "<具体情境说明，禁 TBD/N-A 类占位>"
     updated: "YYYY-MM-DD"

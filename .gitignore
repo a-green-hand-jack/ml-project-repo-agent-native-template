@@ -9,6 +9,7 @@ lab/data/**
 !lab/data/AGENTS.md
 !lab/data/CLAUDE.md
 !lab/data/ANATOMY.md
+!lab/data/dataset-index.yaml
 !lab/data/manifests/
 !lab/data/manifests/**
 !lab/data/checksums/
@@ -24,6 +25,7 @@ lab/models/**
 !lab/models/
 !lab/models/*.yaml
 !lab/models/README.md
+!lab/models/ANATOMY.md
 !lab/models/.gitkeep
 checkpoints/
 *.ckpt

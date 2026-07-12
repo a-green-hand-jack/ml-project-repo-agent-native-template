@@ -1,14 +1,23 @@
 # 模型（逻辑）索引。模型 bytes 不进 Git（见根 .gitignore、lab/models/）。
 # 这里记录逻辑身份与来源，checkpoint 细节见 lab/models/checkpoint-index.yaml。
+# 共同 provenance 字段见 .agent/artifact-policy.md；校验：scripts/check-provenance-chain.py
+# （checkpoint_ref 必须存在于 checkpoint-index）。
+schema_version: 1
 
 models:
   - id: model-000
     name: "<模型逻辑名>"
-    storage_path: "<权重 URI / 集群路径>"
+    location: "<权重 URI / 集群路径>"
+    how_to_inspect: "<怎么看，例如加载/推理命令>"
     checkpoint_ref: "<checkpoint-index 里的 id>"
-    trained_by_run: "<run-id>"
     commit: "<git sha>"
     config: "<config 路径>"
+    run_id: "<run-id>"
     supports: "<claim id>"
     status: unknown        # active | superseded | archived | unknown
+    checksum: "<sha256 hex；本地可算时必填>"
+    checksum_algorithm: sha256
+    # 权重通常在外部存储，无法校验时删掉上两行，改填（两者都要）：
+    # checksum_unavailable_reason: external-uri-no-checksum
+    # checksum_unavailable_justification: "<具体情境说明，禁 TBD/N-A 类占位>"
     updated: "YYYY-MM-DD"

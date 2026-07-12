@@ -3,6 +3,9 @@
 #
 # check_kind: test | smoke | metric-threshold | numerical-equivalence
 # last_status: unknown | pass | fail
+# provenance：release-gates.yaml 的 structured_checks（kind: regression-status）会
+# 按 id 引用这里的条目并核对 last_status（scripts/check-provenance-chain.py）。
+schema_version: 1
 
 regressions:
   - id: reg-000

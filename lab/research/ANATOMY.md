@@ -44,8 +44,10 @@ maintenance: |
 - `release-gates.yaml` / `regression-matrix.yaml` 枚举字段与 claim 引用一致性，已由
   `validate-governance.py` 强制校验（占位默认状态天然通过，仅在 gate/regression 离开占位
   状态后才校验 claim 引用是否真实存在）。
-- provenance 链（引用完整性 / run 闭环 / checksum / claim marker）由子检查
-  `scripts/check-provenance-chain.py` 校验；`claims.yaml`/`evidence.yaml`/
-  `experiment-ledger.yaml` 均带 `schema_version`（整数，字段结构不兼容变更时递增）。
-  字段与枚举定义见 `.agent/artifact-policy.md`。
+- provenance 链（引用完整性 / run 闭环 / checksum / claim marker / gate 结构化检查）由
+  子检查 `scripts/check-provenance-chain.py` 校验；本目录 5 个 YAML 均带 `schema_version`
+  （整数，字段结构不兼容变更时递增）。`release-gates.yaml` 的 `structured_checks` 只
+  结构化可机械验证的 kind（artifact-exists / checksum-verified / run-closed /
+  regression-status / evidence-grade-min），结果仅建议信号，`gate_status` 翻转仍是
+  human 动作。字段与枚举定义见 `.agent/artifact-policy.md`。
 - 校验：`python scripts/validate-governance.py`。

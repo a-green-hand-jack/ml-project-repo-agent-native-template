@@ -18,10 +18,13 @@
    evidence 一致；submitted/published 状态要求「齐全=是」。
 6. deliverable Markdown 正文的 claim marker
    `<!-- claim: id=<claim-id> [evidence=<ev-id>,...] -->` 引用必须存在。
+7. release gate 结构化检查（structured_checks，只覆盖可客观机械验证的 kind）：
+   结果仅作建议信号（ADVISE），gate_status 翻转仍是 human 动作；唯一会 FAIL 的
+   情形是 gate_status=passed 却有结构化检查不满足（不该放行）。
 
-覆盖范围：Phase A 为最短闭环（result-index → evidence → claims → deliverables），
-Phase B 用同一套逻辑经 INDEX_SPECS / COVERED_INDEX_TYPES 扩展到其余 index 类型
-（见 plans/20260712-artifact-evidence-chain.zh.md 决策 1）。
+覆盖范围：同一套逻辑经 INDEX_SPECS / COVERED_INDEX_TYPES 白名单扩展——Phase A 为
+最短闭环（result-index → evidence → claims → deliverables），Phase B 已扩展到全部
+7 类 index + regression-matrix / release-gates（见 plans/20260712-artifact-evidence-chain.zh.md）。
 
 无第三方硬依赖：PyYAML 可选（缺失时用内置受限解析器回退；再失败记 UNKNOWN，
 --strict 下 unknown 也算失败，不静默降级）。模板占位条目（`<...>`）天然通过。
@@ -116,14 +119,9 @@ INDEX_SPECS: dict[str, dict] = {
     },
 }
 
-# Phase A：最短闭环只覆盖 result；Phase B 扩展这里的白名单（决策 1）。
-COVERED_INDEX_TYPES: tuple[str, ...] = ("result",)
-
-# 覆盖的 research YAML（schema_version 检查）。Phase B 追加 regression/release-gates。
-COVERED_RESEARCH_FILES: tuple[str, ...] = (
-    "lab/research/claims.yaml",
-    "lab/research/evidence.yaml",
-    "lab/research/experiment-ledger.yaml",
+# 覆盖白名单：Phase A 为 ("result",) 最短闭环；Phase B 已扩展到全部 7 类（决策 1）。
+COVERED_INDEX_TYPES: tuple[str, ...] = (
+    "result", "table", "figure", "trace", "model", "checkpoint", "dataset",
 )
 
 CLAIM_MARKER_RE = re.compile(
@@ -141,6 +139,7 @@ class Report:
         self.fails: list[str] = []
         self.unknowns: list[str] = []
         self.passes: list[str] = []
+        self.advisories: list[str] = []  # 建议信号（gate 未放行时的结构化检查结果，不计三态）
 
     def fail(self, msg: str) -> None:
         self.fails.append(msg)
@@ -150,6 +149,9 @@ class Report:
 
     def ok(self, msg: str) -> None:
         self.passes.append(msg)
+
+    def advise(self, msg: str) -> None:
+        self.advisories.append(msg)
 
 
 # ---------------------------------------------------------------------------
@@ -548,6 +550,14 @@ def check_artifact_indexes(root: Path, runs: dict, claim_ids: set, rep: Report) 
                     rep.ok(f"{ident}：supports={supports} 存在")
                 else:
                     rep.fail(f"{ident}：supports 指向未知 claim：{supports}")
+            # model → checkpoint 交叉引用（checkpoint 在覆盖范围时校验）。
+            ckpt_ref = e.get("checkpoint_ref")
+            if _filled(ckpt_ref) and "checkpoint" in COVERED_INDEX_TYPES:
+                ckpt_ids = _index_ids(root, "checkpoint")[1]
+                if ckpt_ref in ckpt_ids:
+                    rep.ok(f"{ident}：checkpoint_ref={ckpt_ref} 存在")
+                else:
+                    rep.fail(f"{ident}：checkpoint_ref 指向未知 checkpoint：{ckpt_ref}")
             # checksum / manifest（任务 3.x）。
             if spec["checksum"]:
                 _check_entry_checksum(root, e, ident, location, rep)
@@ -560,8 +570,8 @@ def _load_claims(root: Path, rep: Report) -> tuple[dict, set[str]]:
     return by_id, set(by_id)
 
 
-def check_evidence(root: Path, runs: dict, rep: Report) -> set:
-    """校验 evidence 条目；返回 evidence id 集合（供 marker 检查复用，避免重复加载）。"""
+def check_evidence(root: Path, runs: dict, rep: Report) -> dict:
+    """校验 evidence 条目；返回 id→entry 映射（供 marker / gate 检查复用，避免重复加载）。"""
     doc, entries = _load_indexed(root, "lab/research/evidence.yaml", "evidence", rep, "evidence")
     _check_schema_version(doc, "lab/research/evidence.yaml", rep)
     # 交叉引用目标：覆盖范围内的 index 类型（Phase B 自动随白名单扩展）。
@@ -593,7 +603,7 @@ def check_evidence(root: Path, runs: dict, rep: Report) -> set:
                 else:
                     rep.ok(f"{ident}：{field} → {itype}-index {ref_id} 存在且未 archived")
                 break
-    return {e.get("id") for e in entries if e.get("id")}
+    return {e.get("id"): e for e in entries if e.get("id")}
 
 
 # ---------------------------------------------------------------------------
@@ -680,6 +690,117 @@ def check_claim_markers(root: Path, claim_ids: set, evidence_ids: set, rep: Repo
 
 
 # ---------------------------------------------------------------------------
+# release gate 结构化检查（决策 3：只覆盖可客观机械验证的 kind；
+# 校验结果仅作建议信号，gate_status 翻转仍是 human 动作——validator 只拦
+# 「gate_status=passed 却有结构化检查不满足」这种不该放行的情况）
+# ---------------------------------------------------------------------------
+
+def _eval_structured_check(
+    root: Path, c: dict, runs: dict, claims_by_id: dict,
+    evidence_by_id: dict, regs_by_id: dict,
+):
+    """返回 (result, detail)：result ∈ {True, False, None(无法机械验证), 'malformed'}。"""
+    kind = c.get("kind")
+    if kind == "artifact-exists":
+        target = c.get("target")
+        if not _filled(target):
+            return "malformed", "artifact-exists 缺 target 字段"
+        for itype in COVERED_INDEX_TYPES:
+            if any(target.startswith(p) for p in INDEX_SPECS[itype]["id_prefixes"]):
+                exists = target in _index_ids(root, itype)[1]
+                return exists, f"{itype}-index 条目 {target}{'存在' if exists else '不存在'}"
+        if "://" in target:
+            return None, f"外部 URI {target} 无法机械验证存在性"
+        exists = (root / target).exists()
+        return exists, f"路径 {target}{'存在' if exists else '不存在'}"
+    if kind == "checksum-verified":
+        aid = c.get("artifact")
+        if not _filled(aid):
+            return "malformed", "checksum-verified 缺 artifact 字段"
+        for itype in COVERED_INDEX_TYPES:
+            if any(aid.startswith(p) for p in INDEX_SPECS[itype]["id_prefixes"]):
+                entry = _index_ids(root, itype)[0].get(aid)
+                if entry is None:
+                    return False, f"{itype}-index 无条目 {aid}"
+                sub = Report()
+                _check_entry_checksum(root, entry, aid, entry.get("location") or "", sub)
+                ok = not sub.fails and not sub.unknowns
+                return ok, f"{aid} checksum {'通过' if ok else '未通过'}"
+        return "malformed", f"checksum-verified 的 artifact={aid} 不匹配任何已知 index 前缀"
+    if kind == "run-closed":
+        run_id = c.get("run")
+        if not _filled(run_id):
+            return "malformed", "run-closed 缺 run 字段"
+        run = runs.get(run_id)
+        ok = bool(run) and run.get("status") == "done" and _filled(run.get("run_summary"))
+        return ok, f"run {run_id}{'已闭环' if ok else ' 未闭环或不存在'}"
+    if kind == "regression-status":
+        rid, expect = c.get("regression"), c.get("expect", "pass")
+        if not _filled(rid):
+            return "malformed", "regression-status 缺 regression 字段"
+        reg = regs_by_id.get(rid)
+        if reg is None:
+            return False, f"regression-matrix 无条目 {rid}"
+        actual = reg.get("last_status")
+        return actual == expect, f"regression {rid} last_status={actual!r}（期望 {expect!r}）"
+    if kind == "evidence-grade-min":
+        cid, min_grade = c.get("claim"), c.get("min_grade")
+        if not _filled(cid) or min_grade not in GRADE_RANK:
+            return "malformed", "evidence-grade-min 需要 claim + 合法 min_grade"
+        claim = claims_by_id.get(cid)
+        if claim is None:
+            return False, f"claims.yaml 无条目 {cid}"
+        strongest = max(
+            (GRADE_RANK.get((evidence_by_id.get(r) or {}).get("grade"), 0)
+             for r in (claim.get("evidence") or [])),
+            default=0,
+        )
+        ok = strongest >= GRADE_RANK[min_grade]
+        return ok, f"claim {cid} 最强证据 rank={strongest}（要求 ≥ {min_grade}）"
+    return "malformed", f"kind 非法：{kind!r}（合法：{sorted(STRUCTURED_CHECK_KINDS)}）"
+
+
+def check_release_gates_structured(
+    root: Path, runs: dict, claims_by_id: dict, evidence_by_id: dict, rep: Report,
+) -> None:
+    reg_doc, regs = _load_indexed(
+        root, "lab/research/regression-matrix.yaml", "regressions", rep, "regression-matrix"
+    )
+    _check_schema_version(reg_doc, "lab/research/regression-matrix.yaml", rep)
+    regs_by_id = {r.get("id"): r for r in regs if r.get("id")}
+    gates_doc, gates = _load_indexed(
+        root, "lab/research/release-gates.yaml", "gates", rep, "release-gates"
+    )
+    _check_schema_version(gates_doc, "lab/research/release-gates.yaml", rep)
+    for g in gates:
+        gid, status = g.get("id"), g.get("gate_status")
+        for n, c in enumerate(g.get("structured_checks") or []):
+            if not isinstance(c, dict):
+                rep.fail(f"gate {gid}：structured_checks[{n}] 不是映射")
+                continue
+            # 模板占位（任意值以 < 开头）天然跳过。
+            if any(isinstance(v, str) and v.strip().startswith("<") for v in c.values()):
+                continue
+            ident = f"gate {gid} structured_checks[{n}]（kind={c.get('kind')}）"
+            result, detail = _eval_structured_check(
+                root, c, runs, claims_by_id, evidence_by_id, regs_by_id
+            )
+            if result == "malformed":
+                rep.fail(f"{ident}：{detail}")
+            elif result is None:
+                rep.advise(f"{ident}：{detail}")
+            elif result:
+                rep.ok(f"{ident}：满足——{detail}")
+            elif status == "passed":
+                rep.fail(f"{ident}：不满足（{detail}）但 gate_status=passed——不该放行")
+            else:
+                rep.advise(
+                    f"{ident}：不满足（{detail}）；建议信号，gate_status={status}，"
+                    "翻转仍是 human 动作"
+                )
+
+
+# ---------------------------------------------------------------------------
 # 主流程
 # ---------------------------------------------------------------------------
 
@@ -687,14 +808,17 @@ def run_checks(root: Path, rep: Report) -> None:
     runs = _load_runs(root, rep)
     claims_by_id, claim_ids = _load_claims(root, rep)
     check_artifact_indexes(root, runs, claim_ids, rep)
-    evidence_ids = check_evidence(root, runs, rep)
+    evidence_by_id = check_evidence(root, runs, rep)
     check_deliverables_index(root, claims_by_id, rep)
-    check_claim_markers(root, claim_ids, evidence_ids, rep)
+    check_claim_markers(root, claim_ids, set(evidence_by_id), rep)
+    check_release_gates_structured(root, runs, claims_by_id, evidence_by_id, rep)
 
 
 def _print_report(rep: Report, strict: bool) -> int:
     for msg in rep.passes:
         print(f"PASS    {msg}")
+    for msg in rep.advisories:
+        print(f"ADVISE  {msg}")
     for msg in rep.unknowns:
         print(f"UNKNOWN {msg}")
     for msg in rep.fails:
@@ -825,6 +949,67 @@ def _result_index(checksum: str, **overrides) -> str:
     )
 
 
+_GOOD_DATASET_INDEX = """\
+schema_version: 1
+datasets:
+  - id: dataset-001
+    summary: benchmark Z eval set
+    location: "https://example.org/datasets/z-v1.tar.gz"
+    how_to_inspect: tar -tzf
+    commit: abc1234
+    splits: [train, test]
+    status: active
+    checksum_unavailable_reason: external-uri-no-checksum
+    checksum_unavailable_justification: "上游只发布 tarball，未发布 sha256；镜像后回填"
+    updated: "2026-07-12"
+"""
+
+_GOOD_REGRESSIONS = """\
+schema_version: 1
+regressions:
+  - id: reg-001
+    guards_claim: claim-001
+    code_path: lab/code/src/core.py
+    check_kind: smoke
+    command: uv run pytest -k smoke
+    last_status: pass
+    last_run: "2026-07-12"
+"""
+
+_GOOD_GATES = """\
+schema_version: 1
+gates:
+  - id: gate-001
+    for_claim: claim-001
+    requirements:
+      - "叙述充分（human 判断）"
+    structured_checks:
+      - kind: run-closed
+        run: run-001
+      - kind: regression-status
+        regression: reg-001
+        expect: pass
+      - kind: evidence-grade-min
+        claim: claim-001
+        min_grade: metric
+      - kind: checksum-verified
+        artifact: result-001
+      - kind: artifact-exists
+        target: result-001
+    gate_status: open
+    updated: "2026-07-12"
+"""
+
+# 其余 index 类型的最小合法文件（schema_version + 空列表）。
+_EMPTY_INDEXES = {
+    "lab/artifacts/table-index.yaml": "tables",
+    "lab/artifacts/figure-index.yaml": "figures",
+    "lab/artifacts/trace-index.yaml": "traces",
+    "lab/artifacts/model-index.yaml": "models",
+    "lab/models/checkpoint-index.yaml": "checkpoints",
+}
+
+
 def _make_good(root: Path) -> str:
     """写正常闭环 fixture，返回真实 bytes 的 sha256。"""
     payload = b'{"metric": 0.93, "baseline": 0.90}\n'
@@ -833,7 +1018,12 @@ def _make_good(root: Path) -> str:
     _write(root, "lab/research/experiment-ledger.yaml", _GOOD_LEDGER)
     _write(root, "lab/research/claims.yaml", _GOOD_CLAIMS)
     _write(root, "lab/research/evidence.yaml", _GOOD_EVIDENCE)
+    _write(root, "lab/research/regression-matrix.yaml", _GOOD_REGRESSIONS)
+    _write(root, "lab/research/release-gates.yaml", _GOOD_GATES)
     _write(root, "lab/artifacts/result-index.yaml", _result_index(digest))
+    _write(root, "lab/data/dataset-index.yaml", _GOOD_DATASET_INDEX)
+    for rel, key in _EMPTY_INDEXES.items():
+        _write(root, rel, f"schema_version: 1\n{key}: []\n")
     _write(root, "deliverables/index.md", _GOOD_DELIVERABLES_INDEX)
     _write(root, "deliverables/paper/README.md", _GOOD_PAPER)
     return digest
@@ -947,6 +1137,69 @@ def _self_test() -> int:
                _GOOD_DELIVERABLES_INDEX.replace("| draft | 是 |", "| submitted | 否 |"))
     _run_case("negative-submitted-without-evidence", premature_submit,
               ["要求「evidence 齐全」列为「是」"], False, failures)
+
+    # --- Phase B：其余 index 类型 + release gate 结构化检查 ---
+
+    # 负例 11：evidence.data_split 指向不存在的 dataset 条目。
+    def dangling_dataset(root: Path, digest: str) -> None:
+        _write(root, "lab/research/evidence.yaml",
+               _GOOD_EVIDENCE.replace("data_split: dataset-001/test",
+                                      "data_split: dataset-999/test"))
+    _run_case("negative-dangling-dataset-split", dangling_dataset,
+              ["data_split=dataset-999/test", "不存在"], False, failures)
+
+    # 负例 12：model-index checkpoint_ref 悬空 + checkpoint 未闭环 run。
+    def dangling_ckpt(root: Path, digest: str) -> None:
+        _write(root, "lab/artifacts/model-index.yaml",
+               "schema_version: 1\n"
+               "models:\n"
+               "  - id: model-001\n"
+               "    name: main model\n"
+               "    location: \"s3://bucket/weights/model-001\"\n"
+               "    checkpoint_ref: ckpt-999\n"
+               "    commit: abc1234\n"
+               "    config: lab/code/configs/exp1.yaml\n"
+               "    run_id: run-001\n"
+               "    status: active\n"
+               "    checksum_unavailable_reason: external-uri-no-checksum\n"
+               "    checksum_unavailable_justification: \"权重在对象存储，"
+               "由训练框架管理，暂无导出的 sha256\"\n"
+               "    updated: \"2026-07-12\"\n")
+    _run_case("negative-dangling-checkpoint-ref", dangling_ckpt,
+              ["checkpoint_ref 指向未知 checkpoint：ckpt-999"], False, failures)
+
+    # 负例 13：未通过 gate —— gate_status=passed 但 regression last_status=fail。
+    def gate_passed_but_failing(root: Path, digest: str) -> None:
+        _write(root, "lab/research/regression-matrix.yaml",
+               _GOOD_REGRESSIONS.replace("last_status: pass", "last_status: fail"))
+        _write(root, "lab/research/release-gates.yaml",
+               _GOOD_GATES.replace("gate_status: open", "gate_status: passed"))
+    _run_case("negative-gate-passed-but-failing-check", gate_passed_but_failing,
+              ["gate_status=passed——不该放行"], False, failures)
+
+    # 负例 13b：同样的失败检查，但 gate 仍 open —— 只是建议信号，不算 FAIL。
+    def gate_open_failing(root: Path, digest: str) -> None:
+        _write(root, "lab/research/regression-matrix.yaml",
+               _GOOD_REGRESSIONS.replace("last_status: pass", "last_status: fail"))
+    with_advice_ok = []
+    _run_case("positive-gate-open-advisory-only", gate_open_failing,
+              [], True, with_advice_ok)
+    failures.extend(with_advice_ok)
+
+    # 负例 14：structured check kind 枚举外。
+    def bad_kind(root: Path, digest: str) -> None:
+        _write(root, "lab/research/release-gates.yaml",
+               _GOOD_GATES.replace("kind: run-closed", "kind: vibes-good"))
+    _run_case("negative-structured-check-bad-kind", bad_kind,
+              ["kind 非法"], False, failures)
+
+    # 负例 15：evidence-grade-min 不达标且 gate 已 passed。
+    def grade_below_min(root: Path, digest: str) -> None:
+        _write(root, "lab/research/release-gates.yaml",
+               _GOOD_GATES.replace("min_grade: metric", "min_grade: figure")
+                          .replace("gate_status: open", "gate_status: passed"))
+    _run_case("negative-evidence-grade-below-min", grade_below_min,
+              ["最强证据 rank=", "不该放行"], False, failures)
 
     if failures:
         for f in failures:

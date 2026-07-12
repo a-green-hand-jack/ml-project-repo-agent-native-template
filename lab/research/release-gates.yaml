@@ -2,6 +2,18 @@
 # deliverables/ 不能超过这里放行的证据（no overclaim）。release/promote 是 human gate。
 #
 # gate_status: open | passed | blocked
+#
+# structured_checks（可选）：requirements 里「可客观机械验证」的部分的结构化版本，
+# 由 scripts/check-provenance-chain.py 校验。kind 枚举（只收机械可验证类，价值判断类
+# requirement 继续留自然语言 + human 审批，不强行伪结构化）：
+#   - artifact-exists      target: <index 条目 id 或 repo 相对路径>
+#   - checksum-verified    artifact: <index 条目 id>
+#   - run-closed           run: <run-id>（experiment-ledger 中 status=done + run_summary）
+#   - regression-status    regression: <reg-id>  expect: pass
+#   - evidence-grade-min   claim: <claim-id>  min_grade: log|metric|table|figure|paper-claim
+# 校验结果仅是建议信号（ADVISE）；gate_status 的 open→passed/blocked 翻转仍是 human
+# 动作，validator 不自动写入——唯一会判 FAIL 的是 gate_status=passed 却有检查不满足。
+schema_version: 1
 
 gates:
   - id: gate-000
@@ -12,6 +24,13 @@ gates:
       - "verified_by_fresh_reviewer = true"
       - "regression-matrix 相关检查 last_status = pass"
       - "caveats 已在 deliverable 中如实陈述"
+    structured_checks:
+      - kind: evidence-grade-min
+        claim: "<claim id，如 claim-000>"
+        min_grade: table
+      - kind: regression-status
+        regression: "<reg id，如 reg-000>"
+        expect: pass
     gate_status: open
     approved_by: "<human，批准记录进 human/decisions/>"
     updated: "YYYY-MM-DD"

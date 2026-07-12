@@ -141,7 +141,7 @@ agent **准备**（写好 commit、起草 PR body、生成归档提案），huma
 - **索引**（`lab/artifacts/` + `lab/data/` + `lab/models/`）：大 bytes 不进 Git，只留逻辑索引（status: active/superseded/archived/unknown）。由 `artifact-librarian` 维护。
 - **进 evidence 的门槛**：run 可定位、config 可复现、metric 来源清楚、与 baseline 比较清楚、caveat 写明、经 fresh verifier。
 - **overclaim 由 validator 拦截**（不只口头）：`validate-governance.py` 校验 claims↔evidence 引用可解析，且 claim 强度 ≤ 最强证据（`supported` 需 ≥metric 证据；paper-grade 需经 fresh reviewer 的 paper-claim 证据）。
-- **provenance 链机器可检查**（`check-provenance-chain.py`，作为 `validate-governance.py` 子检查）：run→artifact→evidence→claim→deliverable 引用完整性、run 闭环（ledger `done`+`run_summary`）、checksum（统一 sha256，无法校验需固定枚举 reason + 非占位理由）、deliverable Markdown 的 claim marker（`<!-- claim: id=... -->`）。三态输出（pass/fail/unknown），unknown 不算 pass。当前覆盖最短闭环（result-index→evidence→claims→deliverables），index YAML 带 `schema_version`。
+- **provenance 链机器可检查**（`check-provenance-chain.py`，作为 `validate-governance.py` 子检查）：run→artifact→evidence→claim→deliverable 引用完整性、run 闭环（ledger `done`+`run_summary`）、checksum（统一 sha256，无法校验需固定枚举 reason + 非占位理由）、deliverable Markdown 的 claim marker（`<!-- claim: id=... -->`）。三态输出（pass/fail/unknown），unknown 不算 pass。覆盖全部 7 类 index（result/table/figure/trace/model/checkpoint/dataset，统一 `location` 字段 + `schema_version`）与 release gate 的 `structured_checks`（只结构化可机械验证的 kind；结果仅建议信号，`gate_status` 翻转仍是 human 动作，唯一 FAIL 情形是 passed 却有检查不满足）。
 - promote 结果为 paper claim 走 human gate。
 
 ---

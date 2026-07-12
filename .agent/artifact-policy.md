@@ -36,6 +36,10 @@ deliverables/index.md              对外交付物
   条目必须存在且未 `archived`。
 - deliverables 正文的 claim marker：`<!-- claim: id=<claim-id> evidence=<ev-id>,... -->`
   （只覆盖 Markdown；非 Markdown 交付物走 `human/reviews/results/` 人工 review 兜底）。
+- release gate 的 `structured_checks`：只把可客观机械验证的 requirement 结构化
+  （`artifact-exists` / `checksum-verified` / `run-closed` / `regression-status` /
+  `evidence-grade-min`）；价值判断类留自然语言 + human 审批。校验结果仅建议信号，
+  `gate_status` 翻转仍是 human 动作；唯一 FAIL 情形：`passed` 却有检查不满足。
 
 ## checksum 政策
 

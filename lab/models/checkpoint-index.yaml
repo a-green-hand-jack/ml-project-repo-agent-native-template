@@ -1,15 +1,23 @@
 # checkpoint 索引。checkpoint bytes 永不进 Git；这里是唯一的逻辑真相来源。
 # 删除/移动 checkpoint bytes 走 human gate，agent 只生成归档提案。
+# 共同 provenance 字段见 .agent/artifact-policy.md；校验：scripts/check-provenance-chain.py。
+schema_version: 1
 
 checkpoints:
   - id: ckpt-000
-    storage_path: "<集群/云路径，bytes 不进 Git>"
-    from_run: "<run-id>"
+    location: "<集群/云路径，bytes 不进 Git>"
+    how_to_inspect: "<怎么看，例如加载命令>"
+    run_id: "<run-id>"
     step: "<训练 step/epoch>"
     commit: "<git sha>"
     config: "<config 路径>"
     metric: "<选它的依据 metric>"
     status: unknown        # active | superseded | archived | unknown
     supersedes: "<被它取代的 ckpt id，若有>"
+    checksum: "<sha256 hex；本地可算时必填>"
+    checksum_algorithm: sha256
+    # checkpoint 通常在集群/云存储，无法校验时删掉上两行，改填（两者都要）：
+    # checksum_unavailable_reason: external-uri-no-checksum
+    # checksum_unavailable_justification: "<具体情境说明，禁 TBD/N-A 类占位>"
     archive_after: "<日期/条件>"
     updated: "YYYY-MM-DD"
