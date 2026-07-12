@@ -56,7 +56,7 @@
 - `.env`
 - 真实调用 `sbatch`、`runai`、`kill`、进程 restart 等命令——测试与 smoke 只能用 fake/local 模拟进程
 - `deliverables/`、`human/decisions/`（除非走既有 gate 流程，本 issue 不涉及）
-- `.claude/settings.json`、`.codex/config.toml`、`.codex/rules/default.rules` 的权限地板（若发现确实需要新增 launch/kill 相关 `ask`/`deny`/`prompt` 规则，需在计划里单独列出并等待 human 批准，不在本任务里直接改）。**注意：这三处不在 `sync-codex-adapters.py` 的覆盖范围内**——sync 只生成 `.codex/agents/*.toml` 与 `.agents/skills/**`，权限规则是**手工双写**：Claude 侧 `.claude/settings.json`（`ask`/`deny`）与 Codex 侧 `.codex/rules/default.rules`（execpolicy `prompt`/`forbidden`）语法不同、无自动同步。现状 execpolicy 已有 `kill|sbatch|runai → prompt`；若本 issue 要新增 launch 命令模式的门禁，必须两侧对齐，否则会出现「一侧拦、另一侧放行」的不对等漏洞。
+- `.claude/settings.json`、`.codex/config.toml`、`.codex/rules/default.rules` 的权限地板：默认禁止做与本 issue 无关的权限面调整。**例外（human 已于 2026-07-12 明确授权）**：本 issue 范围内可以为 launch registry 新增的命令类型追加权限规则——Claude 侧 `.claude/settings.json` 的 `ask`/`deny`、Codex 侧 `.codex/rules/default.rules` 的 execpolicy `prompt`/`forbidden`——不需要在实现阶段再单独申请一次批准；但**仅限**新增 launch 命令识别相关的最小必要规则，不得借机做无关的权限面调整，且改动仍要按 repo 正常流程走 PR review（这不代表跳过审查）。**注意：这三处不在 `sync-codex-adapters.py` 的覆盖范围内**——sync 只生成 `.codex/agents/*.toml` 与 `.agents/skills/**`，权限规则是**手工双写**：Claude 侧 `.claude/settings.json`（`ask`/`deny`）与 Codex 侧 `.codex/rules/default.rules`（execpolicy `prompt`/`forbidden`）语法不同、无自动同步。现状 execpolicy 已有 `kill|sbatch|runai → prompt`；本 issue 新增 launch 命令模式的门禁必须两侧对齐同 commit 提交，否则会出现「一侧拦、另一侧放行」的不对等漏洞。
 
 ## 任务树
 
@@ -83,7 +83,7 @@
   - [ ] H. Codex 适配层同步与对等验证（每次动 canonical agent/skill 后必做）
     - [ ] H1. 改完 `.claude/agents/*.md`、`.claude/skills/experiment-workflow/SKILL.md`、新增 agent 后，跑 `python scripts/sync-codex-adapters.py`，把生成的 `.codex/agents/*.toml`、`.agents/skills/**` 与 canonical 同 commit 提交。
     - [ ] H2. 跑 `python scripts/check-agent-harness.py` 确认 adapter 同步（内含 `--check`）+ 受保护路径权限地板 + hook 脚本存在；若新增 agent/hook/skill，同步更新 `DESIGN.md` §10 能力清单计数。
-    - [ ] H3. 若 launch 门禁需要新增权限规则：在 `.claude/settings.json`（`ask`/`deny`）与 `.codex/rules/default.rules`（execpolicy `prompt`/`forbidden`）**两侧手工对齐**并单列出来等 human 批准（此项超出常规 Allowed paths，需明确 gate）。
+    - [ ] H3. 补齐 launch 门禁权限规则（**human 已于 2026-07-12 明确授权，本项在本 issue 范围内直接做，无需实现阶段再单独申请批准**）：为最终选定的 fake/local launch 命令前缀，在 `.claude/settings.json`（`ask`/`deny`）与 `.codex/rules/default.rules`（execpolicy `prompt`/`forbidden`）**两侧手工对齐**，与 launch registry / adapter contract（任务 C）同 commit 提交；仅新增 launch 命令识别相关的最小必要规则，不做无关权限面调整；改动仍按 repo 正常 PR review 流程走，不代表跳过审查。
   - [ ] F. alert → stale run → resume/recovery（human gate）
     - [ ] F1. 定义 stale run 判定规则（如：超过预期 runtime 若干倍、或心跳/metric 长时间无更新）
     - [ ] F2. 定义 alert 记录形态（写入 repo 内文件，如 ledger 旁的 alert 记录或 `human/inbox` 风格条目），不接外部通知
@@ -106,6 +106,7 @@
 - **Codex adapter 同步是硬步骤（二审新增）**：任何 canonical agent/skill 改动都要跑 `sync-codex-adapters.py` 并同 commit 提交生成物；`check-agent-harness.py` 会 gate 这一点。权限规则（settings.json / execpolicy）不在 sync 范围，需两侧手工对齐。
 - **新增 launch 入口必须先补双侧显式门禁（Codex 真实二审确认）**：本轮 `codex execpolicy check` 证明 `kill 123`、`sbatch train.sh`、`runai submit ...` 都返回 `prompt`；但示例 `python scripts/launch-experiment.py ...` 与 `bash lab/infra/launch/run-local.sh ...` 均为 `matchedRules: []`。共享 `pre_tool_guard.py` 也没有 launch/kill 检查。因此不能用「控制面只生成草案」替代机器门禁：一旦选定可执行入口，先把精确命令前缀加入 `.claude/settings.json` 的 `ask` 与 `.codex/rules/default.rules` 的 `prompt`，再允许 fake smoke。
 - **recovery-advisor 保持只读（Codex 真实二审收敛）**：若拆分该角色，它只输出结构化 recovery proposal，不直接落文件、更不执行命令；由已有 workspace-write orchestrator 校验并持久化提案。这样不会仅因“写一份建议”把 advisor 升到 `workspace-write`，也缩小 wrapper 命令绕过简单前缀规则时的风险面。
+- **launch 权限规则改动已获 human 授权（2026-07-12 human 亲自拍板）**：针对上面「新增 launch 入口必须先补双侧显式门禁」的需求——原先这是一条待批的 open item（Forbidden paths 里标注为「需在计划里单独列出并等待 human 批准」）——human 现已明确同意：本 issue 范围内可以新增/调整 launch 相关的权限规则（Claude 侧 `.claude/settings.json` 的 `ask` 门禁 + Codex 侧 `.codex/rules/default.rules` 的 execpolicy `prompt` 规则），不需要在实现阶段再单独申请一次批准。限定：改动范围仅限 launch 命令识别相关的最小必要规则，不做无关的权限面调整；实际改权限文件时仍按 repo 正常流程走 PR review，这不代表可以绕开审查。已同步更新 Forbidden paths 与任务 H3。
 
 ## 未解决问题
 
@@ -143,3 +144,4 @@
 - 2026-07-12 初稿（基于 issue #16 + `.agent/action-boundary.md`、`.claude/skills/experiment-workflow/SKILL.md`、`.claude/agents/experiment-orchestrator.md`、`.claude/agents/experiment-monitor.md`、`.agent/templates/{experiment-card,run-summary}.md`、`.agent/human-gates.md`、`.agent/artifact-policy.md`、`lab/research/experiment-ledger.yaml`、`lab/infra/launch/README.md`、`lab/infra/AGENTS.md` 现状梳理）
 - 2026-07-12 二审修订（由 Claude Opus 4.8 代替额度耗尽的 Codex gpt-5.6-sol 做第二意见审查）。重点补 Codex 侧对等缺口：runtime-neutral 控制面主干、`sync-codex-adapters.py` 硬同步步骤（新增任务 H）、`check-agent-harness.py`/`DESIGN.md §10` 验证、权限地板两侧手工对齐、launch 命令识别以 registry 为单一真源供共享 hook 消费、只读 watcher 的 Codex `read-only` sandbox 语义；新增 open questions 8-10（双 runtime smoke 深度、launch 门禁新规则、recovery-advisor sandbox）。人类最终批准仍待定。
 - 2026-07-12 Codex（gpt-5.6-sol, medium）真实二审：实测 `kill/sbatch/runai` 的 execpolicy 均为 `prompt`，而两个示例 fake launch 入口均未命中规则；据此把新增 launch 双侧显式门禁定为前置条件，纠正“read-only sandbox + hook + execpolicy 都能拦 kill”的过强表述，收敛 recovery-advisor 为只读提案角色，并把暂时无法完成的 custom-agent sandbox / 全业务 smoke 明确推迟到实现期受控 fake process 验证。人类最终批准仍待定。
+- 2026-07-12 human 亲自拍板：授权本 issue 范围内新增 launch 相关权限规则（仍走正常 PR review）。
