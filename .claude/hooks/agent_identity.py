@@ -16,8 +16,14 @@ CLI：
     python3 agent_identity.py --statusline  -> 打印 "🤖 <name>" 或空
 """
 import os
+import re
 import sys
 from pathlib import Path
+
+# ANSI SGR 颜色序列（含 ESC 被 isprintable 剥掉后残留的可见片段 `[31m`/`[0m`）——防止名字里的
+# 转义残渣进 statusline 变成垃圾字符或串色。只吃以 `m` 结尾的 SGR（真正的串色向量），
+# 故 `[wip]auth` 这类含方括号的 focus 不误伤（`[0-9;]*` 后必须紧跟 `m`）。
+_CSI = re.compile(r"\x1b?\[[0-9;]*m")
 
 # 本文件在 .claude/hooks/ 下，parent 链多取一级到 worktree 根（与其它 hook 一致）。
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -28,9 +34,10 @@ MAX_LEN = 60  # 防御：过长名字截断，避免撑爆 statusline
 def _clean(raw: str | None) -> str | None:
     if not raw:
         return None
-    # 只取首行、去空白；控制字符剔掉；截断
-    name = raw.splitlines()[0].strip() if raw.splitlines() else ""
-    name = "".join(ch for ch in name if ch.isprintable())
+    lines = raw.splitlines()
+    name = lines[0].strip() if lines else ""
+    name = _CSI.sub("", name)                                    # 剥 ANSI/CSI（含残片）
+    name = "".join(ch for ch in name if ch.isprintable())        # 再剔其余非 printable
     name = name.strip()
     if not name:
         return None
@@ -44,8 +51,10 @@ def identity_name() -> str | None:
         return env
     try:
         if IDENTITY_FILE.is_file():
-            return _clean(IDENTITY_FILE.read_text(encoding="utf-8"))
-    except OSError:
+            # errors="ignore"：非 UTF-8 文件（中文名字在 GBK/GB18030 编辑器写的）不抛
+            # UnicodeDecodeError（它是 ValueError 非 OSError）——守住「绝不抛异常冒泡」契约。
+            return _clean(IDENTITY_FILE.read_text(encoding="utf-8", errors="ignore"))
+    except (OSError, ValueError):
         pass
     return None
 
