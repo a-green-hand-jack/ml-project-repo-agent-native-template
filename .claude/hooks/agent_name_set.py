@@ -69,17 +69,25 @@ def _paseo_rename(name: str) -> str:
             ["paseo", "agent", "update", pid, "--name", name],
             capture_output=True, text=True, timeout=10,
         )
-        # 注意：paseo agent update 对「agent 不存在」也 exit 0 并打印 Error → 查输出别误报成功。
+        # 注意：paseo agent update 对「agent 不存在」也 exit 0 并打印 Error → 查输出才准。
+        # 用 paseo 的确切失败短语（非裸 "error"），否则名字含 "error"（如 focus=error-handling）
+        # 会把成功误判成失败。
         out = (r.stdout + r.stderr).lower()
-        ok = r.returncode == 0 and "error" not in out and "not found" not in out
+        ok = r.returncode == 0 and "failed to update agent" not in out and "agent not found" not in out
         return "renamed" if ok else f"rename-failed(rc={r.returncode})"
     except (OSError, subprocess.SubprocessError):
         return "rename-failed(no paseo)"
 
 
 def _split_name(name: str) -> tuple[str, str]:
-    """`persona·动作·focus` → (做什么=persona·动作, focus)。分隔符宽容（·/·/-）。"""
-    parts = name.replace("·", "·").split("·")
+    """`persona·动作·focus` → (做什么=persona·动作, focus)。
+
+    分隔符归一化：把常见中点变体（片假名中点 U+30FB `・`、连字点 U+2027 `‧`）归到
+    标准 `·`(U+00B7)，再按 `·` 切；不动 `-`（focus 可能含连字号如 auth-重构）。
+    """
+    for ch in "・‧":
+        name = name.replace(ch, "·")
+    parts = name.split("·")
     if len(parts) >= 3:
         return "·".join(parts[:2]), "·".join(parts[2:])
     if len(parts) == 2:
@@ -94,7 +102,6 @@ def _cell(s: str) -> str:
 
 def _upsert_roster(name: str, doing: str, focus: str, bw: str, pid: str) -> None:
     ts = time.strftime("%Y-%m-%d %H:%M")
-    key = pid or name  # 无 paseo-id 时用 name 作 upsert key
     row = f"| {_cell(name)} | {_cell(doing)} | {_cell(focus)} | {_cell(bw)} | {_cell(pid or '-')} | active | {ts} |\n"
     try:
         ROSTER.parent.mkdir(parents=True, exist_ok=True)
@@ -102,15 +109,22 @@ def _upsert_roster(name: str, doing: str, focus: str, bw: str, pid: str) -> None
     except (OSError, ValueError):
         text = ROSTER_HEADER
     lines = text.splitlines(keepends=True)
-    # 找同 key 的数据行替换；否则追加。数据行 = 以 | 开头且不是表头/分隔行。
+    # 找同一 agent 的数据行替换；否则追加。数据行 = 以 | 开头且不是表头/分隔行。
     replaced = False
     for i, ln in enumerate(lines):
         s = ln.strip()
         if not s.startswith("|") or s.startswith("| ---") or s.startswith("| name "):
             continue
-        cols = [c.strip() for c in s.strip("|").split("|")]
-        row_key = cols[4] if len(cols) >= 5 else ""
-        if row_key == key or (key == name and cols and cols[0] == name):
+        # 按「未转义」的 | 切列：先把 \| 占位，切完再还原——否则 name/focus 里的真实 |
+        # 会多切出一列、错位 paseo-id、导致去重失败而重复行（无限增长）。
+        cols = [c.replace("\x00", "|").strip() for c in s.strip("|").replace("\\|", "\x00").split("|")]
+        row_name = cols[0] if cols else ""
+        row_pid = cols[4] if len(cols) >= 5 else ""
+        if pid:
+            match = row_pid == pid                                  # 有 pid：按 paseo-id 去重
+        else:
+            match = row_name == name and row_pid in ("", "-")       # 无 pid：只认同样无 pid 的同名行
+        if match:
             lines[i] = row
             replaced = True
             break
