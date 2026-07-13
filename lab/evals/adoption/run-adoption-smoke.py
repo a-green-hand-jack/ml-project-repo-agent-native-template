@@ -18,6 +18,10 @@ plans/20260712-bootstrap-adoption-proof.zh.md (smoke/integrity contract):
    native test (which must have actually run -- not "Ran 0 tests").
 5. smoke command undetected -- same exit-0-with-explicit-warning contract,
    for the "skipped" (no test command found) case.
+6. smoke command timeout -- classified as "unknown", still exit 0 with an
+   explicit warning and a timeout-bearing exec record.
+7. legacy phase state without command provenance -- rejected before prove can
+   emit a contradictory command/source pair; the error requires rediscovery.
 """
 from __future__ import annotations
 
@@ -420,6 +424,110 @@ def scenario_smoke_undetected(root: Path) -> None:
     print("[adoption-smoke] smoke-undetected OK")
 
 
+def scenario_smoke_timeout(root: Path) -> None:
+    """A timed-out native test is `unknown`, not pass and not integrity failure."""
+    target = root / "smoke-timeout-existing"
+    init_repo(target)
+    write(target / "README.md", "# Smoke Timeout Repo\n")
+    write(target / "notes.txt", "timeout fixture\n")
+    run(["git", "add", "."], target)
+    run(["git", "commit", "-m", "initial"], target)
+
+    run(
+        [
+            sys.executable,
+            str(ADOPTER),
+            str(target),
+            "--phase",
+            "all",
+            "--test-command",
+            f'{sys.executable} -c "import time; time.sleep(3)"',
+            "--test-timeout",
+            "1",
+            "--project-name",
+            "smoke-timeout-existing",
+        ],
+        REPO,
+    )
+    integrity_json = run([sys.executable, str(INTEGRITY), str(target), "--json"], REPO)
+    data = json.loads(integrity_json.stdout)
+    warnings = data.get("smoke_warnings", [])
+    if not data.get("ok") or not warnings or warnings[0].get("result") != "unknown":
+        print(f"smoke-timeout: expected ok=true with an unknown warning, got {data}")
+        raise SystemExit(1)
+
+    log_path = (
+        target / "lab" / "docs" / "audits" / "template-adoption" / "state" / "phase-log.jsonl"
+    )
+    prove_rows = [
+        json.loads(line)
+        for line in log_path.read_text(encoding="utf-8").splitlines()
+        if line.strip() and json.loads(line).get("phase") == "prove"
+    ]
+    smoke = prove_rows[-1]["details"]["smoke"]
+    if smoke.get("result") != "unknown" or not smoke.get("exec", {}).get("timeout"):
+        print(f"smoke-timeout: expected unknown + timeout=true, got {smoke}")
+        raise SystemExit(1)
+    print("[adoption-smoke] smoke-timeout OK")
+
+
+def scenario_legacy_phase_state_rejected(root: Path) -> None:
+    """A pre-contract v1 plan must not guess provenance during prove."""
+    target = root / "legacy-plan-existing"
+    init_repo(target)
+    write(target / "README.md", "# Legacy Plan Repo\n")
+    write(target / "notes.txt", "legacy plan fixture\n")
+    run(["git", "add", "."], target)
+    run(["git", "commit", "-m", "initial"], target)
+
+    run(
+        [
+            sys.executable,
+            str(ADOPTER),
+            str(target),
+            "--phase",
+            "all",
+            "--test-command",
+            "true",
+            "--project-name",
+            "legacy-plan-existing",
+        ],
+        REPO,
+    )
+    plan_path = (
+        target
+        / "lab"
+        / "docs"
+        / "audits"
+        / "template-adoption"
+        / "state"
+        / "adoption-plan.json"
+    )
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    plan["schema"] = "template-adoption-plan-v1"
+    plan.pop("test_command_source", None)
+    plan_path.write_text(json.dumps(plan, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    prove = run_allow_fail(
+        [
+            sys.executable,
+            str(ADOPTER),
+            str(target),
+            "--phase",
+            "prove",
+            "--project-name",
+            "legacy-plan-existing",
+        ],
+        REPO,
+    )
+    combined = prove.stdout + prove.stderr
+    if prove.returncode == 0 or "rerun --phase discover before prove" not in combined:
+        print("legacy-plan: expected prove to reject missing command provenance")
+        print(combined)
+        raise SystemExit(1)
+    print("[adoption-smoke] legacy-phase-state OK")
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="adoption-smoke-") as tmp:
         root = Path(tmp)
@@ -428,6 +536,8 @@ def main() -> int:
         scenario_blocked_conflict(root)
         scenario_smoke_failing_command(root)
         scenario_smoke_undetected(root)
+        scenario_smoke_timeout(root)
+        scenario_legacy_phase_state_rejected(root)
     print("[adoption-smoke] OK")
     return 0
 

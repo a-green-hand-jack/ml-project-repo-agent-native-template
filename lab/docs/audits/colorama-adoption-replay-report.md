@@ -183,13 +183,13 @@ test command at all (`original_test_returncode: None`, pre-C-part schema).
 Colorama exercises the other branch of `detect_test_command()` (`Makefile`
 `test:` regex match) and produces a `fail` result with a concrete
 returncode/reason, rather than a `skipped`/undetected state. Together the
-two replays now cover three of the four smoke-contract `result` states in
+two replays cover two of the four smoke-contract `result` states in
 real-world evidence: `skipped` (Agent-R1, pre-dating the new schema but
-structurally equivalent to today's undetected case), `fail` (this replay).
-`pass` and `unknown` remain covered by the synthetic negative fixtures in
-`lab/evals/adoption/run-adoption-smoke.py` (which also cover the same
-`skipped` and `fail` states plus the blocked-normalize integrity-failure
-case), not yet by a real-repo replay.
+structurally equivalent to today's undetected case) and `fail` (this replay).
+`pass` and `unknown` are covered by the synthetic fixtures in
+`lab/evals/adoption/run-adoption-smoke.py`; that suite also covers `skipped`,
+`fail`, legacy-state rejection, blocked-normalize, and destination-conflict
+integrity failures. Neither `pass` nor `unknown` has a real-repo replay yet.
 
 ### C4-3: Blocker/integrity layer stayed silent (as expected) for this case
 

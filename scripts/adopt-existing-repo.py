@@ -28,6 +28,8 @@ REPORT_PATH = Path("lab/docs/audits/template-adoption-report.md")
 PLAN_FILE = "adoption-plan.json"
 BASELINE_FILE = "baseline.json"
 LOG_FILE = "phase-log.jsonl"
+PLAN_SCHEMA = "template-adoption-plan-v2"
+LEGACY_PLAN_SCHEMA = "template-adoption-plan-v1"
 
 CONTROL_ITEMS = [
     "AGENTS.md",
@@ -286,7 +288,7 @@ def discover(args: argparse.Namespace) -> dict[str, Any]:
     ]
     test_command, test_command_source = detect_test_command(target, args.test_command)
     plan = {
-        "schema": "template-adoption-plan-v1",
+        "schema": PLAN_SCHEMA,
         "created_at": now_iso(),
         "target": str(target),
         "template_root": str(TEMPLATE_ROOT),
@@ -542,6 +544,44 @@ def integrity_result(target: Path) -> dict[str, Any]:
     }
 
 
+def smoke_command_metadata(plan: dict[str, Any]) -> tuple[str | None, str]:
+    """Validate the persisted smoke-command metadata before execution.
+
+    Plans written before the smoke contract used the same v1 schema label but
+    did not record command provenance. Guessing `none` for those plans can
+    produce contradictory records such as command=`true`, source=`none`.
+    Keep compatible v1 plans that already contain the field, but require
+    genuinely legacy plans to rerun discover and persist unambiguous metadata.
+    """
+    schema = plan.get("schema")
+    if schema not in {LEGACY_PLAN_SCHEMA, PLAN_SCHEMA}:
+        raise SystemExit(
+            f"unsupported adoption plan schema {schema!r}; rerun --phase discover before prove"
+        )
+    if "test_command_source" not in plan:
+        raise SystemExit(
+            "adoption plan predates smoke command provenance; rerun --phase discover "
+            "before prove"
+        )
+    command = plan.get("test_command")
+    source = plan["test_command_source"]
+    if source not in {"auto-detected", "explicit", "none"}:
+        raise SystemExit(
+            f"invalid test_command_source {source!r}; rerun --phase discover before prove"
+        )
+    if command is not None and source == "none":
+        raise SystemExit(
+            "adoption plan has a test command with command_source=none; "
+            "rerun --phase discover before prove"
+        )
+    if command is None and source == "auto-detected":
+        raise SystemExit(
+            "adoption plan has no test command but command_source=auto-detected; "
+            "rerun --phase discover before prove"
+        )
+    return command, source
+
+
 def evaluate_smoke(plan: dict[str, Any], target: Path, test_timeout: int) -> dict[str, Any]:
     """Run the target repo's own native test command and classify the result.
 
@@ -553,8 +593,7 @@ def evaluate_smoke(plan: dict[str, Any], target: Path, test_timeout: int) -> dic
     non-pass smoke result is surfaced as an explicit, structured warning in
     the report instead of a silent success or a hard failure.
     """
-    command = plan.get("test_command")
-    source = plan.get("test_command_source", "none")
+    command, source = smoke_command_metadata(plan)
     if command is None:
         reason = (
             "test command explicitly disabled via --test-command none"
