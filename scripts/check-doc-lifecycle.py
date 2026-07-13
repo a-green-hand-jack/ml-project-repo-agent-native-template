@@ -38,7 +38,8 @@ draft/in-review 天然通过，状态进阶才强制证据。PyYAML 可选：缺
 三个例外**保守拦截**（宁可要求换工具，不能静默放行）：
 - 删除/移走 `memory/doc-lifecycle.yaml`（apply_patch Delete/Move、Bash rm/mv 等）——治理面不可拆除；
 - apply_patch Update 触碰受管文档/注册表但 hunk 无法可靠重建 patch 后全文——提示改用 Edit 或分两步。
-- `cp` 参数含除 `$PWD`/`${PWD}` 外无法安全静态求值的活动 shell 展开——目的路径不可核验。
+- 破坏性命令（`cp`/`rm`/`mv`/`dd`/`tee`/`git rm`/`>` 重定向）的目的路径含除 `$PWD`/`${PWD}`
+  外无法安全静态求值的活动 shell 展开——目的路径不可核验。
 human 显式绕过：`DOC_LIFECYCLE_SKIP=1`（validator 仍会事后校验）。
 
 用法：
@@ -1159,6 +1160,10 @@ _REGISTRY_REMOVE_MSG = (
     f"doc-lifecycle: 禁止删除、移走或直接覆盖 {REGISTRY_REL}——注册表是治理面，"
     f"破坏它等于静默关闭 doc-lifecycle 校验。{_ESCAPE_HINT}"
 )
+_EXPANSION_FAILCLOSED_MSG = (
+    "doc-lifecycle: 破坏性命令的目的路径含无法安全静态核验的活动 shell 展开；"
+    f"为防绕过删除、移走或覆盖 {REGISTRY_REL} 已 fail-closed。{_ESCAPE_HINT}"
+)
 # Bash 侧拦可判定的删除/移走/覆盖注册表；其余 Bash 写入由 validator 兜底。
 _DELETIONISH = {"rm", "unlink", "shred", "srm", "truncate", "mv"}
 _SHELL_WRAPPERS = {"builtin", "command", "exec"}
@@ -1603,6 +1608,23 @@ def _cp_static_word(raw: str, cwd: Path) -> tuple[str, bool]:
     return _restore_shell_literals(word), dynamic
 
 
+def _static_destructive_word(raw: str, cwd: Path) -> tuple[str, bool]:
+    """Resolve deterministic `$PWD`/`${PWD}` in a destructive-command path operand and report
+    other non-glob active shell expansion (`$VAR`/backtick/brace-list/tilde) as unverifiable so
+    the caller can fail closed. Active globs (`*?[`) are intentionally left intact for
+    `_path_covers_registry`'s own bounded expansion. Returns the marker-encoded word (NOT
+    literal-restored) so downstream glob detection still distinguishes active from
+    quoted/escaped globs."""
+    word = re.sub(r"\$(?:\{PWD\}|PWD(?=/|$))", os.fspath(cwd), raw)
+    dynamic = (
+        "$" in word
+        or "`" in word
+        or (word.startswith("~") and not word.startswith("__DL_LITERAL_TILDE__"))
+        or bool(re.search(r"\{[^{}]*(?:,|\.\.)[^{}]*\}", word))
+    )
+    return word, dynamic
+
+
 def _gnu_long_abbreviation(option: str, canonical: str, minimum: str) -> bool:
     """Match an unambiguous GNU long-option prefix, excluding shorter ambiguous forms."""
     return len(option) >= len(minimum) and canonical.startswith(option)
@@ -1719,17 +1741,18 @@ def _bash_reason(cmd: str, repo: Path) -> str | None:
             elif event == ")" and subshell_cwds:
                 cwd = subshell_cwds.pop()
             continue
-        if any(
-            _path_covers_registry(
-                target,
+        for target in _destructive_redirect_targets(event):
+            resolved, dynamic = _static_destructive_word(target, cwd)
+            if dynamic:
+                return _EXPANSION_FAILCLOSED_MSG
+            if _path_covers_registry(
+                resolved,
                 repo,
                 cwd,
                 follow_final_symlink=True,
                 include_ancestors=False,
-            )
-            for target in _destructive_redirect_targets(event)
-        ):
-            return _REGISTRY_REMOVE_MSG
+            ):
+                return _REGISTRY_REMOVE_MSG
         name, args, command_cwd = _unwrap_command(event, cwd)
         if name == "cd":
             next_control = events[index + 1] if index + 1 < len(events) else None
@@ -1763,8 +1786,13 @@ def _bash_reason(cmd: str, repo: Path) -> str | None:
             for arg in args:
                 if not arg.startswith("of="):
                     continue
+                resolved, dynamic = _static_destructive_word(
+                    arg.split("=", 1)[1], command_cwd
+                )
+                if dynamic:
+                    return _EXPANSION_FAILCLOSED_MSG
                 if _path_covers_registry(
-                    arg.split("=", 1)[1],
+                    resolved,
                     repo,
                     command_cwd,
                     follow_final_symlink=True,
@@ -1782,8 +1810,11 @@ def _bash_reason(cmd: str, repo: Path) -> str | None:
                     continue
                 if arg == "-":
                     continue
+                resolved, dynamic = _static_destructive_word(arg, command_cwd)
+                if dynamic:
+                    return _EXPANSION_FAILCLOSED_MSG
                 if _path_covers_registry(
-                    arg,
+                    resolved,
                     repo,
                     command_cwd,
                     follow_final_symlink=True,
@@ -1808,13 +1839,16 @@ def _bash_reason(cmd: str, repo: Path) -> str | None:
         for arg in args:
             if arg.startswith("-"):
                 continue
+            resolved, dynamic = _static_destructive_word(arg, command_cwd)
+            if dynamic:
+                return _EXPANSION_FAILCLOSED_MSG
             if git_command:
                 touches_registry = _git_pathspec_covers_registry(
-                    arg, repo, command_cwd, include_ancestors=recursive
+                    resolved, repo, command_cwd, include_ancestors=recursive
                 )
             else:
                 touches_registry = _path_covers_registry(
-                    arg,
+                    resolved,
                     repo,
                     command_cwd,
                     follow_final_symlink=(name in {"shred", "truncate"}),
@@ -2302,6 +2336,19 @@ def self_test() -> int:
         f'env -S "rm {REGISTRY_REL}"',
         f'env --split-string="rm {REGISTRY_REL}"',
         f"timeout 5s rm {REGISTRY_REL}",
+        # exact-head review 2：cp 分支的 $PWD/${PWD} 解析必须下沉到 rm/mv/dd/tee/git-rm/重定向
+        "rm $PWD/memory/doc-lifecycle.yaml",
+        "rm ${PWD}/memory/doc-lifecycle.yaml",
+        'rm "$PWD/memory/doc-lifecycle.yaml"',
+        "mv $PWD/memory/doc-lifecycle.yaml /tmp/away",
+        "dd if=/dev/null of=$PWD/memory/doc-lifecycle.yaml",
+        "dd if=/dev/null of=${PWD}/memory/doc-lifecycle.yaml",
+        "printf x | tee $PWD/memory/doc-lifecycle.yaml",
+        "git rm $PWD/memory/doc-lifecycle.yaml",
+        "printf x > $PWD/memory/doc-lifecycle.yaml",
+        # 未知活动展开在破坏路径上不可静态核验 → fail-closed（与 cp --target-directory=$DEST 平行）
+        "rm $DEST/doc-lifecycle.yaml",
+        "dd if=/dev/null of=$DEST",
     ):
         check(
             f"hook 拦 Bash wrapper/global-option 绕过：{wrapped.split()[0:3]}",
@@ -2468,6 +2515,13 @@ def self_test() -> int:
         r"cp /tmp/doc-lifecycle.yaml \$PWD/memory",
         "dd if=/dev/null of=/tmp/not-this-repo/memory/doc-lifecycle.yaml",
         "printf x | tee /tmp/not-this-repo/memory/doc-lifecycle.yaml",
+        # exact-head review 2：破坏路径上 $PWD 解析到非注册表 / 字面 $ / 转义 $ 不得误拦
+        "rm $PWD/not-memory/doc-lifecycle.yaml",
+        "mv $PWD/not-memory/doc-lifecycle.yaml /tmp/away",
+        "dd if=/dev/null of=$PWD/not-memory/doc-lifecycle.yaml",
+        "printf x | tee $PWD/not-memory/doc-lifecycle.yaml",
+        "rm '$PWD/memory/doc-lifecycle.yaml'",
+        r"rm \$PWD/memory/doc-lifecycle.yaml",
         f'env -S "echo {REGISTRY_REL}"',
         f'env --split-string="echo {REGISTRY_REL}"',
         f"timeout 5s echo {REGISTRY_REL}",
