@@ -13,8 +13,10 @@
   默认非法 Write deny、仅显式 `DOC_LIFECYCLE_SKIP=1` allow、registry delete deny 均有顶层
   Claude Code session hook raw evidence。
   raw 转录、debug log 与 sha256 见 `lab/evals/doc-lifecycle/evidence-20260713-runtime-probes.md`。
-  当前 evidence-only child 直接绑定代码 parent `492e042`；下一步是对该 exact HEAD 独立复审。
-  未 APPROVE 前不标 verified、不合入。
+  evidence-only `54822ff` 的独立 fresh review 证明 PyYAML 正常路径仍会静默采用第二份合法
+  `docs:`，而 fallback 会拒绝；当前 HEAD 正在统一拒绝该重复根字段并补 normal/`python -S`
+  真实 hook 对抗 fixture。修复后须重跑 exact-target G1/G2、严格门禁与独立复审；未 APPROVE 前
+  不标 verified、不合入。
 - 权威状态注册表：`memory/doc-lifecycle.yaml`（brief/plan/review/decision 四类统一，语义见 `plans/ANATOMY.md`）。
 - 其余存量 plan 均已 `verified`，decisions 均 `approved`（详见注册表）。
 - 本节由 agent 在状态流转时更新；compact/clear 后 `context_continuity.py` 会把本文件回注新上下文。
@@ -47,9 +49,9 @@
 
 ## 未合入 blocker
 
-- #13：C1-C3/X1-X3/G1-G2 真实 runtime evidence 已 8/8 PASS；最终代码 parent `492e042`，
-  当前 evidence-only child 将绑定本轮精确 G1/G2 raw evidence。当前唯一门槛是 exact HEAD fresh
-  APPROVE。
+- #13：C1-C3/X1-X3/G1-G2 真实 runtime evidence 已 8/8 PASS；`54822ff` final review 的唯一
+  MAJOR 是 PyYAML 接受第二份合法 `docs:` 而 fallback 拒绝。当前修复与双模式对抗 fixture 落地后，
+  仍须在新代码 target 重跑 G1/G2、绑定 raw evidence并取得 exact HEAD fresh APPROVE。
 - #18 `cebe427`：raw-evidence 绑定 validator 的代码 MAJOR 已修复并获 code APPROVE；仍须纳入
   #13 hook 兼容修复，在最终 exact target 完成 C1-C7/X1-X7、`--require-fresh` exit 0 与 fresh
   final review。未取得这些证据前不得合入。

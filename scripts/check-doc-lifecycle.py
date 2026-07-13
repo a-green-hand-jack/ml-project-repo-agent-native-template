@@ -309,6 +309,15 @@ def parse_registry_text(text: str):
     except ImportError:
         return _parse_restricted(text)
     try:
+        root_node = yaml.compose(text, Loader=yaml.SafeLoader)
+        if isinstance(root_node, yaml.nodes.MappingNode):
+            docs_keys = [
+                key_node
+                for key_node, _ in root_node.value
+                if isinstance(key_node, yaml.nodes.ScalarNode) and key_node.value == "docs"
+            ]
+            if len(docs_keys) > 1:
+                return [], [f"{REGISTRY_REL} 顶层 docs 字段重复"]
         data = yaml.safe_load(text) or {}
     except Exception as e:  # noqa: BLE001
         return [], [f"{REGISTRY_REL} YAML 解析失败：{e}"]
@@ -2382,7 +2391,12 @@ def self_test() -> int:
     )
     td.cleanup()
 
-    duplicate_docs = f"{_OK_REGISTRY}\ndocs: []\n"
+    duplicate_docs = f"{_OK_REGISTRY}\n{_OK_REGISTRY[_OK_REGISTRY.index('docs:'):]}"
+    _, duplicate_errors = parse_registry_text(duplicate_docs)
+    check(
+        "统一 parser 拒绝第二份本身合法的重复顶层 docs",
+        any("docs 字段重复" in e for e in duplicate_errors),
+    )
     restricted_entries, restricted_errors = _parse_restricted(duplicate_docs)
     check(
         "受限 parser 拒绝重复顶层 docs 字段",
@@ -2390,7 +2404,7 @@ def self_test() -> int:
     )
     td, root = fresh({"plans/demo.zh.md": _OK_PLAN, REGISTRY_REL: _OK_REGISTRY})
     check(
-        "真实 fallback hook 拦追加重复 docs: []",
+        "真实 hook 拦第二份本身合法的重复 docs",
         pretooluse_reason(
             "Write",
             {"file_path": str(root / REGISTRY_REL), "content": duplicate_docs},

@@ -90,7 +90,9 @@ def run_no_site(tool: str, tool_input: dict) -> int:
 def main() -> int:
     registry_text = (REPO / REGISTRY).read_text(encoding="utf-8")
     registry_first_line = registry_text.split("\n")[0]
-    duplicate_docs_registry = f"{registry_text.rstrip()}\n\ndocs: []\n"
+    duplicate_docs_registry = (
+        f"{registry_text.rstrip()}\n\n{registry_text[registry_text.index('docs:'):]}"
+    )
     flip_patch = (
         f"*** Begin Patch\n*** Update File: {TMP_PLAN_REL}\n@@\n"
         "-Status: verified · 2026-07-13 · synthetic\n"
@@ -426,7 +428,7 @@ def main() -> int:
         ("exact-head-review: docs 行内值后隐藏缩进条目拦", "Write",
          {"file_path": REGISTRY,
           "content": "docs: []\n  - id: hidden\n    path: plans/hidden.zh.md\n"}, 2, None),
-        ("exact-head-review: 重复顶层 docs 字段拦", "Write",
+        ("exact-head-review: normal hook 拦第二份本身合法的重复 docs", "Write",
          {"file_path": REGISTRY, "content": duplicate_docs_registry}, 2, None),
         ("fresh-review-5a: draft 状态锚点缺 date/ref 拦", "Write",
          {"file_path": TMP_ANCHOR_PLAN_REL, "content": status_only_draft}, 2, None),
@@ -555,7 +557,7 @@ def main() -> int:
         failures += 0 if ok else 1
         print(
             "  "
-            f"{'PASS' if ok else 'FAIL'}  real python -S hook: 重复 docs fail-closed "
+            f"{'PASS' if ok else 'FAIL'}  real python -S hook: 第二份合法重复 docs fail-closed "
             f"(exit {got}, want 2)"
         )
     finally:
