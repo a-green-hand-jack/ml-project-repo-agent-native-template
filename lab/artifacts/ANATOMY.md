@@ -40,6 +40,8 @@ maintenance: |
 
 - 共同最小 schema（`schema_version` / `location` / `how_to_inspect` /
   `commit`+`config`+`run_id` / `status` / checksum 三件套）见 `.agent/artifact-policy.md`。
+  三元组全部 7 类统一必填；确无 run 来源（如 human-cc/agent trace）须显式豁免
+  （`provenance_unavailable_reason` 固定枚举 + 非占位理由），不允许静默留空。
 - 悬空索引 / 未闭环 run / checksum 不匹配由 `scripts/check-provenance-chain.py` 拦截
   （由 `validate-governance.py` 拉起；checksum 统一 sha256，无法校验需固定枚举 reason +
   非占位人工理由）。

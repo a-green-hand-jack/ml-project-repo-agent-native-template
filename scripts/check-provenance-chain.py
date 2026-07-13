@@ -7,20 +7,28 @@
 
 检查项（三态输出：PASS / FAIL / UNKNOWN，unknown 不算 pass）：
 1. 覆盖的 index / ledger YAML 带 `schema_version`（整数 ≥1）。
-2. artifact index 条目：commit/config/run_id 三元组非占位；run_id 存在于
-   experiment-ledger 且 run 已闭环（status=done 且有 run_summary）。
+2. artifact index 条目：commit/config/run_id 三元组非占位（全部 7 类统一要求；
+   确无 run 来源的合法场景须显式豁免：provenance_unavailable_reason 固定枚举 +
+   非占位 justification，不允许静默留空）；run_id 存在于 experiment-ledger 且
+   run 已闭环（status=done 且有 run_summary）。
 3. checksum：统一 sha256，进程内 hashlib 计算；本地 bytes 可达则真算比对；
    外部 URI / 不可达路径只要求记录完备；无法校验必须给固定枚举 reason +
    非占位 justification，枚举外或占位理由判 FAIL（不是 unknown）。
 4. evidence → artifact index 交叉引用（metric_source 等指向 index 条目时必须存在
    且未 archived）；evidence.run_id 的 run 必须闭环。
 5. deliverables/index.md → claims.yaml 引用存在；「evidence 齐全」列与 claims 实际
-   evidence 一致；submitted/published 状态要求「齐全=是」。
+   evidence 一致；submitted/published 状态要求「齐全=是」；「齐全=是」的非 draft
+   条目还必须「正文含 claim marker」或「登记人工 review 证据（行内引用
+   human/reviews/results/ 下存在的文件）」二选一（plan 任务 5.3），两者皆无判 FAIL
+   （豁免仅限占位/示例行与 draft 状态）。
 6. deliverable Markdown 正文的 claim marker
    `<!-- claim: id=<claim-id> [evidence=<ev-id>,...] -->` 引用必须存在。
 7. release gate 结构化检查（structured_checks，只覆盖可客观机械验证的 kind）：
    结果仅作建议信号（ADVISE），gate_status 翻转仍是 human 动作；唯一会 FAIL 的
-   情形是 gate_status=passed 却有结构化检查不满足（不该放行）。
+   情形是 gate_status=passed 却有结构化检查不满足（不该放行）。语义收紧：
+   artifact-exists 除条目存在外还查 repo 内 location 文件真实存在（外部/不可达
+   location 查 checksum/manifest 记录完备）；checksum-verified 只在真算 sha256
+   比对通过时满足，waived（豁免）/ recorded-unverified（登记未校验）≠ verified。
 
 覆盖范围：同一套逻辑经 INDEX_SPECS / COVERED_INDEX_TYPES 白名单扩展——Phase A 为
 最短闭环（result-index → evidence → claims → deliverables），Phase B 已扩展到全部
@@ -51,6 +59,11 @@ CHECKSUM_UNAVAILABLE_REASONS = {
     "pending-upload",            # bytes 尚未落地/上传，条目先行占位登记
     "legacy-untracked",          # 历史遗留条目，尚未回填 checksum
     "oversized-defer-hash",      # 文件过大，暂不具备本地算 hash 条件
+}
+PROVENANCE_UNAVAILABLE_REASONS = {  # 三元组豁免（决策 9）：无 run 来源的合法场景
+    "external-origin",   # 外部/上游产生（如外部数据集），repo 内无 run/config 来源
+    "human-authored",    # human 手工产生（如 human-cc trace），无 run/config
+    "legacy-untracked",  # 历史遗留条目，来源三元组尚未回填
 }
 JUSTIFICATION_PLACEHOLDERS = {"tbd", "n/a", "na", "none", "todo", "...", "-", "?"}
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -91,8 +104,8 @@ INDEX_SPECS: dict[str, dict] = {
         "file": "lab/artifacts/trace-index.yaml",
         "key": "traces",
         "id_prefixes": ("trace-",),
-        # human-cc trace 可无 commit/config；run_id 若填了才校验。
-        "required_triplet": (),
+        # human-cc/agent trace 无 run 来源时走显式 provenance 豁免（决策 9），不清空要求。
+        "required_triplet": ("commit", "config", "run_id"),
         "checksum": True,
     },
     "model": {
@@ -113,8 +126,8 @@ INDEX_SPECS: dict[str, dict] = {
         "file": "lab/data/dataset-index.yaml",
         "key": "datasets",
         "id_prefixes": ("dataset-",),
-        # 外部数据集可无 run 来源；run_id 若填了才校验。
-        "required_triplet": (),
+        # 外部数据集无 run 来源时走显式 provenance 豁免（决策 9），不清空要求。
+        "required_triplet": ("commit", "config", "run_id"),
         "checksum": True,
     },
 }
@@ -373,22 +386,34 @@ def _check_schema_version(doc, rel: str, rep: Report) -> None:
 # checksum / manifest 校验（决策 2/8：统一 sha256 + 固定枚举 reason + 必填理由）
 # ---------------------------------------------------------------------------
 
-def _check_justified_unavailable(entry: dict, ident: str, rep: Report) -> None:
-    reason = entry.get("checksum_unavailable_reason")
-    just = entry.get("checksum_unavailable_justification")
-    if reason not in CHECKSUM_UNAVAILABLE_REASONS:
+def _check_reason_justification(
+    ident: str, field_prefix: str, reason, just, enum: set, rep: Report,
+) -> bool:
+    """校验「固定枚举 reason + 非占位 justification」双关卡组合（决策 2 模式，
+    checksum 与 provenance 豁免共用）。返回记录是否完备；不完备时已记 FAIL。"""
+    if reason not in enum:
         rep.fail(
-            f"{ident}：checksum_unavailable_reason 非法（{reason!r}），"
-            f"合法枚举：{sorted(CHECKSUM_UNAVAILABLE_REASONS)}"
+            f"{ident}：{field_prefix}_reason 非法（{reason!r}），"
+            f"合法枚举：{sorted(enum)}"
         )
-        return
+        return False
     if not _filled(just) or str(just).strip().lower() in JUSTIFICATION_PLACEHOLDERS:
         rep.fail(
-            f"{ident}：checksum_unavailable_justification 为空或占位（{just!r}）——"
+            f"{ident}：{field_prefix}_justification 为空或占位（{just!r}）——"
             "reason 枚举 + 具体人工理由两者都要，防止校验逃逸"
         )
-        return
-    rep.ok(f"{ident}：无 checksum，reason={reason} 且理由已填，记录完备")
+        return False
+    return True
+
+
+def _check_justified_unavailable(entry: dict, ident: str, rep: Report) -> None:
+    reason = entry.get("checksum_unavailable_reason")
+    if _check_reason_justification(
+        ident, "checksum_unavailable", reason,
+        entry.get("checksum_unavailable_justification"),
+        CHECKSUM_UNAVAILABLE_REASONS, rep,
+    ):
+        rep.ok(f"{ident}：无 checksum，reason={reason} 且理由已填，记录完备")
 
 
 def _verify_sum(root: Path, ident: str, location: str, checksum: str, rep: Report) -> None:
@@ -535,10 +560,33 @@ def check_artifact_indexes(root: Path, runs: dict, claim_ids: set, rep: Report) 
             if not _filled(location):
                 # 模板占位条目（location 未填/占位）天然通过，不误伤。
                 continue
-            # 可复现三元组非占位（任务 2.1）。
-            for field in spec["required_triplet"]:
-                if not _filled(e.get(field)):
-                    rep.fail(f"{ident}：{field} 缺失或占位（可复现三元组必填）")
+            # 可复现三元组非占位（任务 2.1）。全部 7 类共用同一要求（决策 9）：
+            # 无 run 来源的合法场景（外部数据集 / human-cc trace / 历史遗留）必须
+            # 显式豁免（固定枚举 reason + 非占位理由），不允许静默留空。
+            missing = [f for f in spec["required_triplet"] if not _filled(e.get(f))]
+            prov_reason = e.get("provenance_unavailable_reason")
+            prov_just = e.get("provenance_unavailable_justification")
+            if prov_reason is not None or _filled(prov_just):
+                if _check_reason_justification(
+                    ident, "provenance_unavailable", prov_reason, prov_just,
+                    PROVENANCE_UNAVAILABLE_REASONS, rep,
+                ):
+                    if missing:
+                        rep.ok(
+                            f"{ident}：三元组缺 {missing}，已显式豁免"
+                            f"（reason={prov_reason}，理由已填）"
+                        )
+                    else:
+                        rep.fail(
+                            f"{ident}：三元组已齐全，不应再填 provenance_unavailable_*"
+                            "（豁免只用于字段确实缺失的场景）"
+                        )
+            else:
+                for field in missing:
+                    rep.fail(
+                        f"{ident}：{field} 缺失或占位（可复现三元组必填；确无 run 来源"
+                        "需填 provenance_unavailable_reason/justification 显式豁免）"
+                    )
             # run 闭环（任务 2.2）：required 或已填时校验。
             run_id = e.get("run_id")
             if _filled(run_id):
@@ -611,6 +659,34 @@ def check_evidence(root: Path, runs: dict, rep: Report) -> dict:
 # ---------------------------------------------------------------------------
 
 _CLAIM_REF_RE = re.compile(r"claims\.yaml#([A-Za-z0-9._-]+)|(claim-[A-Za-z0-9._-]+)")
+_REVIEW_REF_RE = re.compile(r"human/reviews/results/[A-Za-z0-9._/-]+")
+
+
+def _iter_markers(md: Path):
+    """产出 md 文件正文（跳过 code fence）里的 claim marker 匹配。"""
+    in_fence = False
+    for line in md.read_text(encoding="utf-8").splitlines():
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        yield from CLAIM_MARKER_RE.finditer(line)
+
+
+def _deliverable_has_marker(root: Path, path_cell: str) -> bool:
+    """交付物路径（index.md「路径」列）下是否存在至少一个 claim marker。"""
+    rel = path_cell.strip().strip("`").strip()
+    if not rel or rel.startswith("<"):
+        return False
+    p = root / rel
+    if p.is_dir():
+        files = sorted(p.rglob("*.md"))
+    elif p.is_file() and p.suffix == ".md":
+        files = [p]
+    else:
+        return False
+    return any(True for f in files for _ in _iter_markers(f))
 
 
 def check_deliverables_index(root: Path, claims_by_id: dict, rep: Report) -> None:
@@ -654,6 +730,33 @@ def check_deliverables_index(root: Path, claims_by_id: dict, rep: Report) -> Non
                 )
         if status_cell in ("submitted", "published") and complete not in ("是", "yes", "Yes"):
             rep.fail(f"{ident}：状态 {status_cell} 要求「evidence 齐全」列为「是」")
+        # plan 任务 5.3：判「evidence 齐全=是」还必须有机器可见的支撑动作——正文含
+        # claim marker，或登记了人工 review 证据（行内引用 human/reviews/results/ 下
+        # 存在的文件）。二者皆无 → FAIL。豁免条件（仅此两类）：
+        #   a) 占位/示例行（上方已 continue 跳过）；
+        #   b) status=draft——尚未对外，允许先标「齐全」再补 marker/review；提升到
+        #      submitted/published 时本检查即生效。
+        if complete in ("是", "yes", "Yes") and status_cell != "draft":
+            review_refs = _REVIEW_REF_RE.findall(" ".join(cells))
+            live_reviews = []
+            for r in review_refs:
+                if (root / r).is_file():
+                    live_reviews.append(r)
+                else:
+                    rep.fail(f"{ident}：登记的人工 review 证据不存在：{r}")
+            if _deliverable_has_marker(root, path_cell):
+                rep.ok(f"{ident}：「齐全=是」且正文含 claim marker（任务 5.3 满足）")
+            elif live_reviews:
+                rep.ok(
+                    f"{ident}：「齐全=是」，正文无 marker，但已登记人工 review 证据："
+                    f"{live_reviews[0]}（任务 5.3 兜底路径）"
+                )
+            else:
+                rep.fail(
+                    f"{ident}：「evidence 齐全=是」（状态 {status_cell}）但正文"
+                    "无 claim marker、也未登记 human/reviews/results/ 人工 review 证据"
+                    "——两者至少其一（任务 5.3），否则「齐全」列不得为「是」"
+                )
 
 
 def check_claim_markers(root: Path, claim_ids: set, evidence_ids: set, rep: Report) -> None:
@@ -662,31 +765,27 @@ def check_claim_markers(root: Path, claim_ids: set, evidence_ids: set, rep: Repo
         return
     n_markers = 0
     for md in sorted(deliv.rglob("*.md")):
-        in_fence = False
-        for line in md.read_text(encoding="utf-8").splitlines():
-            if line.lstrip().startswith("```"):
-                in_fence = not in_fence
-                continue
-            if in_fence:
-                continue
-            for m in CLAIM_MARKER_RE.finditer(line):
-                n_markers += 1
-                cid, ev_list = m.group(1), m.group(2)
-                ident = f"claim marker（{md.relative_to(root)}）"
-                if cid in claim_ids:
-                    rep.ok(f"{ident}：id={cid} 存在")
+        for m in _iter_markers(md):
+            n_markers += 1
+            cid, ev_list = m.group(1), m.group(2)
+            ident = f"claim marker（{md.relative_to(root)}）"
+            if cid in claim_ids:
+                rep.ok(f"{ident}：id={cid} 存在")
+            else:
+                rep.fail(f"{ident}：id={cid} 不存在于 claims.yaml")
+            for ev in (ev_list or "").split(","):
+                ev = ev.strip()
+                if not ev:
+                    continue
+                if ev in evidence_ids:
+                    rep.ok(f"{ident}：evidence={ev} 存在")
                 else:
-                    rep.fail(f"{ident}：id={cid} 不存在于 claims.yaml")
-                for ev in (ev_list or "").split(","):
-                    ev = ev.strip()
-                    if not ev:
-                        continue
-                    if ev in evidence_ids:
-                        rep.ok(f"{ident}：evidence={ev} 存在")
-                    else:
-                        rep.fail(f"{ident}：evidence={ev} 不存在于 evidence.yaml")
+                    rep.fail(f"{ident}：evidence={ev} 不存在于 evidence.yaml")
     if n_markers == 0:
-        rep.ok("claim marker：deliverables 下暂无 marker（非 Markdown/无 marker 走人工 review 兜底）")
+        rep.ok(
+            "claim marker：deliverables 下暂无 marker（无 marker 的活跃交付物由"
+            " deliverables/index.md 的 marker-or-review 检查兜底）"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -695,6 +794,32 @@ def check_claim_markers(root: Path, claim_ids: set, evidence_ids: set, rep: Repo
 # 「gate_status=passed 却有结构化检查不满足」这种不该放行的情况）
 # ---------------------------------------------------------------------------
 
+def _checksum_verification_state(root: Path, entry: dict, location: str) -> str:
+    """区分 checksum 的三种「记录完备」状态（前提：_check_entry_checksum 无 FAIL）：
+    - verified：validator 真算 sha256 且比对通过（本地 bytes 可达）；
+    - waived：走 checksum_unavailable_reason/justification 豁免（理由完备 ≠ 校验过）；
+    - recorded-unverified：登记了 checksum 但 bytes 不在本地，无法真算比对。
+    manifest 场景按 files 逐条聚合：全部 verified 才算 verified。"""
+    manifest = entry.get("manifest")
+    if _filled(manifest):
+        doc, _err = load_yaml(root / manifest)
+        files = [fe for fe in ((doc or {}).get("files") or []) if isinstance(fe, dict)]
+        states = []
+        for fe in files:
+            if _filled(fe.get("sha256")):
+                st, _ = _locate(root, fe.get("path") or fe.get("uri") or "")
+                states.append("verified" if st == "local" else "recorded-unverified")
+            else:
+                states.append("waived")
+        if states and all(s == "verified" for s in states):
+            return "verified"
+        return "waived" if "waived" in states else "recorded-unverified"
+    if _filled(entry.get("checksum")):
+        st, _ = _locate(root, location)
+        return "verified" if st == "local" else "recorded-unverified"
+    return "waived"
+
+
 def _eval_structured_check(
     root: Path, c: dict, runs: dict, claims_by_id: dict,
     evidence_by_id: dict, regs_by_id: dict,
@@ -702,18 +827,45 @@ def _eval_structured_check(
     """返回 (result, detail)：result ∈ {True, False, None(无法机械验证), 'malformed'}。"""
     kind = c.get("kind")
     if kind == "artifact-exists":
+        # 语义（决策 3「文件/manifest 存在性」）：index 条目登记存在还不够——repo 内
+        # location 必须真实存在；外部/不可达 location 要求 checksum/manifest 记录完备。
         target = c.get("target")
         if not _filled(target):
             return "malformed", "artifact-exists 缺 target 字段"
         for itype in COVERED_INDEX_TYPES:
             if any(target.startswith(p) for p in INDEX_SPECS[itype]["id_prefixes"]):
-                exists = target in _index_ids(root, itype)[1]
-                return exists, f"{itype}-index 条目 {target}{'存在' if exists else '不存在'}"
+                entry = _index_ids(root, itype)[0].get(target)
+                if entry is None:
+                    return False, f"{itype}-index 无条目 {target}"
+                location = entry.get("location")
+                if not _filled(location):
+                    return False, (
+                        f"{itype}-index 条目 {target} 的 location 未填/占位，"
+                        "无法确认产物真实存在"
+                    )
+                state, _p = _locate(root, location)
+                if state == "local":
+                    return True, f"{itype}-index 条目 {target} 存在且 location 文件可达"
+                if state == "missing":
+                    return False, (
+                        f"{itype}-index 条目 {target} 的 location 指向 repo 内"
+                        f"不存在的文件：{location}"
+                    )
+                sub = Report()
+                _check_entry_checksum(root, entry, target, location, sub)
+                ok = not sub.fails and not sub.unknowns
+                return ok, (
+                    f"{itype}-index 条目 {target} 的 location 在外部/不可达（{state}），"
+                    f"checksum/manifest 记录{'完备' if ok else '不完备'}"
+                )
         if "://" in target:
             return None, f"外部 URI {target} 无法机械验证存在性"
         exists = (root / target).exists()
         return exists, f"路径 {target}{'存在' if exists else '不存在'}"
     if kind == "checksum-verified":
+        # 语义（决策 3「checksum 状态为已校验通过」）：只有 validator 真算 sha256 且
+        # 比对通过才为 True；「理由完备的无 checksum」是 waived、「登记了 checksum 但
+        # bytes 不可达」是 recorded-unverified——两者都 ≠ verified，不放行。
         aid = c.get("artifact")
         if not _filled(aid):
             return "malformed", "checksum-verified 缺 artifact 字段"
@@ -722,10 +874,18 @@ def _eval_structured_check(
                 entry = _index_ids(root, itype)[0].get(aid)
                 if entry is None:
                     return False, f"{itype}-index 无条目 {aid}"
+                location = entry.get("location") or ""
                 sub = Report()
-                _check_entry_checksum(root, entry, aid, entry.get("location") or "", sub)
-                ok = not sub.fails and not sub.unknowns
-                return ok, f"{aid} checksum {'通过' if ok else '未通过'}"
+                _check_entry_checksum(root, entry, aid, location, sub)
+                if sub.fails or sub.unknowns:
+                    return False, f"{aid} checksum 记录不完备或校验失败"
+                state = _checksum_verification_state(root, entry, location)
+                if state == "verified":
+                    return True, f"{aid} checksum 已真算 sha256 且比对通过"
+                return False, (
+                    f"{aid} checksum 状态为 {state}（记录完备但未经真实校验），"
+                    "waived/recorded-unverified ≠ verified——本 kind 只认真算比对通过"
+                )
         return "malformed", f"checksum-verified 的 artifact={aid} 不匹配任何已知 index 前缀"
     if kind == "run-closed":
         run_id = c.get("run")
@@ -959,6 +1119,8 @@ datasets:
     commit: abc1234
     splits: [train, test]
     status: active
+    provenance_unavailable_reason: external-origin
+    provenance_unavailable_justification: "外部基准集由上游发布，无本 repo run/config 来源"
     checksum_unavailable_reason: external-uri-no-checksum
     checksum_unavailable_justification: "上游只发布 tarball，未发布 sha256；镜像后回填"
     updated: "2026-07-12"
@@ -996,6 +1158,8 @@ gates:
         artifact: result-001
       - kind: artifact-exists
         target: result-001
+      - kind: artifact-exists
+        target: result-002
     gate_status: open
     updated: "2026-07-12"
 """
@@ -1200,6 +1364,170 @@ def _self_test() -> int:
                           .replace("gate_status: open", "gate_status: passed"))
     _run_case("negative-evidence-grade-below-min", grade_below_min,
               ["最强证据 rank=", "不该放行"], False, failures)
+
+    # --- 初审修复（2026-07-13）：MAJOR-1 deliverable marker-or-review ---
+
+    # 正例：submitted + 齐全=是 + 正文有 marker（任务 5.3 主路径）。
+    def submitted_with_marker(root: Path, digest: str) -> None:
+        _write(root, "deliverables/index.md",
+               _GOOD_DELIVERABLES_INDEX.replace("| draft |", "| submitted |"))
+    _run_case("positive-submitted-with-marker", submitted_with_marker,
+              [], True, failures)
+
+    # 负例 16：submitted + 齐全=是，但零 marker、零人工 review 证据 → FAIL。
+    def no_marker_no_review(root: Path, digest: str) -> None:
+        _write(root, "deliverables/index.md",
+               _GOOD_DELIVERABLES_INDEX.replace("| draft |", "| submitted |"))
+        _write(root, "deliverables/paper/README.md",
+               "# paper\n\nMethod X beats baseline Y.\n")
+    _run_case("negative-active-deliverable-no-marker-no-review", no_marker_no_review,
+              ["无 claim marker", "人工 review 证据"], False, failures)
+
+    # 正例：零 marker 但登记了人工 review 证据（任务 5.3 兜底路径成立）。
+    def review_fallback(root: Path, digest: str) -> None:
+        _write(root, "human/reviews/results/paper-1-review.md",
+               "# paper-1 review\n\nhuman 复核：claim-001 由 ev-001 支撑。2026-07-12\n")
+        _write(root, "deliverables/index.md",
+               "# deliverables/index.md\n\n"
+               "| id | 类型 | 路径 | 支撑 claim | 状态 | evidence 齐全 | 人工 review |\n"
+               "| --- | --- | --- | --- | --- | --- | --- |\n"
+               "| paper-1 | paper | `deliverables/paper/` | claim-001 | submitted "
+               "| 是 | `human/reviews/results/paper-1-review.md` |\n")
+        _write(root, "deliverables/paper/README.md",
+               "# paper\n\nMethod X beats baseline Y.\n")
+    _run_case("positive-review-evidence-fallback", review_fallback,
+              [], True, failures)
+
+    # 负例 17：登记的人工 review 证据文件不存在（悬空引用）。
+    def dangling_review(root: Path, digest: str) -> None:
+        review_fallback(root, digest)
+        (root / "human/reviews/results/paper-1-review.md").unlink()
+    _run_case("negative-dangling-review-ref", dangling_review,
+              ["review 证据不存在"], False, failures)
+
+    # --- 初审修复：MAJOR-2 gate 结构化检查语义收紧 ---
+
+    # 负例 18：checksum-verified 指向 waived 条目（豁免 ≠ 已校验）且 gate=passed。
+    def gate_passed_waived_checksum(root: Path, digest: str) -> None:
+        _write(root, "lab/research/release-gates.yaml",
+               _GOOD_GATES.replace("artifact: result-001", "artifact: result-002")
+                          .replace("gate_status: open", "gate_status: passed"))
+    _run_case("negative-gate-checksum-waived-not-verified", gate_passed_waived_checksum,
+              ["≠ verified", "不该放行"], False, failures)
+
+    # 负例 19：artifact-exists 的条目索引仍在、但 location 文件已不存在，gate=passed。
+    def gate_passed_artifact_gone(root: Path, digest: str) -> None:
+        (root / "lab/runs/exports/result-001.json").unlink()
+        _write(root, "lab/research/release-gates.yaml",
+               _GOOD_GATES.replace("gate_status: open", "gate_status: passed"))
+    _run_case("negative-gate-artifact-file-missing", gate_passed_artifact_gone,
+              ["不存在的文件", "不该放行"], False, failures)
+
+    # --- 初审修复：MAJOR-3 三元组统一 + provenance 豁免；MINOR-4 各类型负例 ---
+
+    # 负例 20：table 条目缺三元组（无 provenance 豁免）。
+    def table_missing_triplet(root: Path, digest: str) -> None:
+        _write(root, "lab/artifacts/table-index.yaml",
+               "schema_version: 1\n"
+               "tables:\n"
+               "  - id: table-001\n"
+               "    caption: main results table\n"
+               "    location: \"s3://bucket/tables/table-001.csv\"\n"
+               "    how_to_inspect: aws s3 cp\n"
+               "    run_id: run-001\n"
+               "    status: active\n"
+               "    checksum_unavailable_reason: external-uri-no-checksum\n"
+               "    checksum_unavailable_justification: \"表格由导出 pipeline 托管在"
+               " s3，待回填 sha256\"\n"
+               "    updated: \"2026-07-12\"\n")
+    _run_case("negative-table-missing-triplet", table_missing_triplet,
+              ["table-index table-001：commit 缺失或占位",
+               "table-index table-001：config 缺失或占位"], False, failures)
+
+    # 负例 21：figure 条目 supports_claim 悬空引用。
+    def figure_dangling_claim(root: Path, digest: str) -> None:
+        _write(root, "lab/artifacts/figure-index.yaml",
+               "schema_version: 1\n"
+               "figures:\n"
+               "  - id: figure-001\n"
+               "    caption: main curve\n"
+               "    location: \"s3://bucket/figures/figure-001.pdf\"\n"
+               "    how_to_inspect: aws s3 cp\n"
+               "    commit: abc1234\n"
+               "    config: lab/code/configs/exp1.yaml\n"
+               "    run_id: run-001\n"
+               "    supports_claim: claim-999\n"
+               "    status: active\n"
+               "    checksum_unavailable_reason: external-uri-no-checksum\n"
+               "    checksum_unavailable_justification: \"图由绘图 pipeline 托管在"
+               " s3，待回填 sha256\"\n"
+               "    updated: \"2026-07-12\"\n")
+    _run_case("negative-figure-dangling-supports-claim", figure_dangling_claim,
+              ["supports 指向未知 claim：claim-999"], False, failures)
+
+    _TRACE_ENTRY = (
+        "schema_version: 1\n"
+        "traces:\n"
+        "  - id: trace-001\n"
+        "    kind: human-cc\n"
+        "    location: \"s3://bucket/traces/trace-001.jsonl\"\n"
+        "    how_to_inspect: aws s3 cp\n"
+        "    summary: human-cc session trace\n"
+        "    status: active\n"
+        "    checksum_unavailable_reason: external-uri-no-checksum\n"
+        "    checksum_unavailable_justification: \"trace 由采集端上传对象存储，"
+        "暂无导出的 sha256\"\n"
+        "    updated: \"2026-07-12\"\n"
+    )
+
+    # 负例 22：trace 条目缺三元组且未显式豁免（静默留空不再放行）。
+    def trace_missing_triplet(root: Path, digest: str) -> None:
+        _write(root, "lab/artifacts/trace-index.yaml", _TRACE_ENTRY)
+    _run_case("negative-trace-missing-triplet-no-waiver", trace_missing_triplet,
+              ["trace-index trace-001：commit 缺失或占位",
+               "provenance_unavailable_reason/justification 显式豁免"],
+              False, failures)
+
+    # 正例：同一 trace 条目，带显式 provenance 豁免（human-authored）→ 放行。
+    def trace_with_waiver(root: Path, digest: str) -> None:
+        _write(root, "lab/artifacts/trace-index.yaml",
+               _TRACE_ENTRY.replace(
+                   "    updated:",
+                   "    provenance_unavailable_reason: human-authored\n"
+                   "    provenance_unavailable_justification: \"human-cc 会话"
+                   "手工产生，无 run/config 来源\"\n"
+                   "    updated:"))
+    _run_case("positive-trace-provenance-waiver", trace_with_waiver,
+              [], True, failures)
+
+    # 负例 23：provenance 豁免理由为占位（TBD）→ 逃逸口关闭。
+    def waiver_placeholder_just(root: Path, digest: str) -> None:
+        _write(root, "lab/data/dataset-index.yaml",
+               re.sub(r'provenance_unavailable_justification: ".*"',
+                      'provenance_unavailable_justification: "TBD"',
+                      _GOOD_DATASET_INDEX))
+    _run_case("negative-provenance-waiver-placeholder", waiver_placeholder_just,
+              ["provenance_unavailable_justification 为空或占位"], False, failures)
+
+    # 负例 24：checkpoint 条目 run_id 悬空引用（experiment-ledger 中不存在）。
+    def checkpoint_dangling_run(root: Path, digest: str) -> None:
+        _write(root, "lab/models/checkpoint-index.yaml",
+               "schema_version: 1\n"
+               "checkpoints:\n"
+               "  - id: ckpt-001\n"
+               "    name: best checkpoint\n"
+               "    location: \"s3://bucket/ckpts/ckpt-001\"\n"
+               "    how_to_inspect: aws s3 ls\n"
+               "    commit: abc1234\n"
+               "    config: lab/code/configs/exp1.yaml\n"
+               "    run_id: run-999\n"
+               "    status: active\n"
+               "    checksum_unavailable_reason: external-uri-no-checksum\n"
+               "    checksum_unavailable_justification: \"checkpoint 由训练框架"
+               "写入对象存储，暂无导出的 sha256\"\n"
+               "    updated: \"2026-07-12\"\n")
+    _run_case("negative-checkpoint-dangling-run", checkpoint_dangling_run,
+              ["checkpoint-index ckpt-001", "run_id=run-999 不存在"], False, failures)
 
     if failures:
         for f in failures:

@@ -1,7 +1,8 @@
 # 数据集索引。数据 bytes 不进 Git（根 .gitignore 覆盖），只登记指针与校验信息。
 # 每数据集清单放 manifests/，校验和放 checksums/（或经 manifest 字段引用）。
 # 共同 provenance 字段见 .agent/artifact-policy.md；校验：scripts/check-provenance-chain.py。
-# dataset 特例：外部数据集可无 run 来源；run_id 填了才校验 run 闭环。
+# commit/config/run_id 三元组与其他 index 同样必填；外部数据集等确无 run 来源的合法场景
+# 用显式豁免字段承载（固定枚举 reason + 非占位理由，见下），不允许静默留空。
 # evidence.yaml 的 data_split 以 "<dataset-id>/<split>" 形式引用这里的条目。
 schema_version: 1
 
@@ -11,8 +12,12 @@ datasets:
     location: "<路径或 URI，bytes 不进 Git>"
     how_to_inspect: "<怎么看，例如加载/抽样命令>"
     splits: []             # e.g. [train, val, test]
-    commit: "<产生/固定它的 git sha，若适用>"
-    run_id: "<run-id，若由某次 run 产生>"
+    commit: "<产生/固定它的 git sha>"
+    config: "<config 路径>"
+    run_id: "<run-id>"
+    # 确无 run 来源（外部数据集等）时删掉上面缺失的三元组行，改填（两者都要）：
+    # provenance_unavailable_reason: external-origin   # external-origin | human-authored | legacy-untracked
+    # provenance_unavailable_justification: "<具体情境说明，禁 TBD/N-A 类占位>"
     status: unknown        # active | superseded | archived | unknown
     manifest: "<lab/data/manifests/<id>.yaml，多文件时>"
     checksum: "<sha256 hex；单文件且本地可算时必填>"

@@ -49,5 +49,7 @@ maintenance: |
   （整数，字段结构不兼容变更时递增）。`release-gates.yaml` 的 `structured_checks` 只
   结构化可机械验证的 kind（artifact-exists / checksum-verified / run-closed /
   regression-status / evidence-grade-min），结果仅建议信号，`gate_status` 翻转仍是
-  human 动作。字段与枚举定义见 `.agent/artifact-policy.md`。
+  human 动作；artifact-exists 查 location 文件/manifest 记录真实存在，
+  checksum-verified 只认真算 sha256 比对通过（waived ≠ verified）。字段与枚举定义见
+  `.agent/artifact-policy.md`。
 - 校验：`python scripts/validate-governance.py`。
