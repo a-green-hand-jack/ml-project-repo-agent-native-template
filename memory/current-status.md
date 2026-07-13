@@ -8,11 +8,12 @@
 - 当前活跃 plan：`plans/20260712-plan-lifecycle-state.zh.md`（issue #13）· status: **implementing** ·
   branch `feat/13-plan-lifecycle-state`（worktree `.claude/worktrees/13-plan-lifecycle-state`）。
 - 真实 runtime 验收已 8/8 PASS：C1-C3/X1-X3 的 continuity/context 目标为 `68f1d43`；
-  main 集成后的 guard G1/G2 已在精确代码 `183a7fa` 的三个新 disposable clones 中重跑，
+  exact-head review 两条 MAJOR 修复后的 guard G1/G2 已在精确代码 `3eb7b1a` 的三个新
+  disposable clones 中重跑，
   默认非法 Write deny、仅显式 `DOC_LIFECYCLE_SKIP=1` allow、registry delete deny 均有顶层
   Claude Code session hook raw evidence。
   raw 转录、debug log 与 sha256 见 `lab/evals/doc-lifecycle/evidence-20260713-runtime-probes.md`。
-  当前只剩把 `183a7fa` raw evidence 固化到 evidence-only child 后做 fresh exact-head review；
+  当前只剩把 `3eb7b1a` raw evidence 固化到 evidence-only child 后做 fresh exact-head review；
   未 APPROVE 前不标 verified、不合入。
 - 权威状态注册表：`memory/doc-lifecycle.yaml`（brief/plan/review/decision 四类统一，语义见 `plans/ANATOMY.md`）。
 - 其余存量 plan 均已 `verified`，decisions 均 `approved`（详见注册表）。
