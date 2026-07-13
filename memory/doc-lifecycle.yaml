@@ -1,7 +1,8 @@
 # doc-lifecycle.yaml — brief/plan/review/decision 四类文档生命周期注册表（issue #13）
 #
 # 由 agent 维护，human 不手填复杂 YAML；文档标题后的第一条非空正文必须是唯一状态锚点行
-# （Status: <enum> · <date> · <ref>；fenced 示例不算），本文件是机器可解析的关联/证据。
+# （Status: <enum> · <date> · <ref>；fenced、blockquoted、四空格代码块示例不算），
+# 本文件是机器可解析的关联/证据。
 # 两处必须一致（validator 在 commit 粒度强制）。
 #
 # 校验：scripts/check-doc-lifecycle.py（由 validate-governance.py 拉起）。

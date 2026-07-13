@@ -36,8 +36,8 @@ draft → in-review → approved → implementing → verified
 ## 状态载体（两层，runtime-neutral，Claude/Codex 完全等价）
 
 1. **状态锚点**：标题后的第一条非空正文必须是一行纯文本
-   `Status: <enum> · <date> · <ref>`，全文只能有一条；代码围栏中的示例不算锚点——两个
-   runtime 都用同一 parser 读文件，不依赖 runtime 专属注入。
+   `Status: <enum> · <date> · <ref>`，全文只能有一条；代码围栏、blockquoted 与四空格缩进
+   代码块中的示例不算锚点——两个 runtime 都用同一 parser 读文件，不依赖 runtime 专属注入。
 2. **注册表** `memory/doc-lifecycle.yaml`：机器可解析的关联/证据（id/path/kind/status/
    issue/branch/worktree/approval/upstream/downstream/superseded_by），由 agent 维护。
    字段语义与格式约定见该文件头部注释。
@@ -46,7 +46,7 @@ draft → in-review → approved → implementing → verified
 
 | 层 | 位置 | 拦什么 |
 | --- | --- | --- |
-| 机械拦截 | `.claude/hooks/pre_tool_guard.py` → `check-doc-lifecycle.py:pretooluse_reason` | 写入使文档进入 approved/implementing 但 scope/forbidden/verification 缺失、批注区残留 `[?]`/`[改]`、上游已 superseded、注册表引用悬空/kind 与路径类别不符（谎报 kind）；活跃 plan 的 issue/branch/worktree 关联不成立；删除/移走注册表（含 `command`/`env` wrapper 与 git 全局选项）；apply_patch Update 尊重 `@@ <anchor>` 重建 patch 后全文，anchor/上下文不能唯一定位时保守拦截（提示改用 Edit） |
+| 机械拦截 | `.claude/hooks/pre_tool_guard.py` → `check-doc-lifecycle.py:pretooluse_reason` | 写入使文档进入 approved/implementing 但 scope/forbidden/verification 缺失、批注区残留 `[?]`/`[改]`、上游已 superseded、注册表引用悬空/kind 与路径类别不符（谎报 kind）；活跃 plan 的 issue/branch/worktree 关联不成立；删除/移走/覆盖注册表（含 `command`/`env` wrapper、git 全局选项、`cp`/`dd`/`tee`）；apply_patch Update 尊重 `@@ <anchor>` 重建 patch 后全文，anchor/上下文不能唯一定位时保守拦截（提示改用 Edit） |
 | 事后校验 | `scripts/check-doc-lifecycle.py`（`validate-governance.py` 拉起） | 上述全部 + 锚点/注册表一致 + 四类文档必须登记 + 存在受管文档但注册表缺失 = error（非 strict 也 fail） |
 
 human 显式绕过 hook：`DOC_LIFECYCLE_SKIP=1`（validator 仍会事后校验）。

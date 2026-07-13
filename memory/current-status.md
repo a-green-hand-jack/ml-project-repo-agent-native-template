@@ -7,31 +7,16 @@
 
 - 当前活跃 plan：`plans/20260712-plan-lifecycle-state.zh.md`（issue #13）· status: **implementing** ·
   branch `feat/13-plan-lifecycle-state`（worktree `.claude/worktrees/13-plan-lifecycle-state`）。
-- 真实 runtime 验收已 8/8 PASS：C1-C3/X1-X3 的 continuity/context 目标为 `68f1d43`；
-  final-review 三项修复后的 guard G1/G2 已在精确代码 `6950825` 的三个新
-  disposable clones 中重跑，
-  默认非法 Write deny、仅显式 `DOC_LIFECYCLE_SKIP=1` allow、registry delete deny 均有顶层
-  Claude Code session hook raw evidence。
-  raw 转录、debug log 与 sha256 见 `lab/evals/doc-lifecycle/evidence-20260713-runtime-probes.md`。
-  evidence-only `8b4c55b` 已完成全 strict gates 与独立 exact HEAD final review；reviewer 认可
-  48 份 raw 的 SHA256、G1/G2 与 continuity 证据，但以 `CHANGES_REQUESTED` 报告五个 MAJOR：
-  `git rm --pathspec-from-file` 不透明删除绕过、blockquoted Status 示例冒充锚点、octopus
-  detached merge 冒充双亲 synthetic merge、draft 等非活跃态的 issue/branch/worktree/approval
-  非标量 fail-open，以及本文仍指向已完成的 evidence-only 步骤。本轮 code target 同步修复这
-  五项并补 normal/`python -S` 对抗 fixtures，code target 为 `b7c7c7a`。G1 已用同一
-  malformed-draft fixture 在两个新顶层 Claude sessions 证明默认 deny/显式 SKIP allow；G2 已用
-  实际指向注册表的 opaque `--pathspec-from-file` 在第三个 session 证明 deny，三者都绑定
-  `b7c7c7a`。evidence-only direct child `f31e5d3` 已纳入上述八份 raw/debug 与 SHA256；
-  SHA256、normal/`python -S` self-test、G1/G2 guard regression、continuity probes、adapter sync、
-  strict doc-lifecycle/harness/anatomy/governance、same-commit 与 diff/clean 检查均通过。随后
-  status-only `df61087` 的独立 review 以 `CHANGES_REQUESTED` 报告三项 MAJOR：durable status 把
-  evidence parent 误写成 exact HEAD、缺一级标题的文档仍可接受 Status 锚点、G1/G2 raw 没有
-  pre/post clone 状态与 pathspec bytes，因而不足以支撑 exact-head/clean/preserved 断言。标题校验与
-  normal/`python -S` 对抗 fixtures 已修，exact code target 为 `8eea18e`。三个新顶层 Claude
-  sessions 已在该 target 重跑 G1/G2；同一 raw typescript 同时包含 exact HEAD、pre/post status、
-  registry 状态、hook events，G2 还包含 opaque pathspec 的 bytes/text/SHA256。默认 G1 与 G2
-  post-status 均空、registry present；SKIP clone 只新增预期 probe。下一门槛是提交这些 raw 的
-  evidence child、跑全 strict gates，并对该 symbolic `HEAD` 做独立 final fresh review。未获
+- C1-C3/X1-X3 的真实 continuity/context runtime evidence 仍有效；G1/G2 已在多个精确代码
+  target 上由独立顶层 Claude sessions 证明 default deny、显式 SKIP allow 与 registry delete
+  deny。raw 转录、debug log 与 SHA256 见
+  `lab/evals/doc-lifecycle/evidence-20260713-runtime-probes.md`。
+- symbolic `HEAD` 的上轮独立 fresh review（受审提交 `1a970291`）核验了 62 份 gzip/SHA256、
+  strict gates 与 G1/G2 raw 绑定，但结论仍为 `CHANGES_REQUESTED`：受限 YAML parser 会把嵌套
+  mapping 扁平化、Bash `dd`/`tee` 可覆盖注册表、四空格 Markdown 代码块可冒充 Status 锚点，
+  且 durable status/plan 下一步已过时。本轮正在修复这四项并补 normal/`python -S` 对抗
+  fixtures；形成新 code target 后必须在该精确 target 重跑真实 G1/G2，再提交 evidence-only
+  direct child、跑全 strict gates，并对新的 symbolic `HEAD` 做独立 final fresh review。未获
   `APPROVE` 前仍保持 implementing、不得合入。
 - 权威状态注册表：`memory/doc-lifecycle.yaml`（brief/plan/review/decision 四类统一，语义见 `plans/ANATOMY.md`）。
 - 其余存量 plan 均已 `verified`，decisions 均 `approved`（详见注册表）。
@@ -65,9 +50,9 @@
 
 ## 未合入 blocker
 
-- #13：既有 C1-C3/X1-X3 真实 runtime evidence 有效；`df61087` final review 的标题 MAJOR 已由
-  `8eea18e` 修复，G1/G2 也已用包含 exact HEAD/pathspec/pre-post 状态的 raw 重新证明。仍须提交
-  evidence child、完成全 strict gates 与 exact symbolic `HEAD` 独立 fresh `APPROVE`，否则不得合入。
+- #13：既有 C1-C3/X1-X3 真实 runtime evidence 有效；`1a970291` final review 的四项 MAJOR
+  正在修复。仍须提交新 code target、在其上重跑真实 G1/G2、提交 evidence-only direct child、
+  完成全 strict gates 与 exact symbolic `HEAD` 独立 fresh `APPROVE`，否则不得合入。
 - #18 `cebe427`：raw-evidence 绑定 validator 的代码 MAJOR 已修复并获 code APPROVE；仍须纳入
   #13 hook 兼容修复，在最终 exact target 完成 C1-C7/X1-X7、`--require-fresh` exit 0 与 fresh
   final review。未取得这些证据前不得合入。

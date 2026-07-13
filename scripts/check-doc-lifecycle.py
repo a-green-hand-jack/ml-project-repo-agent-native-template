@@ -79,9 +79,9 @@ ANNOTATION_SECTION = "Human 批注区"
 NAV_BASENAMES = {"README.md", "AGENTS.md", "CLAUDE.md", "ANATOMY.md"}
 DOC_DIRS = ("plans", "human/briefs", "human/reviews", "human/decisions")
 
-STATUS_PREFIX = re.compile(r"^\s*Status[:：]")
+STATUS_PREFIX = re.compile(r"^ {0,3}Status[:：]")
 STATUS_LINE = re.compile(
-    r"^\s*Status[:：]\s*([A-Za-z-]+)\s*·\s*"
+    r"^ {0,3}Status[:：]\s*([A-Za-z-]+)\s*·\s*"
     r"(\d{4}-\d{2}-\d{2})\s*·\s*(.*?)\s*$"
 )
 UNRESOLVED_MARK = re.compile(r"^\s*(?:[-*]\s*)?\[(?:\?|改)\]", re.MULTILINE)
@@ -271,19 +271,21 @@ def _parse_restricted(text: str):
             continue
         if not in_docs:
             continue
-        if s.startswith("- "):
-            body = s[2:].strip()
-            if ":" in body:  # 新条目（约定以 `- id:` 开头）
-                key, _, val = body.partition(":")
-                cur = {key.strip(): _scalar(val)}
-                entries.append(cur)
-                cur_list = None
-            elif cur is not None and cur_list is not None:
-                cur.setdefault(cur_list, []).append(_scalar(body))
-            else:
-                errors.append(f"注册表第 {lineno} 行：列表项没有归属字段")
+        if indent == 2:
+            if not s.startswith("- ") or ":" not in s[2:]:
+                errors.append(f"注册表第 {lineno} 行：docs 条目必须是两空格缩进的 `- id:`")
+                cur, cur_list = None, None
+                continue
+            key, _, val = s[2:].strip().partition(":")
+            if key.strip() != "id":
+                errors.append(f"注册表第 {lineno} 行：docs 条目必须以 `- id:` 开头")
+                cur, cur_list = None, None
+                continue
+            cur = {"id": _scalar(val)}
+            entries.append(cur)
+            cur_list = None
             continue
-        if ":" in s and cur is not None:
+        if indent == 4 and ":" in s and cur is not None:
             key, _, val = s.partition(":")
             key, val = key.strip(), val.strip()
             if val == "":
@@ -296,8 +298,14 @@ def _parse_restricted(text: str):
             else:
                 cur[key] = _scalar(val)
                 cur_list = None
-        else:
-            errors.append(f"注册表第 {lineno} 行无法解析：{s[:60]}")
+            continue
+        if indent == 6 and s.startswith("- ") and cur is not None and cur_list is not None:
+            cur.setdefault(cur_list, []).append(_scalar(s[2:].strip()))
+            continue
+        errors.append(
+            f"注册表第 {lineno} 行：缩进/嵌套结构不受支持（仅允许 2 空格条目、"
+            "4 空格字段、6 空格块列表项）"
+        )
     return entries, errors
 
 
@@ -419,7 +427,7 @@ def _parse_status_anchor(text: str) -> tuple[str | None, str | None]:
     anchor_index, line = candidates[0]
     first_nonblank = next((i for i, raw in enumerate(visible_lines) if raw.strip()), None)
     if first_nonblank is None or not re.match(
-        r"^\s*#(?:\s+|$)", visible_lines[first_nonblank]
+        r"^ {0,3}#(?:\s+|$)", visible_lines[first_nonblank]
     ):
         return None, "缺文档标题（第一条非空行必须是一级标题，Status 锚点紧随其后）"
     expected_index = next(
@@ -1147,10 +1155,10 @@ def _read_rel(repo: Path, rel: str) -> str | None:
 
 
 _REGISTRY_REMOVE_MSG = (
-    f"doc-lifecycle: 禁止删除/移走 {REGISTRY_REL}——注册表是治理面，"
-    f"删除等于静默关闭 doc-lifecycle 校验。{_ESCAPE_HINT}"
+    f"doc-lifecycle: 禁止删除、移走或直接覆盖 {REGISTRY_REL}——注册表是治理面，"
+    f"破坏它等于静默关闭 doc-lifecycle 校验。{_ESCAPE_HINT}"
 )
-# Bash 侧只拦「删除/移走注册表」这一件可判定的事；其余 Bash 写入由 validator 兜底。
+# Bash 侧拦可判定的删除/移走/覆盖注册表；其余 Bash 写入由 validator 兜底。
 _DELETIONISH = {"rm", "unlink", "shred", "srm", "truncate", "mv"}
 _SHELL_WRAPPERS = {"builtin", "command", "exec"}
 _ENV_FLAGS_WITH_VALUE = {"-u", "--unset", "-C", "--chdir", "-S", "--split-string"}
@@ -1570,7 +1578,7 @@ def _git_pathspec_covers_registry(
 
 
 def _bash_reason(cmd: str, repo: Path) -> str | None:
-    """Bash 命令中对注册表的删除/移动（rm/unlink/shred/truncate/mv/git rm）→ 拦。"""
+    """Bash 命令中对注册表的删除、移动或覆盖（含 cp/dd/tee/git rm）→ 拦。"""
     try:
         protected = re.sub(
             r":\(([A-Za-z0-9_,!^-]+)\)",
@@ -1623,6 +1631,38 @@ def _bash_reason(cmd: str, repo: Path) -> str | None:
                 include_ancestors=False,
             ):
                 return _REGISTRY_REMOVE_MSG
+            continue
+        if name == "dd":
+            for arg in args:
+                if not arg.startswith("of="):
+                    continue
+                if _path_covers_registry(
+                    arg.split("=", 1)[1],
+                    repo,
+                    command_cwd,
+                    follow_final_symlink=True,
+                    include_ancestors=False,
+                ):
+                    return _REGISTRY_REMOVE_MSG
+            continue
+        if name == "tee":
+            after_options = False
+            for arg in args:
+                if arg == "--":
+                    after_options = True
+                    continue
+                if not after_options and arg.startswith("-"):
+                    continue
+                if arg == "-":
+                    continue
+                if _path_covers_registry(
+                    arg,
+                    repo,
+                    command_cwd,
+                    follow_final_symlink=True,
+                    include_ancestors=False,
+                ):
+                    return _REGISTRY_REMOVE_MSG
             continue
         if name not in _DELETIONISH:
             continue
@@ -2115,6 +2155,8 @@ def self_test() -> int:
         f": > {REGISTRY_REL}",
         "cd memory && : > doc-lifecycle.yaml",
         f"cp /dev/null {REGISTRY_REL}",
+        f"dd if=/dev/null of={REGISTRY_REL}",
+        f"printf x | tee {REGISTRY_REL}",
         f'env -S "rm {REGISTRY_REL}"',
         f'env --split-string="rm {REGISTRY_REL}"',
         f"timeout 5s rm {REGISTRY_REL}",
@@ -2177,6 +2219,10 @@ def self_test() -> int:
           pretooluse_reason("Bash", {"command": f": > {alias_rel}"}, root) is not None)
     check("hook 拦 cp 覆盖 final symlink alias",
           pretooluse_reason("Bash", {"command": f"cp /dev/null {alias_rel}"}, root) is not None)
+    check("hook 拦 dd 覆盖 final symlink alias",
+          pretooluse_reason("Bash", {"command": f"dd if=/dev/null of={alias_rel}"}, root) is not None)
+    check("hook 拦 tee 覆盖 final symlink alias",
+          pretooluse_reason("Bash", {"command": f"printf x | tee {alias_rel}"}, root) is not None)
     check("hook 放行 Bash rm -rf final symlink alias",
           pretooluse_reason("Bash", {"command": f"rm -rf {alias_rel}"}, root) is None)
     alias_update = (
@@ -2271,6 +2317,8 @@ def self_test() -> int:
         "rm /tmp/not-this-repo/memory/doc-lifecycle.y*",
         ": > /tmp/not-this-repo/memory/doc-lifecycle.yaml",
         "cp /dev/null /tmp/not-this-repo/memory/doc-lifecycle.yaml",
+        "dd if=/dev/null of=/tmp/not-this-repo/memory/doc-lifecycle.yaml",
+        "printf x | tee /tmp/not-this-repo/memory/doc-lifecycle.yaml",
         f'env -S "echo {REGISTRY_REL}"',
         f'env --split-string="echo {REGISTRY_REL}"',
         f"timeout 5s echo {REGISTRY_REL}",
@@ -2594,6 +2642,11 @@ def self_test() -> int:
             "Status: draft · 2026-07-13 · issue #13\n\n# demo plan\n",
             "缺文档标题",
         ),
+        (
+            "四空格缩进代码块",
+            "# demo plan\n\n    Status: draft · 2026-07-13 · issue #13\n",
+            "缺状态锚点",
+        ),
     )
     for label, malformed, needle in ambiguous_anchors:
         td, root = fresh({"plans/demo.zh.md": malformed, REGISTRY_REL: _OK_REGISTRY})
@@ -2735,6 +2788,39 @@ def self_test() -> int:
             "Write",
             {"file_path": str(root / REGISTRY_REL), "content": malformed_docs_inline},
             root,
+        ) is not None,
+    )
+    td.cleanup()
+
+    nested_mapping_registry = _OK_REGISTRY.replace(
+        "    kind: plan\n    status: approved\n",
+        "    meta:\n      kind: plan\n      status: approved\n",
+        1,
+    )
+    entries, parser_errors = parse_registry_text(nested_mapping_registry)
+    normal_errors = (
+        registry_errors(entries, root, check_paths=False) if not parser_errors else parser_errors
+    )
+    check(
+        "统一 parser 拒绝用 nested mapping 隐藏 registry 字段",
+        any(
+            "kind 应为字符串" in e
+            or "status 应为字符串" in e
+            or "缩进/嵌套结构不受支持" in e
+            for e in normal_errors
+        ),
+    )
+    restricted_entries, restricted_errors = _parse_restricted(nested_mapping_registry)
+    check(
+        "受限 parser 拒绝 nested mapping 而非扁平化字段",
+        bool(restricted_entries)
+        and any("缩进/嵌套结构不受支持" in e for e in restricted_errors),
+    )
+    td, root = fresh({"plans/demo.zh.md": _OK_PLAN, REGISTRY_REL: _OK_REGISTRY})
+    check(
+        "hook 拦 nested mapping registry 写入",
+        pretooluse_reason(
+            "Write", {"file_path": str(root / REGISTRY_REL), "content": nested_mapping_registry}, root
         ) is not None,
     )
     td.cleanup()

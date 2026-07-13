@@ -203,6 +203,10 @@ def main() -> int:
         "# blockquoted-only status\n\n"
         "> Status: draft · 2026-07-13 · example only\n"
     )
+    indented_code_anchor_plan = (
+        "# indented-code-only status\n\n"
+        "    Status: draft · 2026-07-13 · example only\n"
+    )
     missing_title_plan = "Status: draft · 2026-07-13 · issue #13\n"
     title_after_anchor_plan = (
         "Status: draft · 2026-07-13 · issue #13\n\n# late title\n"
@@ -278,6 +282,11 @@ def main() -> int:
     )
     quoted_hash_registry = placeholder_approval_registry.replace(
         "approval: TODO", 'approval: "commit #123 verified"'
+    )
+    nested_mapping_registry = placeholder_approval_registry.replace(
+        "    kind: plan\n    status: verified\n",
+        "    meta:\n      kind: plan\n      status: verified\n",
+        1,
     )
     cases = [
         # —— 安全地板回归（期望与 doc-lifecycle 引入前完全一致）——
@@ -406,6 +415,10 @@ def main() -> int:
          {"command": "cd memory && : > doc-lifecycle.yaml"}, 2, None),
         ("fresh-review-2n21: cp overwrite registry 拦", "Bash",
          {"command": f"cp /dev/null {REGISTRY}"}, 2, None),
+        ("final-review: dd overwrite registry 拦", "Bash",
+         {"command": f"dd if=/dev/null of={REGISTRY}"}, 2, None),
+        ("final-review: tee overwrite registry 拦", "Bash",
+         {"command": f"printf x | tee {REGISTRY}"}, 2, None),
         ("fresh-review-2n22: env -S split-string rm registry 拦", "Bash",
          {"command": f'env -S "rm {REGISTRY}"'}, 2, None),
         ("fresh-review-2n23: env --split-string rm registry 拦", "Bash",
@@ -491,6 +504,10 @@ def main() -> int:
          {"file_path": TMP_ANCHOR_PLAN_REL, "content": fenced_only_anchor_plan}, 2, None),
         ("exact-head: blockquoted 示例不能冒充正文状态锚点", "Write",
          {"file_path": TMP_ANCHOR_PLAN_REL, "content": blockquoted_only_anchor_plan}, 2, None),
+        ("final-review: 四空格缩进代码块不能冒充正文状态锚点", "Write",
+         {"file_path": TMP_ANCHOR_PLAN_REL, "content": indented_code_anchor_plan}, 2, None),
+        ("final-review: nested mapping registry 不能被 fallback 扁平化", "Write",
+         {"file_path": REGISTRY, "content": nested_mapping_registry}, 2, None),
         ("final-review: 缺一级标题的状态锚点拦", "Write",
          {"file_path": TMP_ANCHOR_PLAN_REL, "content": missing_title_plan}, 2, None),
         ("final-review: 标题晚于状态锚点拦", "Write",
@@ -547,6 +564,10 @@ def main() -> int:
          {"command": ": > /tmp/not-this-repo/memory/doc-lifecycle.yaml"}, 0, None),
         ("control: repo 外 cp overwrite 放行", "Bash",
          {"command": "cp /dev/null /tmp/not-this-repo/memory/doc-lifecycle.yaml"}, 0, None),
+        ("control: repo 外 dd overwrite 放行", "Bash",
+         {"command": "dd if=/dev/null of=/tmp/not-this-repo/memory/doc-lifecycle.yaml"}, 0, None),
+        ("control: repo 外 tee overwrite 放行", "Bash",
+         {"command": "printf x | tee /tmp/not-this-repo/memory/doc-lifecycle.yaml"}, 0, None),
         ("integration: #16 launch floor 对 env -S 动态执行面 fail-closed", "Bash",
          {"command": f'env -S "echo {REGISTRY}"'}, 2, None),
         ("control: timeout echo literal registry 放行", "Bash",
@@ -621,8 +642,10 @@ def main() -> int:
             ("重复/歧义状态锚点", TMP_ANCHOR_PLAN_REL, duplicate_anchor_plan),
             ("fenced 示例冒充状态锚点", TMP_ANCHOR_PLAN_REL, fenced_only_anchor_plan),
             ("blockquoted 示例冒充状态锚点", TMP_ANCHOR_PLAN_REL, blockquoted_only_anchor_plan),
+            ("四空格缩进代码块冒充状态锚点", TMP_ANCHOR_PLAN_REL, indented_code_anchor_plan),
             ("缺一级标题的状态锚点", TMP_ANCHOR_PLAN_REL, missing_title_plan),
             ("标题晚于状态锚点", TMP_ANCHOR_PLAN_REL, title_after_anchor_plan),
+            ("nested mapping registry", REGISTRY, nested_mapping_registry),
         ):
             got = run_no_site("Write", {"file_path": path, "content": content})
             ok = got == 2
@@ -645,6 +668,8 @@ def main() -> int:
             ("pathspec file", "git rm --pathspec-from-file=/tmp/doc-lifecycle-paths"),
             ("stdin pathspec", "git rm --pathspec-from-file=-"),
             ("NUL stdin pathspec", "git rm --pathspec-from-file=- --pathspec-file-nul"),
+            ("dd overwrite", f"dd if=/dev/null of={REGISTRY}"),
+            ("tee overwrite", f"printf x | tee {REGISTRY}"),
         ):
             got = run_no_site("Bash", {"command": command})
             ok = got == 2
