@@ -39,6 +39,11 @@ MAJOR 跨越需 `--allow-major` 人工确认。
 
 `adopt-existing-repo.py` 是迁移工具，不是 validator：它会在目标 repo 内写入
 `lab/docs/audits/template-adoption/` state/report，并按 conservative policy 保留原文件。
+`prove` phase 的 exit code（`check-adoption-integrity.py` 同理）只反映 adoption 工具自身完整性
+（tracked-byte hash 一致 + 无未解决的 conflict/受保护路径 blocker）；被迁移项目自身原生测试的
+smoke 结果（`pass`/`fail`/`skipped`/`unknown`）与该 exit code 解耦，非 pass 时以 report/`--json`
+里显式的 `warnings`/`smoke_warnings` 字段呈现，不会被静默吞掉（见
+`plans/20260712-bootstrap-adoption-proof.zh.md` 开放问题 5）。
 
 多 agent 控制面四脚本（`agent-state` / `agent-status` / `agent-mailbox` / `check-agent-conflicts`）
 见 `.agent/multi-agent-control-plane.md`：状态/mailbox 内容是运行时（gitignored），各脚本自带

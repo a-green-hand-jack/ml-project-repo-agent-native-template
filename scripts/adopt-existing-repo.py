@@ -28,6 +28,8 @@ REPORT_PATH = Path("lab/docs/audits/template-adoption-report.md")
 PLAN_FILE = "adoption-plan.json"
 BASELINE_FILE = "baseline.json"
 LOG_FILE = "phase-log.jsonl"
+PLAN_SCHEMA = "template-adoption-plan-v2"
+LEGACY_PLAN_SCHEMA = "template-adoption-plan-v1"
 
 CONTROL_ITEMS = [
     "AGENTS.md",
@@ -234,18 +236,25 @@ def project_slug(target: Path, explicit: str | None) -> str:
     return slug or "imported-project"
 
 
-def detect_test_command(target: Path, requested: str | None) -> str | None:
+def detect_test_command(target: Path, requested: str | None) -> tuple[str | None, str]:
+    """Return (command, command_source).
+
+    command_source is one of the smoke-contract values (C1): "explicit",
+    "auto-detected", "none". A command of None with source "explicit" means
+    the caller explicitly opted out (`--test-command none`); a command of
+    None with source "none" means auto-detection found nothing to run.
+    """
     if requested == "none":
-        return None
+        return None, "explicit"
     if requested and requested != "auto":
-        return requested
+        return requested, "explicit"
     if (target / "pytest.ini").exists() or (target / "tests").is_dir():
-        return "python -m pytest"
+        return "python -m pytest", "auto-detected"
     if (target / "Makefile").exists():
         text = (target / "Makefile").read_text(encoding="utf-8", errors="replace")
         if re.search(r"^test:", text, re.MULTILINE):
-            return "make test"
-    return None
+            return "make test", "auto-detected"
+    return None, "none"
 
 
 def git_ls_files(target: Path) -> list[str]:
@@ -277,8 +286,9 @@ def discover(args: argparse.Namespace) -> dict[str, Any]:
         for e in root_entries
         if e["template_control_item"] and (TEMPLATE_ROOT / e["path"]).exists()
     ]
+    test_command, test_command_source = detect_test_command(target, args.test_command)
     plan = {
-        "schema": "template-adoption-plan-v1",
+        "schema": PLAN_SCHEMA,
         "created_at": now_iso(),
         "target": str(target),
         "template_root": str(TEMPLATE_ROOT),
@@ -286,7 +296,8 @@ def discover(args: argparse.Namespace) -> dict[str, Any]:
         "project_slug": slug,
         "state_dir": STATE_DIR.as_posix(),
         "report_path": REPORT_PATH.as_posix(),
-        "test_command": detect_test_command(target, args.test_command),
+        "test_command": test_command,
+        "test_command_source": test_command_source,
         "root_entries": root_entries,
         "protected_roots": protected_roots,
         "root_pollution": root_pollution,
@@ -485,6 +496,21 @@ def current_hash_index(target: Path) -> dict[str, list[str]]:
     return index
 
 
+def latest_normalize_blockers(target: Path) -> list[str]:
+    """Return the blocker list from the most recent `normalize` phase-log entry.
+
+    Unresolved conflict/protected-path blockers are an adoption-tool-self
+    integrity failure (the tool could not safely complete the move), distinct
+    from the target repo's own runtime/smoke health (see C1/C3 in
+    plans/20260712-bootstrap-adoption-proof.zh.md).
+    """
+    rows = read_phase_log(target)
+    normalize_rows = [r for r in rows if r.get("phase") == "normalize"]
+    if not normalize_rows:
+        return []
+    return list(normalize_rows[-1].get("details", {}).get("blockers", []))
+
+
 def integrity_result(target: Path) -> dict[str, Any]:
     baseline_path = state_path(target, BASELINE_FILE)
     if not baseline_path.exists():
@@ -506,13 +532,113 @@ def integrity_result(target: Path) -> dict[str, Any]:
             present += 1
         else:
             missing.append(row)
+    unresolved_blockers = latest_normalize_blockers(target)
     return {
         "schema": "template-adoption-integrity-v1",
         "checked_at": now_iso(),
         "baseline_files": len(baseline_data["tracked_files"]),
         "present": present,
         "missing": missing,
-        "ok": not missing,
+        "unresolved_blockers": unresolved_blockers,
+        "ok": not missing and not unresolved_blockers,
+    }
+
+
+def smoke_command_metadata(plan: dict[str, Any]) -> tuple[str | None, str]:
+    """Validate the persisted smoke-command metadata before execution.
+
+    Plans written before the smoke contract used the same v1 schema label but
+    did not record command provenance. Guessing `none` for those plans can
+    produce contradictory records such as command=`true`, source=`none`.
+    Keep compatible v1 plans that already contain the field, but require
+    genuinely legacy plans to rerun discover and persist unambiguous metadata.
+    """
+    schema = plan.get("schema")
+    if schema not in {LEGACY_PLAN_SCHEMA, PLAN_SCHEMA}:
+        raise SystemExit(
+            f"unsupported adoption plan schema {schema!r}; rerun --phase discover before prove"
+        )
+    if "test_command_source" not in plan:
+        raise SystemExit(
+            "adoption plan predates smoke command provenance; rerun --phase discover "
+            "before prove"
+        )
+    command = plan.get("test_command")
+    source = plan["test_command_source"]
+    if source not in {"auto-detected", "explicit", "none"}:
+        raise SystemExit(
+            f"invalid test_command_source {source!r}; rerun --phase discover before prove"
+        )
+    if command is not None and source == "none":
+        raise SystemExit(
+            "adoption plan has a test command with command_source=none; "
+            "rerun --phase discover before prove"
+        )
+    if command is None and source == "auto-detected":
+        raise SystemExit(
+            "adoption plan has no test command but command_source=auto-detected; "
+            "rerun --phase discover before prove"
+        )
+    return command, source
+
+
+def evaluate_smoke(plan: dict[str, Any], target: Path, test_timeout: int) -> dict[str, Any]:
+    """Run the target repo's own native test command and classify the result.
+
+    Implements the smoke contract from plans/20260712-bootstrap-adoption-proof.zh.md
+    (C1): command_source (auto-detected/explicit/none), command, result
+    (pass/fail/skipped/unknown), unverified_reason (required whenever result
+    is not "pass"). This function never raises for a non-pass result -- the
+    smoke contract is decoupled from `prove`'s process exit code (C1/C2); a
+    non-pass smoke result is surfaced as an explicit, structured warning in
+    the report instead of a silent success or a hard failure.
+    """
+    command, source = smoke_command_metadata(plan)
+    if command is None:
+        reason = (
+            "test command explicitly disabled via --test-command none"
+            if source == "explicit"
+            else "no native test command detected "
+            "(no pytest.ini, no tests/ dir, no Makefile `test:` target, "
+            "and none supplied via --test-command)"
+        )
+        return {
+            "schema": "template-adoption-smoke-v1",
+            "command_source": source,
+            "command": None,
+            "result": "skipped",
+            "unverified_reason": reason,
+            "exec": None,
+        }
+    cwd = target / plan["import_root"]
+    if not cwd.exists():
+        cwd = target
+    exec_result = run(command, cwd, shell=True, timeout=test_timeout)
+    if exec_result.get("timeout"):
+        return {
+            "schema": "template-adoption-smoke-v1",
+            "command_source": source,
+            "command": command,
+            "result": "unknown",
+            "unverified_reason": f"command timed out after {test_timeout}s",
+            "exec": exec_result,
+        }
+    if exec_result["returncode"] == 0:
+        return {
+            "schema": "template-adoption-smoke-v1",
+            "command_source": source,
+            "command": command,
+            "result": "pass",
+            "unverified_reason": None,
+            "exec": exec_result,
+        }
+    return {
+        "schema": "template-adoption-smoke-v1",
+        "command_source": source,
+        "command": command,
+        "result": "fail",
+        "unverified_reason": f"command exited with returncode {exec_result['returncode']}",
+        "exec": exec_result,
     }
 
 
@@ -524,34 +650,54 @@ def prove(args: argparse.Namespace) -> dict[str, Any]:
     governance = None
     if (target / "scripts" / "validate-governance.py").exists():
         governance = run([sys.executable, "scripts/validate-governance.py", "--strict"], target, timeout=180)
-    original_test = None
-    if plan.get("test_command"):
-        cwd = target / plan["import_root"]
-        if not cwd.exists():
-            cwd = target
-        original_test = run(plan["test_command"], cwd, shell=True, timeout=args.test_timeout)
+    smoke = evaluate_smoke(plan, target, args.test_timeout)
+    warnings: list[dict[str, Any]] = []
+    if smoke["result"] != "pass":
+        warnings.append(
+            {
+                "item": "original_test",
+                "result": smoke["result"],
+                "reason": smoke["unverified_reason"],
+            }
+        )
     report = {
         "schema": "template-adoption-proof-v1",
         "created_at": now_iso(),
         "target": str(target),
         "integrity": integrity,
         "governance": governance,
-        "original_test": original_test,
+        "smoke": smoke,
+        # Back-compat field: the raw exec result of the smoke command (or
+        # None when skipped). Prefer `smoke` for the structured contract.
+        "original_test": smoke.get("exec"),
+        "warnings": warnings,
     }
     if not args.dry_run:
         write_report(target, plan, report)
+    # C1/C2 (decided, see plan doc open question 5): the prove process exit
+    # code is decoupled from the smoke result. It is non-zero only for
+    # adoption's own integrity failure (tracked-byte mismatch or unresolved
+    # normalize blockers); a fail/skipped/unknown smoke result stays exit 0
+    # but must be visible via the `warnings` field above, never silently
+    # dropped.
     append_log(target, "prove", "ok" if integrity["ok"] else "failed", report, args.dry_run)
     print(
         "[prove] integrity="
         + ("ok" if integrity["ok"] else "failed")
         + f" governance_rc={None if governance is None else governance['returncode']}"
+        + f" smoke={smoke['result']}"
     )
+    if warnings:
+        for w in warnings:
+            print(f"[prove] WARNING {w['item']}: result={w['result']} reason={w['reason']}")
     return report
 
 
 def write_report(target: Path, plan: dict[str, Any], proof: dict[str, Any]) -> None:
     governance = proof.get("governance")
     original_test = proof.get("original_test")
+    smoke = proof.get("smoke") or {}
+    warnings = proof.get("warnings") or []
     phase_rows = read_phase_log(target)
     normalize_rows = [r for r in phase_rows if r.get("phase") == "normalize"]
     normalize = normalize_rows[-1].get("details", {}) if normalize_rows else {}
@@ -572,6 +718,7 @@ def write_report(target: Path, plan: dict[str, Any], proof: dict[str, Any]) -> N
         f"- integrity: `{'ok' if proof['integrity']['ok'] else 'failed'}`",
         f"- governance_returncode: `{None if governance is None else governance['returncode']}`",
         f"- original_test_returncode: `{None if original_test is None else original_test['returncode']}`",
+        f"- smoke_result: `{smoke.get('result')}`",
         f"- baseline_files_present: `{proof['integrity']['present']}/{proof['integrity']['baseline_files']}`",
         f"- moved_root_entries: `{len(moved)}`",
         f"- normalize_blockers: `{len(blockers)}`",
@@ -584,10 +731,33 @@ def write_report(target: Path, plan: dict[str, Any], proof: dict[str, Any]) -> N
         "- Before staging, Git may show original paths as deleted and imported paths as untracked; "
         "that is expected for a move-based migration. Use `check-adoption-integrity.py` to verify bytes.",
         "- Protected bytes are not moved by the conservative policy.",
+        "- The smoke result below is about the *target repo's own* native test command, not about "
+        "whether this adoption tool itself succeeded (that is `integrity`); see the smoke contract "
+        "in plans/20260712-bootstrap-adoption-proof.zh.md (C1).",
         "",
-        "## Normalize",
+        "## Smoke (target repo native test command)",
+        "",
+        f"- command_source: `{smoke.get('command_source')}`",
+        f"- command: `{smoke.get('command')}`",
+        f"- result: `{smoke.get('result')}`",
+        f"- unverified_reason: `{smoke.get('unverified_reason')}`",
+        "",
+        "## Warnings",
         "",
     ]
+    if warnings:
+        lines.append(
+            "The smoke/original-test result below did **not** reach `pass`. This does NOT make "
+            "`prove`/`check-adoption-integrity.py` exit non-zero (decided, open question 5) -- it is "
+            "surfaced here as an explicit, machine-readable warning instead:"
+        )
+        lines.append("")
+        for w in warnings:
+            lines.append(f"- `{w['item']}`: result=`{w['result']}` reason=`{w['reason']}`")
+        lines.append("")
+    else:
+        lines.extend(["No warnings. Smoke result is `pass` (or explicitly not applicable).", ""])
+    lines.extend(["## Normalize", ""])
     if moved:
         lines.extend(["Moved root entries:", ""])
         lines.extend(f"- `{row['from']}` -> `{row['to']}`" for row in moved)
@@ -647,15 +817,23 @@ def main(argv: list[str]) -> int:
     phases = ["discover", "baseline", "scaffold", "normalize", "prove"]
     if args.phase != "all":
         phases = [args.phase]
+    exit_code = 0
     for phase in phases:
-        {
+        result = {
             "discover": discover,
             "baseline": baseline,
             "scaffold": scaffold,
             "normalize": normalize,
             "prove": prove,
         }[phase](args)
-    return 0
+        if phase == "prove" and isinstance(result, dict):
+            # C1/C2 (decided): exit code reflects adoption's own integrity
+            # only (tracked-byte mismatch or unresolved normalize blockers),
+            # never the target repo's own smoke/original-test result.
+            integrity = result.get("integrity", {})
+            if not integrity.get("ok", True):
+                exit_code = 1
+    return exit_code
 
 
 if __name__ == "__main__":
