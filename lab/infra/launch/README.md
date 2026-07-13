@@ -12,8 +12,8 @@
 
 | 文件 | 角色 |
 | --- | --- |
-| `registry.yaml` | launch adapter 描述（local-fake / slurm / runai）+ 门禁命令前缀的单一真源 |
-| `expctl.py` | 控制面 CLI：`detect`（adapter 可用性/降级）/ `plan`（命令草案，不执行）/ `watch`（一次性有界快照检查，只读）/ `validate-recovery`（只读校验 ledger 提案）；`apply-recovery` 因缺可信 provenance/原子 consumer 始终 fail-closed |
+| `registry.yaml` | launch adapter 描述（local-fake / slurm / runai）+ 门禁命令前缀的单一真源；local-fake 模板的解释器占位符只能由 `expctl.py` 注入 |
+| `expctl.py` | 控制面 CLI：`detect`（adapter 可用性/降级）/ `plan`（命令草案，不执行）/ `watch`（一次性有界快照检查，只读）/ `validate-recovery`（只读校验 ledger 提案）；local-fake 草案与 recovery proposal 固定序列化当前进程的 canonical 解释器绝对路径，validator 拒绝其他 PATH Python；`apply-recovery` 因缺可信 provenance/原子 consumer 始终 fail-closed |
 | `fake_job.py` | local-fake 后端：仅允许字面 `/tmp/.../<run-id>` workdir；status/受信 worker argv 绑定同一 run，control lock 串行控制动作，pidfd 固定 signal 目标；支持 NaN/stall fixture |
 | `launch_gate.py` | 门禁判定模块：被共享 `pre_tool_guard.py` hook 加载；registered launch 命中永拒，路径别名/`python -m`/`_worker` 同样覆盖，env split/shell eval/`python -c`（含 `-c<command>` attached token）动态面整体 fail-closed，`nice -n10` 等 attached wrapper operand 会被解析，caller-set env 不放行 |
 

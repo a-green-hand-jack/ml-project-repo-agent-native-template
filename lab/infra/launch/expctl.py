@@ -45,7 +45,7 @@ REPO_ROOT = _HERE.parent.parent.parent
 REGISTRY = _HERE / "registry.yaml"
 LEDGER = REPO_ROOT / "lab" / "research" / "experiment-ledger.yaml"
 LITERAL_TMP = Path("/tmp")
-TRUSTED_PYTHON = Path(sys.executable).resolve()
+TRUSTED_PYTHON = Path(sys.executable).resolve(strict=True)
 RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 SAFE_WORKDIR_RE = re.compile(r"^/tmp/[A-Za-z0-9._/-]+$")
 
@@ -84,6 +84,11 @@ def _load_registry(path: Path | None = None) -> dict:
 
 def _now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S%z")
+
+
+def _trusted_python_command() -> str:
+    """Return the running expctl interpreter as one reviewable shell token."""
+    return shlex.quote(str(TRUSTED_PYTHON))
 
 
 # ------------------------------------------------------------------ detect ----
@@ -185,6 +190,9 @@ def cmd_plan(args: argparse.Namespace) -> int:
             print(f"[expctl] 拒绝 local-fake 草案：{reason}", file=sys.stderr)
             return 2
         variables["workdir"] = str(safe_workdir)
+        # local-fake commands are approved as exact text later. Bind that text to
+        # the interpreter running expctl rather than to a mutable PATH alias.
+        variables["trusted_python"] = _trusted_python_command()
     command = _render(template, variables)
     unresolved = re.findall(r"\{(\w+)\}", command)
     print("command_draft:")
@@ -291,7 +299,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
 
     def alert(atype: str, evidence: str, action: str = "restart") -> None:
         cmd = (
-            f"python lab/infra/launch/fake_job.py {action} "
+            f"{_trusted_python_command()} lab/infra/launch/fake_job.py {action} "
             f"--run-id {args.run_id} --workdir {workdir}"
         )
         alerts.append({
@@ -731,8 +739,16 @@ def _self_test() -> int:  # noqa: PLR0915
             "降级到 local-fake" in r.stdout and "fake_job.py launch" in r.stdout,
             "plan 应降级并渲染草案",
         )
-    r = run(["plan", "--action", "kill", "--run-id", "t-plan"])
+    r = run([
+        "plan", "--action", "kill", "--run-id", "t-plan",
+        "--var", "trusted_python=/bin/false",
+    ])
     expect("命令草案，不会被执行" in r.stdout, "plan 应声明不执行")
+    expect(
+        f'command: "{_trusted_python_command()} lab/infra/launch/fake_job.py kill' in r.stdout,
+        "local-fake plan 必须序列化当前 expctl 的受信解释器",
+    )
+    expect("/bin/false" not in r.stdout, "--var 不得改写受信解释器来源")
 
     root = Path(tempfile.mkdtemp(prefix="expctl-selftest-", dir="/tmp"))
     fake_job = str(_HERE / "fake_job.py")
@@ -780,6 +796,10 @@ def _self_test() -> int:  # noqa: PLR0915
             "checkpoint 停更应产出 stale-checkpoint alert（而非只记 ok:false）",
         )
         expect(f"--run-id t-s" in r.stdout, "提案命令应指向同一 run")
+        expect(
+            f'command: "{_trusted_python_command()} lab/infra/launch/fake_job.py restart' in r.stdout,
+            "watch proposal 必须序列化当前 expctl 的受信解释器",
+        )
 
         # 4. watch bounded：日志行数上限生效（scanned 行数 ≤ bound）
         r2 = run(["watch", "--run-id", "t-s", "--workdir", str(w2), "--log-tail", "2",
@@ -789,7 +809,10 @@ def _self_test() -> int:  # noqa: PLR0915
 
         # 5. validate-recovery 只做安全校验：/tmp actual 永拒，覆盖批准、路径、
         #    run/workdir/interpreter、resolved/consumed 对抗场景，不产生恢复副作用。
-        cmd_restart = f"python lab/infra/launch/fake_job.py restart --run-id t-s --workdir {w2}"
+        cmd_restart = (
+            f"{_trusted_python_command()} lab/infra/launch/fake_job.py restart "
+            f"--run-id t-s --workdir {w2}"
+        )
         ledger = root / "ledger.yaml"
 
         def write_ledger(
@@ -847,14 +870,20 @@ def _self_test() -> int:  # noqa: PLR0915
         expect(r.returncode == 2 and "canonical" in r.stderr, "非 canonical 且非临时目录的 ledger 应拒绝")
 
         # run-id 不匹配（BLOCKER-3）：run-a 的批准不能执行 run-b
-        cmd_other = f"python lab/infra/launch/fake_job.py restart --run-id t-other --workdir {w2}"
+        cmd_other = (
+            f"{_trusted_python_command()} lab/infra/launch/fake_job.py restart "
+            f"--run-id t-other --workdir {w2}"
+        )
         write_ledger(approved(cmd_other), command=cmd_other)
         r = run(["validate-recovery", "--ledger", str(ledger), "--run-id", "t-s",
                  "--alert-id", "alert-1"])
         expect(r.returncode == 2 and "不能执行 run-b" in r.stderr, "批准命令指向其他 run 应拒绝")
 
         # 假路径 fake_job（BLOCKER-3）：路径 resolve 必须等于 repo 内 canonical fake_job.py
-        cmd_evil = f"python /tmp/evil/lab/infra/launch/fake_job.py restart --run-id t-s --workdir {w2}"
+        cmd_evil = (
+            f"{_trusted_python_command()} /tmp/evil/lab/infra/launch/fake_job.py restart "
+            f"--run-id t-s --workdir {w2}"
+        )
         write_ledger(approved(cmd_evil), command=cmd_evil)
         r = run(["validate-recovery", "--ledger", str(ledger), "--run-id", "t-s",
                  "--alert-id", "alert-1"])
@@ -862,7 +891,7 @@ def _self_test() -> int:  # noqa: PLR0915
 
         # workdir 必须绑定同 run，且只能是字面 /tmp 安全 leaf。
         cmd_cross_workdir = (
-            "python lab/infra/launch/fake_job.py restart --run-id t-s "
+            f"{_trusted_python_command()} lab/infra/launch/fake_job.py restart --run-id t-s "
             f"--workdir {root / 't-other'}"
         )
         write_ledger(approved(cmd_cross_workdir), command=cmd_cross_workdir)
@@ -871,7 +900,7 @@ def _self_test() -> int:  # noqa: PLR0915
         expect(r.returncode == 2 and "workdir" in r.stderr, "跨 run workdir 应拒绝")
 
         cmd_protected = (
-            "python lab/infra/launch/fake_job.py restart --run-id t-s "
+            f"{_trusted_python_command()} lab/infra/launch/fake_job.py restart --run-id t-s "
             f"--workdir {REPO_ROOT / 'lab/runs/t-s'}"
         )
         write_ledger(approved(cmd_protected), command=cmd_protected)
@@ -879,11 +908,25 @@ def _self_test() -> int:  # noqa: PLR0915
                  "--alert-id", "alert-1"])
         expect(r.returncode == 2 and "字面 /tmp" in r.stderr, "protected/repo workdir 应拒绝")
 
-        cmd_untrusted_python = cmd_restart.replace("python ", "/bin/false ", 1)
+        other_python = next(
+            (
+                Path(candidate).resolve(strict=True)
+                for name in ("python", "python3")
+                if (candidate := shutil.which(name)) is not None
+                and Path(candidate).resolve(strict=True) != TRUSTED_PYTHON
+            ),
+            Path("/bin/false").resolve(strict=True),
+        )
+        cmd_untrusted_python = cmd_restart.replace(
+            _trusted_python_command(), shlex.quote(str(other_python)), 1
+        )
         write_ledger(approved(cmd_untrusted_python), command=cmd_untrusted_python)
         r = run(["validate-recovery", "--ledger", str(ledger), "--run-id", "t-s",
                  "--alert-id", "alert-1"])
-        expect(r.returncode == 2 and "受信 Python" in r.stderr, "非受信解释器应拒绝")
+        expect(
+            r.returncode == 2 and "受信 Python" in r.stderr,
+            f"不同 Python 安装/非受信解释器应拒绝（candidate={other_python}）",
+        )
 
         write_ledger(approved(), proposal_action="kill")
         r = run(["validate-recovery", "--ledger", str(ledger), "--run-id", "t-s",

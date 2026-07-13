@@ -3,7 +3,8 @@
 # 角色（见 plans/20260712-experiment-control-plane.zh.md 任务 C1/C1b）：
 # 1. adapters：把「本地 fake job」与可选的 Slurm / RunAI 后端统一成同一套
 #    launch/status/kill/restart 命令**草案**描述。adapter 只生成命令文本，
-#    不代替 human 按下启动键；后端 CLI 不存在时由 expctl.py 优雅降级 local-only。
+#    不代替 human 按下启动键；local-fake 的 {trusted_python} 只由 expctl.py 注入当前
+#    进程的 canonical 解释器绝对路径，后端 CLI 不存在时优雅降级 local-only。
 # 2. gated_prefixes：哪些命令前缀属于「launch/kill/restart 类计算副作用入口」。
 #    由 .claude/hooks/pre_tool_guard.py（Claude 与 Codex 共享）经
 #    lab/infra/launch/launch_gate.py 消费：命中即拒绝，不存在 env 放行；调用者自设
@@ -34,10 +35,10 @@ adapters:
     description: "本地 fake job（sleep + status/heartbeat/metrics 文件），零算力，供 smoke 与恢复演练"
     detect_executables: []
     commands:
-      launch: "python lab/infra/launch/fake_job.py launch --run-id {run_id} --workdir {workdir}"
-      status: "python lab/infra/launch/fake_job.py status --run-id {run_id} --workdir {workdir}"
-      kill: "python lab/infra/launch/fake_job.py kill --run-id {run_id} --workdir {workdir}"
-      restart: "python lab/infra/launch/fake_job.py restart --run-id {run_id} --workdir {workdir}"
+      launch: "{trusted_python} lab/infra/launch/fake_job.py launch --run-id {run_id} --workdir {workdir}"
+      status: "{trusted_python} lab/infra/launch/fake_job.py status --run-id {run_id} --workdir {workdir}"
+      kill: "{trusted_python} lab/infra/launch/fake_job.py kill --run-id {run_id} --workdir {workdir}"
+      restart: "{trusted_python} lab/infra/launch/fake_job.py restart --run-id {run_id} --workdir {workdir}"
 
   - id: slurm
     kind: remote
