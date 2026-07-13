@@ -50,6 +50,9 @@ import re
 import shlex
 import subprocess
 import sys
+from datetime import date, datetime
+from fnmatch import fnmatchcase
+from glob import iglob
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -74,37 +77,142 @@ ANNOTATION_SECTION = "Human 批注区"
 NAV_BASENAMES = {"README.md", "AGENTS.md", "CLAUDE.md", "ANATOMY.md"}
 DOC_DIRS = ("plans", "human/briefs", "human/reviews", "human/decisions")
 
-STATUS_LINE = re.compile(r"^\s*>?\s*Status[:：]\s*([A-Za-z-]+)")
+STATUS_PREFIX = re.compile(r"^\s*>?\s*Status[:：]")
+STATUS_LINE = re.compile(
+    r"^\s*>?\s*Status[:：]\s*([A-Za-z-]+)\s*·\s*"
+    r"(\d{4}-\d{2}-\d{2})\s*·\s*(.*?)\s*$"
+)
 UNRESOLVED_MARK = re.compile(r"^\s*(?:[-*]\s*)?\[(?:\?|改)\]", re.MULTILINE)
+MARKDOWN_LIST_PREFIX = re.compile(r"^(?:[-*+]|\d+[.)])(?:\s+|$)")
+MARKDOWN_CHECK_PREFIX = re.compile(r"^\[[ xX]\](?:\s+|$)")
+EVIDENCE_PLACEHOLDER = re.compile(
+    r"^(?:"
+    r"\[(?:todo|tbd|n/?a|none|null)\](?:$|[\s:(])"
+    r"|(?:todo|tbd)(?:$|\s*:|\s+(?:pending|replace)\b)"
+    r"|n/?a(?:$|(?:\s+|\s*:\s*)(?:pending|todo|tbd|replace)\b)"
+    r"|(?:none|null)(?:$|\s*:\s*(?:pending|todo|tbd|replace)\b)"
+    r")",
+    re.IGNORECASE,
+)
+FENCE_LINE = re.compile(r"^(`{3,}|~{3,})(.*)$")
+FORMATTING_ONLY = re.compile(r"^(?:`+|~+|\*+|_+|#+|>+|<code>\s*</code>)$", re.IGNORECASE)
+HEADING_PREFIX = re.compile(r"^#{1,6}(?:\s+|$)")
+BLOCKQUOTE_PREFIX = re.compile(r"^>+\s*")
+HORIZONTAL_RULE = re.compile(r"^(?:(?:-\s*){3,}|(?:\*\s*){3,}|(?:_\s*){3,})$")
+TABLE_SEPARATOR_CELL = re.compile(r"^:?-{3,}:?$")
 SKIP_ENV = "DOC_LIFECYCLE_SKIP"
 _ESCAPE_HINT = f"确属 human 明示例外可 {SKIP_ENV}=1 显式放行（validator 仍会事后校验）。"
 
 LIST_FIELDS = ("upstream", "downstream")
 
 
-def _is_placeholder(value) -> bool:
-    return isinstance(value, str) and value.strip().startswith("<")
+def _strip_markdown_item_prefixes(value: str) -> str:
+    """递归剥掉 Markdown list/checkbox 前缀，不把正文中的符号当作前缀。"""
+    text = value.strip()
+    while text:
+        before = text
+        for pattern in (MARKDOWN_LIST_PREFIX, MARKDOWN_CHECK_PREFIX):
+            match = pattern.match(text)
+            if match:
+                text = text[match.end():].strip()
+        if text == before:
+            break
+    return text
 
 
-def _is_missing_or_placeholder(value) -> bool:
-    if value is None:
-        return True
-    text = str(value).strip()
+def _strip_wrapping_formatting(value: str) -> str:
+    """只剥完整包裹的轻量行内格式；普通 prose/code 中的符号保持原样。"""
+    text = value.strip()
+    pairs = (("**", "**"), ("__", "__"), ("~~", "~~"), ("`", "`"))
+    for _ in range(8):
+        for left, right in pairs:
+            if len(text) > len(left) + len(right) and text.startswith(left) and text.endswith(right):
+                text = text[len(left):-len(right)].strip()
+                break
+        else:
+            return text
+    return text
+
+
+def _normalized_scalar(value) -> str | None:
+    if not isinstance(value, str):
+        return None
+    return _strip_wrapping_formatting(_strip_markdown_item_prefixes(value))
+
+
+def _is_evidence_missing_or_placeholder(value) -> bool:
+    """approval/anchor/section 证据：拒绝明确 placeholder phrase，不误伤正常开头 prose。"""
+    text = _normalized_scalar(value)
+    return text is None or not text or text.startswith("<") or bool(EVIDENCE_PLACEHOLDER.match(text))
+
+
+def _is_association_missing_or_placeholder(value) -> bool:
+    """issue/branch/worktree 坐标只拒绝空值与 exact token；todo/foo 等合法名字可用。"""
+    text = _normalized_scalar(value)
     return (
-        not text
-        or _is_placeholder(text)
+        text is None
+        or not text
+        or text.startswith("<")
         or text.lower() in {"none", "null", "n/a", "na", "tbd", "todo", "-"}
     )
 
 
 # ---------------------------------------------------------------- 注册表解析
 
+def _strip_yaml_inline_comment(raw: str) -> str:
+    """剥掉 YAML plain-scalar inline comment；引号内的 `#` 保持为证据正文。"""
+    quote: str | None = None
+    escaped = False
+    for index, char in enumerate(raw):
+        if quote == '"' and char == "\\" and not escaped:
+            escaped = True
+            continue
+        if char in "'\"" and not escaped:
+            quote = None if quote == char else (char if quote is None else quote)
+        elif char == "#" and quote is None and (index == 0 or raw[index - 1].isspace()):
+            return raw[:index].rstrip()
+        escaped = False
+    return raw
+
+
 def _scalar(raw: str):
     v = raw.strip()
     if len(v) >= 2 and v[0] == v[-1] and v[0] in "'\"":
-        v = v[1:-1]
+        return v[1:-1]
     if v in ("", "null", "~"):
         return None
+    if v == "[]":
+        return []
+    if v == "{}":
+        return {}
+    lower = v.lower()
+    if lower in ("true", "false", "yes", "no", "on", "off"):
+        return lower in ("true", "yes", "on")
+    if re.fullmatch(r"[+-]?0x[0-9a-f]+", lower):
+        return int(lower, 0)
+    if re.fullmatch(r"[+-]?0b[01]+", lower):
+        return int(lower, 0)
+    if re.fullmatch(r"[+-]?\d[\d_]*", v):
+        return int(v.replace("_", ""))
+    if re.fullmatch(r"[+-]?(?:\d+\.\d*|\.\d+)(?:e[+-]\d+)?", lower):
+        return float(lower)
+    if lower in (".inf", "+.inf", "-.inf", ".nan"):
+        return float(lower.replace(".", "", 1))
+    if re.fullmatch(r"\d+(?::[0-5]?\d){1,}", v):
+        total = 0
+        for part in v.split(":"):
+            total = total * 60 + int(part)
+        return total
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}[Tt ]\S+", v):
+        try:
+            return datetime.fromisoformat(v.replace("Z", "+00:00").replace("z", "+00:00"))
+        except ValueError:
+            pass
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", v):
+        try:
+            return date.fromisoformat(v)
+        except ValueError:
+            pass
     return v
 
 
@@ -116,6 +224,7 @@ def _parse_restricted(text: str):
     cur_list: str | None = None
     in_docs = False
     for lineno, raw in enumerate(text.splitlines(), 1):
+        raw = _strip_yaml_inline_comment(raw)
         if not raw.strip() or raw.lstrip().startswith("#"):
             continue
         indent = len(raw) - len(raw.lstrip(" "))
@@ -211,12 +320,28 @@ def scan_docs(repo: Path) -> list[str]:
     return rels
 
 
-def extract_status(text: str) -> str | None:
+def _parse_status_anchor(text: str) -> tuple[str | None, str | None]:
+    """返回 (status, error)：没有锚点不是解析错误，出现 Status 前缀却不完整则是。"""
     for line in text.splitlines():
-        m = STATUS_LINE.match(line)
-        if m:
-            return m.group(1)
-    return None
+        if not STATUS_PREFIX.match(line):
+            continue
+        m = STATUS_LINE.fullmatch(line)
+        if not m:
+            return None, "状态锚点格式非法（应为 Status: <enum> · <YYYY-MM-DD> · <ref>）"
+        status, raw_date, ref = m.groups()
+        try:
+            date.fromisoformat(raw_date)
+        except ValueError:
+            return None, f"状态锚点日期非法：{raw_date}（应为真实 YYYY-MM-DD 日期）"
+        if _is_evidence_missing_or_placeholder(ref):
+            return None, "状态锚点 ref 缺失/占位（需可核验的非占位引用）"
+        return status, None
+    return None, None
+
+
+def extract_status(text: str) -> str | None:
+    status, error = _parse_status_anchor(text)
+    return None if error else status
 
 
 def _section_body(text: str, name: str) -> list[str] | None:
@@ -238,7 +363,45 @@ def _section_body(text: str, name: str) -> list[str] | None:
 
 
 def _has_real_content(body: list[str]) -> bool:
-    return any(ln.strip() and not ln.strip().startswith("<") for ln in body)
+    fence: str | None = None
+    for raw_line in body:
+        text = _strip_markdown_item_prefixes(raw_line)
+        for _ in range(8):
+            before = text
+            text = BLOCKQUOTE_PREFIX.sub("", text).strip()
+            text = HEADING_PREFIX.sub("", text).strip()
+            text = _strip_markdown_item_prefixes(text)
+            if text == before:
+                break
+        fence_match = FENCE_LINE.match(text)
+        if fence is not None:
+            if fence_match and fence_match.group(1)[0] == fence:
+                fence = None
+            elif (
+                text
+                and not FORMATTING_ONLY.fullmatch(text)
+                and not HORIZONTAL_RULE.fullmatch(text)
+                and not _is_evidence_missing_or_placeholder(text)
+            ):
+                return True
+            continue
+        if fence_match:
+            fence = fence_match.group(1)[0]
+            continue
+        if FORMATTING_ONLY.fullmatch(text) or HORIZONTAL_RULE.fullmatch(text):
+            continue
+        if text.startswith("|") and text.endswith("|"):
+            cells = [cell.strip() for cell in text[1:-1].split("|")]
+            if all(
+                not cell
+                or TABLE_SEPARATOR_CELL.fullmatch(cell)
+                or _is_evidence_missing_or_placeholder(cell)
+                for cell in cells
+            ):
+                continue
+        if not _is_evidence_missing_or_placeholder(text):
+            return True
+    return False
 
 
 def missing_plan_sections(text: str) -> list[str]:
@@ -342,21 +505,24 @@ def _active_plan_association_errors(e: dict, repo: Path) -> list[str]:
     issue = e.get("issue")
     branch = e.get("branch")
     worktree = e.get("worktree")
-    if _is_missing_or_placeholder(issue):
+    if _is_association_missing_or_placeholder(issue):
         errors.append(f"{eid}: status={status} 的活跃 plan 缺非占位 issue 关联")
     elif not ISSUE_REF.fullmatch(str(issue).strip()):
         errors.append(
             f"{eid}: issue 关联格式非法：{issue}（应为 #N 或 https://github.com/<owner>/<repo>/issues/N）"
         )
 
-    if _is_missing_or_placeholder(branch):
+    if _is_association_missing_or_placeholder(branch):
         errors.append(f"{eid}: status={status} 的活跃 plan 缺非占位 branch 关联")
     elif not _branch_exists(repo, str(branch)):
         errors.append(f"{eid}: branch 不存在或不是单一 Git ref：{branch}")
 
-    if status == "implementing" and _is_missing_or_placeholder(worktree):
+    if status == "implementing" and _is_association_missing_or_placeholder(worktree):
         errors.append(f"{eid}: status=implementing 的 plan 缺非占位 worktree 关联")
-    elif not _is_missing_or_placeholder(worktree) and not _is_missing_or_placeholder(branch):
+    elif (
+        not _is_association_missing_or_placeholder(worktree)
+        and not _is_association_missing_or_placeholder(branch)
+    ):
         if not _worktree_matches(repo, str(worktree), str(branch)):
             errors.append(
                 f"{eid}: worktree 不存在、未登记，或未绑定 branch={branch}：{worktree}"
@@ -366,6 +532,11 @@ def _active_plan_association_errors(e: dict, repo: Path) -> list[str]:
 
 def registry_errors(entries: list[dict], repo: Path, *, check_paths: bool = True) -> list[str]:
     errs: list[str] = []
+    if not entries and scan_docs(repo):
+        errs.append(
+            f"{REGISTRY_REL} 的 docs 不能为空——repo 中仍存在四类受管文档，"
+            "清空注册表会静默关闭治理"
+        )
     ids: dict[str, dict] = {}
     for e in entries:
         eid = e.get("id")
@@ -394,7 +565,7 @@ def registry_errors(entries: list[dict], repo: Path, *, check_paths: bool = True
                     f"{eid}: kind={kind} 与路径类别不符：{path} 属 {expected} 目录，"
                     f"必须登记为 kind={expected}（防止谎报 kind 绕过必填段校验）"
                 )
-        if status in APPROVAL_REQUIRED and (not e.get("approval") or _is_placeholder(str(e.get("approval")))):
+        if status in APPROVAL_REQUIRED and _is_evidence_missing_or_placeholder(e.get("approval")):
             errs.append(f"{eid}: status={status} 但 approval 证据缺失/占位（human gate 引用必填）")
         for field in LIST_FIELDS:
             for ref in e.get(field) or []:
@@ -430,8 +601,10 @@ def doc_errors_for_entry(e: dict, repo: Path) -> list[str]:
     except OSError:
         return [f"{path}: 无法读取"]
     status = e.get("status")
-    anchor = extract_status(text)
-    if anchor is None:
+    anchor, anchor_error = _parse_status_anchor(text)
+    if anchor_error:
+        errs.append(f"{path}: {anchor_error}")
+    elif anchor is None:
         errs.append(f"{path}: 缺状态锚点行（Status: <enum> · <date> · <ref>）")
     elif anchor != status:
         errs.append(f"{path}: 状态锚点 {anchor} 与注册表 {status} 矛盾（同 commit 对齐两处）")
@@ -497,19 +670,72 @@ def _skip_by_env() -> bool:
     return os.environ.get(SKIP_ENV, "").strip().lower() in ("1", "true", "yes")
 
 
-def _rel_to_repo(path_str: str, repo: Path) -> str | None:
+def _path_identities(
+    path_str: str,
+    repo: Path,
+    *,
+    base_dir: Path | None = None,
+    follow_final_symlink: bool = True,
+) -> tuple[str, ...]:
+    """返回 path 的 repo 内词法/解析后身份；两者都保留且绝不靠 basename/suffix 猜测。"""
     p = (path_str or "").strip().strip('"').strip("'")
     if not p:
-        return None
-    if p.startswith("./"):
-        p = p[2:]
+        return ()
     pp = Path(p)
-    if pp.is_absolute():
+    try:
+        root = repo.resolve()
+        base = base_dir if base_dir is not None else root
+        base = Path(os.path.abspath(os.path.normpath(os.fspath(base))))
+        candidate = pp if pp.is_absolute() else base / pp
+        lexical = Path(os.path.abspath(os.path.normpath(os.fspath(candidate))))
+    except (ValueError, OSError, RuntimeError):
+        return ()
+
+    identities: list[str] = []
+    candidates = [lexical]
+    try:
+        resolved = (
+            lexical.resolve(strict=False)
+            if follow_final_symlink
+            else lexical.parent.resolve(strict=False) / lexical.name
+        )
+        candidates.append(resolved)
+    except (OSError, RuntimeError):
+        pass
+    for candidate in candidates:
         try:
-            return pp.resolve().relative_to(repo.resolve()).as_posix()
-        except (ValueError, OSError):
-            return None
-    return pp.as_posix()
+            rel = candidate.relative_to(root).as_posix()
+        except (ValueError, OSError, RuntimeError):
+            continue
+        if rel not in identities:
+            identities.append(rel)
+    return tuple(identities)
+
+
+def _rel_to_repo(path_str: str, repo: Path, *, base_dir: Path | None = None) -> str | None:
+    identities = _path_identities(path_str, repo, base_dir=base_dir)
+    return identities[0] if identities else None
+
+
+def _managed_doc_identity(
+    path_str: str,
+    repo: Path,
+    *,
+    base_dir: Path | None = None,
+    follow_final_symlink: bool = True,
+) -> tuple[str, str] | None:
+    """返回操作实际触及的受管文档身份；解析后目标优先于词法 alias。"""
+    identities = _path_identities(
+        path_str,
+        repo,
+        base_dir=base_dir,
+        follow_final_symlink=follow_final_symlink,
+    )
+    for rel in reversed(identities):
+        kind = doc_kind(rel)
+        if kind:
+            return rel, kind
+    return None
 
 
 def _load_registry(repo: Path) -> list[dict] | None:
@@ -544,7 +770,9 @@ def _stale_reason(rel: str, status: str, repo: Path) -> str | None:
 def _doc_write_reason(rel: str, kind: str, content: str, markers_text: str, repo: Path) -> str | None:
     """对一次「写入后的文档内容」判定进阶态完整性。content=用于状态/段落检查的全文（或联合语料），
     markers_text=用于未决批注检查的文本（apply_patch update 只看新增行，避免误拦）。"""
-    status = extract_status(content)
+    status, anchor_error = _parse_status_anchor(content)
+    if anchor_error:
+        return f"doc-lifecycle: {rel} 的{anchor_error}。{_ESCAPE_HINT}"
     if status is None:
         return None  # 无状态锚点：coverage 由 validator 事后管，hook 不拦
     if status not in VALID_STATUS:
@@ -703,19 +931,33 @@ _REGISTRY_REMOVE_MSG = (
 )
 # Bash 侧只拦「删除/移走注册表」这一件可判定的事；其余 Bash 写入由 validator 兜底。
 _DELETIONISH = {"rm", "unlink", "shred", "srm", "truncate", "mv"}
-_SHELL_WRAPPERS = {"command", "exec"}
+_SHELL_WRAPPERS = {"builtin", "command", "exec"}
 _ENV_FLAGS_WITH_VALUE = {"-u", "--unset", "-C", "--chdir", "-S", "--split-string"}
 _GIT_GLOBAL_FLAGS_WITH_VALUE = {
     "-C", "-c", "--config-env", "--exec-path", "--git-dir", "--work-tree",
     "--namespace", "--super-prefix", "--list-cmds", "--attr-source",
 }
+_SHELL_LITERAL_GLOB_MARKERS = {
+    "*": "__DL_LITERAL_STAR__",
+    "?": "__DL_LITERAL_QMARK__",
+    "[": "__DL_LITERAL_LBRACKET__",
+    "]": "__DL_LITERAL_RBRACKET__",
+}
 
 
-def _is_registry_path(raw: str, repo: Path) -> bool:
-    if _rel_to_repo(raw, repo) == REGISTRY_REL:
-        return True
-    p = (raw or "").strip().strip('"').strip("'")
-    return p == REGISTRY_REL or p.endswith("/" + REGISTRY_REL)
+def _is_registry_path(
+    raw: str,
+    repo: Path,
+    *,
+    base_dir: Path | None = None,
+    follow_final_symlink: bool = True,
+) -> bool:
+    return REGISTRY_REL in _path_identities(
+        raw,
+        repo,
+        base_dir=base_dir,
+        follow_final_symlink=follow_final_symlink,
+    )
 
 
 def _strip_command_wrapper_options(args: list[str]) -> list[str]:
@@ -725,63 +967,196 @@ def _strip_command_wrapper_options(args: list[str]) -> list[str]:
     return args[i:]
 
 
-def _strip_env_wrapper(args: list[str]) -> list[str]:
+def _strip_env_wrapper(args: list[str], cwd: Path) -> tuple[list[str], Path]:
     i = 0
+    env_cwd = cwd
     while i < len(args):
         arg = args[i]
         if arg == "--":
-            return args[i + 1:]
+            return args[i + 1:], env_cwd
         if re.match(r"^[A-Za-z_]\w*=", arg):
             i += 1
             continue
         if arg in {"-i", "--ignore-environment", "-0", "--null"}:
             i += 1
             continue
+        if arg in {"-C", "--chdir"}:
+            if i + 1 >= len(args):
+                return [], env_cwd
+            env_cwd = _lexical_path(args[i + 1], env_cwd)
+            i += 2
+            continue
+        if arg.startswith("--chdir="):
+            env_cwd = _lexical_path(arg.split("=", 1)[1], env_cwd)
+            i += 1
+            continue
+        if arg.startswith("-C") and len(arg) > 2:
+            env_cwd = _lexical_path(arg[2:], env_cwd)
+            i += 1
+            continue
+        if arg in {"-S", "--split-string"}:
+            if i + 1 >= len(args):
+                return [], env_cwd
+            try:
+                args = shlex.split(args[i + 1]) + args[i + 2:]
+            except ValueError:
+                return [], env_cwd
+            i = 0
+            continue
+        if arg.startswith("--split-string="):
+            try:
+                args = shlex.split(arg.split("=", 1)[1]) + args[i + 1:]
+            except ValueError:
+                return [], env_cwd
+            i = 0
+            continue
         if arg in _ENV_FLAGS_WITH_VALUE:
             if i + 1 >= len(args):
-                return []
+                return [], env_cwd
             i += 2
             continue
         if any(arg.startswith(flag + "=") for flag in _ENV_FLAGS_WITH_VALUE if flag.startswith("--")):
             i += 1
             continue
         break
+    return args[i:], env_cwd
+
+
+def _strip_nice_wrapper(args: list[str]) -> list[str]:
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--":
+            return args[i + 1:]
+        if arg in {"-n", "--adjustment"}:
+            if i + 1 >= len(args):
+                return []
+            i += 2
+            continue
+        if (
+            arg.startswith("--adjustment=")
+            or re.fullmatch(r"-\d+", arg)
+            or re.fullmatch(r"-n[+-]?\d+", arg)
+        ):
+            i += 1
+            continue
+        if arg.startswith("-"):
+            return []  # --help/--version/未知 option：没有可安全识别的子命令
+        break
     return args[i:]
 
 
-def _unwrap_command(seg: list[str]) -> tuple[str, list[str]]:
-    """展开前导 assignment 与 `command`/`exec`/`env` wrapper，返回实际命令与参数。"""
-    remaining = list(seg)
-    for _ in range(8):  # wrapper 可嵌套；有界循环避免畸形输入拖住 hook
-        while remaining and re.match(r"^[A-Za-z_]\w*=", remaining[0]):
-            remaining.pop(0)
-        if not remaining:
-            return "", []
-        name = remaining[0].rsplit("/", 1)[-1]
-        args = remaining[1:]
-        if name in _SHELL_WRAPPERS:
-            remaining = _strip_command_wrapper_options(args)
-            continue
-        if name == "env":
-            remaining = _strip_env_wrapper(args)
-            continue
-        return name, args
-    return "", []
+def _strip_nohup_wrapper(args: list[str]) -> list[str]:
+    if args and args[0] == "--":
+        return args[1:]
+    if args and args[0].startswith("-"):
+        return []
+    return args
 
 
-def _git_subcommand(args: list[str]) -> tuple[str, list[str]]:
-    """跳过 git 全局选项，定位 subcommand；覆盖 `git -C . rm` 等合法形态。"""
+def _strip_timeout_wrapper(args: list[str]) -> list[str]:
     i = 0
     while i < len(args):
         arg = args[i]
         if arg == "--":
             i += 1
             break
+        if arg in {"-k", "--kill-after", "-s", "--signal"}:
+            if i + 1 >= len(args):
+                return []
+            i += 2
+            continue
+        if arg in {"--foreground", "--preserve-status", "-v", "--verbose"}:
+            i += 1
+            continue
+        if arg.startswith(("--kill-after=", "--signal=")):
+            i += 1
+            continue
+        break
+    if i >= len(args):
+        return []
+    return args[i + 1:]  # 第一个非 option 是 DURATION
+
+
+def _unwrap_command(seg: list[str], cwd: Path) -> tuple[str, list[str], Path]:
+    """展开常见执行 wrapper，返回实际命令与参数。"""
+    remaining = list(seg)
+    for _ in range(12):  # wrapper 可嵌套；有界循环避免畸形输入拖住 hook
+        while remaining and remaining[0] == "(":
+            remaining.pop(0)
+        while remaining and re.match(r"^[A-Za-z_]\w*=", remaining[0]):
+            remaining.pop(0)
+        if not remaining:
+            return "", [], cwd
+        name = remaining[0].rsplit("/", 1)[-1]
+        args = remaining[1:]
+        if name in _SHELL_WRAPPERS:
+            remaining = _strip_command_wrapper_options(args)
+            continue
+        if name == "env":
+            remaining, cwd = _strip_env_wrapper(args, cwd)
+            continue
+        if name == "nice":
+            remaining = _strip_nice_wrapper(args)
+            continue
+        if name == "nohup":
+            remaining = _strip_nohup_wrapper(args)
+            continue
+        if name == "timeout":
+            remaining = _strip_timeout_wrapper(args)
+            continue
+        return name, args, cwd
+    return "", [], cwd
+
+
+def _lexical_path(raw: str, cwd: Path) -> Path:
+    path = Path(raw)
+    candidate = path if path.is_absolute() else cwd / path
+    return Path(os.path.abspath(os.path.normpath(os.fspath(candidate))))
+
+
+def _git_subcommand(args: list[str], cwd: Path) -> tuple[str, list[str], Path]:
+    """跳过 git 全局选项并累计 `-C` cwd，返回 subcommand、参数和路径基准。"""
+    i = 0
+    git_cwd = cwd
+    path_base = cwd
+    explicit_work_tree = False
+    while i < len(args):
+        arg = args[i]
+        if arg == "--":
+            i += 1
+            break
         if not arg.startswith("-") or arg == "-":
-            return arg, args[i + 1:]
+            return arg, args[i + 1:], path_base
+        if arg == "-C":
+            if i + 1 >= len(args):
+                return "", [], path_base
+            git_cwd = _lexical_path(args[i + 1], git_cwd)
+            if not explicit_work_tree:
+                path_base = git_cwd
+            i += 2
+            continue
+        if arg.startswith("-C") and len(arg) > 2:
+            git_cwd = _lexical_path(arg[2:], git_cwd)
+            if not explicit_work_tree:
+                path_base = git_cwd
+            i += 1
+            continue
+        if arg == "--work-tree":
+            if i + 1 >= len(args):
+                return "", [], path_base
+            path_base = _lexical_path(args[i + 1], git_cwd)
+            explicit_work_tree = True
+            i += 2
+            continue
+        if arg.startswith("--work-tree="):
+            path_base = _lexical_path(arg.split("=", 1)[1], git_cwd)
+            explicit_work_tree = True
+            i += 1
+            continue
         if arg in _GIT_GLOBAL_FLAGS_WITH_VALUE:
             if i + 1 >= len(args):
-                return "", []
+                return "", [], path_base
             i += 2
             continue
         if any(arg.startswith(flag + "=") for flag in _GIT_GLOBAL_FLAGS_WITH_VALUE
@@ -790,35 +1165,268 @@ def _git_subcommand(args: list[str]) -> tuple[str, list[str]]:
             continue
         i += 1  # 无参数全局 flag，如 --literal-pathspecs
     if i < len(args):
-        return args[i], args[i + 1:]
-    return "", []
+        return args[i], args[i + 1:], path_base
+    return "", [], path_base
+
+
+def _cd_target(args: list[str], cwd: Path) -> Path | None:
+    remaining = list(args)
+    while remaining and remaining[0] in {"-L", "-P", "-e", "-@"}:
+        remaining.pop(0)
+    if remaining and remaining[0] == "--":
+        remaining.pop(0)
+    if len(remaining) != 1 or remaining[0] == "-":
+        return None
+    target = _lexical_path(remaining[0], cwd)
+    return target if target.is_dir() else None
+
+
+def _prepare_shell_source(cmd: str) -> str:
+    """标记 shell-literal glob 字符，并把引号外换行变成 `;` 命令边界。"""
+    out: list[str] = []
+    quote: str | None = None
+    i = 0
+    while i < len(cmd):
+        char = cmd[i]
+        if char == "\\" and quote != "'" and i + 1 < len(cmd):
+            if cmd[i + 1] == "\n":
+                i += 2
+                continue
+            if cmd[i + 1] in _SHELL_LITERAL_GLOB_MARKERS:
+                out.append(_SHELL_LITERAL_GLOB_MARKERS[cmd[i + 1]])
+                i += 2
+                continue
+            out.extend((char, cmd[i + 1]))
+            i += 2
+            continue
+        if char in "'\"":
+            quote = None if quote == char else (char if quote is None else quote)
+            out.append(char)
+        elif quote is not None and char in _SHELL_LITERAL_GLOB_MARKERS:
+            out.append(_SHELL_LITERAL_GLOB_MARKERS[char])
+        else:
+            out.append(";" if char == "\n" and quote is None else char)
+        i += 1
+    return "".join(out)
+
+
+def _restore_shell_literals(raw: str) -> str:
+    restored = raw
+    for literal, marker in _SHELL_LITERAL_GLOB_MARKERS.items():
+        restored = restored.replace(marker, literal)
+    return restored
+
+
+def _has_active_shell_glob(raw: str) -> bool:
+    return any(ch in raw for ch in "*?[")
+
+
+def _shell_glob_matches(raw: str, cwd: Path, *, limit: int = 1024) -> tuple[list[str], bool]:
+    """按有效 cwd 有界展开真实 shell glob；返回 (matches, 是否因上限截断)。"""
+    pattern = Path(raw)
+    absolute = pattern if pattern.is_absolute() else cwd / pattern
+    matches: list[str] = []
+    try:
+        for index, match in enumerate(iglob(os.fspath(absolute))):
+            if index >= limit:
+                return matches, True
+            matches.append(match)
+    except (OSError, RuntimeError, ValueError):
+        return [], False
+    return matches, False
+
+
+def _destructive_redirect_targets(command: list[str]) -> list[str]:
+    return [
+        command[index + 1]
+        for index, token in enumerate(command[:-1])
+        if token in {">", ">>", ">|", "<>"}
+    ]
+
+
+def _shell_events(tokens: list[str]) -> list[list[str] | str]:
+    """把 shlex token 流拆成 command/control events；只理解本 guard 所需控制符。"""
+    events: list[list[str] | str] = []
+    command: list[str] = []
+
+    def flush() -> None:
+        nonlocal command
+        if command:
+            events.append(command)
+            command = []
+
+    for token in tokens:
+        controls: list[str] | None = None
+        if token in {"{", "}"}:
+            controls = [token]
+        elif token and set(token) <= set("();|&"):
+            controls = []
+            i = 0
+            while i < len(token):
+                pair = token[i:i + 2]
+                if pair in {"&&", "||"}:
+                    controls.append(pair)
+                    i += 2
+                else:
+                    controls.append(token[i])
+                    i += 1
+        if controls is None:
+            command.append(token)
+            continue
+        flush()
+        events.extend(controls)
+    flush()
+    return events
+
+
+def _git_pathspec_identity(arg: str, repo: Path, cwd: Path) -> tuple[str, Path, set[str]]:
+    """抽出本 guard 需要的 git pathspec magic；glob 等语义仍交给 git。"""
+    arg = _restore_shell_literals(arg)
+    if arg.startswith(":/"):
+        return arg[2:], repo.resolve(), {"top"}
+    match = re.match(r"^:\(([^)]*)\)(.*)$", arg)
+    if not match:
+        return arg, cwd, set()
+    magic = {part.strip() for part in match.group(1).split(",")}
+    return match.group(2), repo.resolve() if "top" in magic else cwd, magic
+
+
+def _path_covers_registry(
+    raw: str,
+    repo: Path,
+    cwd: Path,
+    *,
+    follow_final_symlink: bool,
+    include_ancestors: bool,
+) -> bool:
+    if _has_active_shell_glob(raw):
+        candidates, truncated = _shell_glob_matches(raw, cwd)
+    else:
+        candidates, truncated = [_restore_shell_literals(raw)], False
+    for candidate in candidates:
+        identities = _path_identities(
+            candidate, repo, base_dir=cwd, follow_final_symlink=follow_final_symlink
+        )
+        if any(
+            rel == REGISTRY_REL
+            or (include_ancestors and REGISTRY_REL.startswith(rel.rstrip("/") + "/"))
+            for rel in identities
+        ):
+            return True
+    return truncated  # security guard: expansion cap is uncertainty, so fail closed
+
+
+def _git_pathspec_covers_registry(
+    arg: str, repo: Path, cwd: Path, *, include_ancestors: bool
+) -> bool:
+    raw, base, magic = _git_pathspec_identity(arg, repo, cwd)
+    if "literal" in magic:
+        identities = _path_identities(
+            raw, repo, base_dir=base, follow_final_symlink=False
+        )
+        return any(
+            rel == REGISTRY_REL
+            or (include_ancestors and REGISTRY_REL.startswith(rel.rstrip("/") + "/"))
+            for rel in identities
+        )
+    if not any(ch in raw for ch in "*?["):
+        return _path_covers_registry(
+            raw,
+            repo,
+            base,
+            follow_final_symlink=False,
+            include_ancestors=include_ancestors,
+        )
+    root = repo.resolve()
+    for pattern_base in (base, base.resolve(strict=False)):
+        try:
+            pattern = _lexical_path(raw, pattern_base).relative_to(root).as_posix()
+        except (ValueError, OSError, RuntimeError):
+            continue
+        if fnmatchcase(REGISTRY_REL, pattern):
+            return True
+    return False
 
 
 def _bash_reason(cmd: str, repo: Path) -> str | None:
     """Bash 命令中对注册表的删除/移动（rm/unlink/shred/truncate/mv/git rm）→ 拦。"""
-    if REGISTRY_REL.rsplit("/", 1)[-1] not in cmd:
-        return None  # 廉价预过滤：命令未提及注册表文件名
     try:
-        lex = shlex.shlex(cmd, posix=True, punctuation_chars=True)
+        protected = re.sub(
+            r":\(([A-Za-z0-9_,!^-]+)\)",
+            lambda m: f":__DL_LP__{m.group(1)}__DL_RP__",
+            _prepare_shell_source(cmd),
+        )
+        lex = shlex.shlex(protected, posix=True, punctuation_chars=True)
         lex.whitespace_split = True
-        toks = list(lex)
+        toks = [t.replace("__DL_LP__", "(").replace("__DL_RP__", ")") for t in lex]
     except ValueError:
         toks = cmd.split()
-    segs: list[list[str]] = [[]]
-    for t in toks:
-        if t and set(t) <= set(";|&<>()"):
-            segs.append([])
-        else:
-            segs[-1].append(t)
-    for seg in segs:
-        name, args = _unwrap_command(seg)
-        if name == "git":
-            subcommand, args = _git_subcommand(args)
+    events = _shell_events(toks)
+    cwd = repo.resolve()
+    subshell_cwds: list[Path] = []
+    for index, event in enumerate(events):
+        if isinstance(event, str):
+            if event == "(":
+                subshell_cwds.append(cwd)
+            elif event == ")" and subshell_cwds:
+                cwd = subshell_cwds.pop()
+            continue
+        if any(
+            _path_covers_registry(
+                target,
+                repo,
+                cwd,
+                follow_final_symlink=True,
+                include_ancestors=False,
+            )
+            for target in _destructive_redirect_targets(event)
+        ):
+            return _REGISTRY_REMOVE_MSG
+        name, args, command_cwd = _unwrap_command(event, cwd)
+        if name == "cd":
+            next_control = events[index + 1] if index + 1 < len(events) else None
+            if next_control not in {"|", "&"}:
+                cwd = _cd_target(args, cwd) or cwd
+            continue
+        git_command = name == "git"
+        if git_command:
+            subcommand, args, command_cwd = _git_subcommand(args, command_cwd)
             name = subcommand.rsplit("/", 1)[-1]
+        if name == "cp":
+            cp_targets = [arg for arg in args if not arg.startswith("-")]
+            if cp_targets and _path_covers_registry(
+                cp_targets[-1],
+                repo,
+                command_cwd,
+                follow_final_symlink=True,
+                include_ancestors=False,
+            ):
+                return _REGISTRY_REMOVE_MSG
+            continue
         if name not in _DELETIONISH:
             continue
-        if any(not a.startswith("-") and _is_registry_path(a, repo) for a in args):
-            return _REGISTRY_REMOVE_MSG
+        recursive = name == "rm" and any(
+            arg == "--recursive"
+            or (arg.startswith("-") and not arg.startswith("--") and "r" in arg.lower())
+            for arg in args
+        )
+        for arg in args:
+            if arg.startswith("-"):
+                continue
+            if git_command:
+                touches_registry = _git_pathspec_covers_registry(
+                    arg, repo, command_cwd, include_ancestors=recursive
+                )
+            else:
+                touches_registry = _path_covers_registry(
+                    arg,
+                    repo,
+                    command_cwd,
+                    follow_final_symlink=(name in {"shred", "truncate"}),
+                    include_ancestors=(name == "mv" or recursive),
+                )
+            if touches_registry:
+                return _REGISTRY_REMOVE_MSG
     return None
 
 
@@ -832,12 +1440,15 @@ def pretooluse_reason(tool_name: str, tool_input: dict, repo_root) -> str | None
     tool_input = tool_input or {}
 
     if tool_name in ("Edit", "Write"):
-        rel = _rel_to_repo(tool_input.get("file_path") or "", repo)
-        if rel is None:
-            return None
+        raw_path = tool_input.get("file_path") or ""
+        managed_doc = _managed_doc_identity(raw_path, repo)
+        identities = _path_identities(raw_path, repo)
+        rel = managed_doc[0] if managed_doc else (identities[0] if identities else None)
         if tool_name == "Write":
             prospective = tool_input.get("content") or ""
         else:
+            if rel is None:
+                return None
             f = repo / rel
             try:
                 current = f.read_text(encoding="utf-8")
@@ -852,10 +1463,10 @@ def pretooluse_reason(tool_name: str, tool_input: dict, repo_root) -> str | None
                 if tool_input.get("replace_all")
                 else current.replace(old, new, 1)
             )
-        if rel == REGISTRY_REL:
+        if _is_registry_path(raw_path, repo):
             return _registry_write_reason(prospective, repo)
-        kind = doc_kind(rel)
-        if kind:
+        if managed_doc:
+            rel, kind = managed_doc
             return _doc_write_reason(rel, kind, prospective, prospective, repo)
         return None
 
@@ -865,18 +1476,37 @@ def pretooluse_reason(tool_name: str, tool_input: dict, repo_root) -> str | None
     if tool_name == "apply_patch":
         patch = tool_input.get("command") or tool_input.get("patch") or ""
         for op in _patch_ops(patch):
-            rel = _rel_to_repo(op["path"], repo)
+            raw_path = op["path"]
+            raw_dest = op["move_to"] or raw_path
+            follows_final = op["op"] != "delete" and not op["move_to"]
+            source_managed = _managed_doc_identity(
+                raw_path, repo, follow_final_symlink=follows_final
+            )
+            dest_managed = _managed_doc_identity(
+                raw_dest, repo, follow_final_symlink=follows_final
+            )
+            source_identities = _path_identities(
+                raw_path, repo, follow_final_symlink=follows_final
+            )
+            rel = source_managed[0] if source_managed else (
+                source_identities[0] if source_identities else None
+            )
             if rel is None:
                 continue
-            dest = _rel_to_repo(op["move_to"], repo) if op["move_to"] else rel
+            source_is_registry = _is_registry_path(
+                raw_path, repo, follow_final_symlink=follows_final
+            )
+            dest_is_registry = _is_registry_path(
+                raw_dest, repo, follow_final_symlink=follows_final
+            )
 
             if op["op"] == "delete":
-                if rel == REGISTRY_REL:
+                if source_is_registry:
                     return _REGISTRY_REMOVE_MSG
                 continue
 
-            if rel == REGISTRY_REL or dest == REGISTRY_REL:
-                if op["op"] == "update" and dest != REGISTRY_REL:
+            if source_is_registry or dest_is_registry:
+                if op["op"] == "update" and source_is_registry and not dest_is_registry:
                     return _REGISTRY_REMOVE_MSG  # Move to 把注册表移走 = 变相删除
                 if op["op"] == "add":
                     prospective = _added_text(op)
@@ -896,23 +1526,24 @@ def pretooluse_reason(tool_name: str, tool_input: dict, repo_root) -> str | None
                     return reason
                 continue
 
-            kind = doc_kind(rel) or (doc_kind(dest) if dest else None)
-            if not kind:
+            managed_doc = source_managed or dest_managed
+            if not managed_doc:
                 continue
+            managed_rel, kind = managed_doc
             if op["op"] == "add":
                 prospective = _added_text(op)
             else:
-                current = _read_rel(repo, rel)
+                current = _read_rel(repo, managed_rel)
                 if current is None:
                     continue  # 文件不存在：apply_patch 本身会失败，无需拦
                 prospective = _reconstruct_update(current, op["lines"])
                 if prospective is None:
                     return (
-                        f"doc-lifecycle: 无法可靠重建对 {rel} 的 apply_patch Update 结果"
+                        f"doc-lifecycle: 无法可靠重建对 {managed_rel} 的 apply_patch Update 结果"
                         f"（hunk 上下文与当前文件对不上/语法不明）——保守拦截，"
                         f"请改用 Edit 工具或拆成更小的 patch。{_ESCAPE_HINT}"
                     )
-            reason = _doc_write_reason(rel, kind, prospective, prospective, repo)
+            reason = _doc_write_reason(managed_rel, kind, prospective, prospective, repo)
             if reason:
                 return reason
     return None
@@ -1222,11 +1853,229 @@ def self_test() -> int:
         f"git -C . rm {REGISTRY_REL}",
         f"git --literal-pathspecs rm {REGISTRY_REL}",
         f"command rm {REGISTRY_REL}",
+        f"builtin command rm {REGISTRY_REL}",
         f"env rm {REGISTRY_REL}",
+        "rm memory/../memory/doc-lifecycle.yaml",
+        "cd memory && rm doc-lifecycle.yaml",
+        "(cd memory && rm doc-lifecycle.yaml)",
+        "git -C memory rm doc-lifecycle.yaml",
+        "git --work-tree memory rm doc-lifecycle.yaml",
+        "git --work-tree=memory rm doc-lifecycle.yaml",
+        f"nice -n 10 rm {REGISTRY_REL}",
+        f"nice -n10 rm {REGISTRY_REL}",
+        f"nohup rm {REGISTRY_REL}",
+        "(cd /tmp && true); rm memory/doc-lifecycle.yaml",
+        "{ cd memory && rm doc-lifecycle.yaml; }",
+        "cd memory || exit 1; rm doc-lifecycle.yaml",
+        "env --chdir=memory rm doc-lifecycle.yaml",
+        "env -C memory rm doc-lifecycle.yaml",
+        "env -Cmemory rm doc-lifecycle.yaml",
+        "git rm :(top)memory/doc-lifecycle.yaml",
+        "git rm :/memory/doc-lifecycle.yaml",
+        "git rm :(literal)memory/doc-lifecycle.yaml",
+        "git rm -- 'memory/doc-lifecycle.*'",
+        "git rm -- ':(glob)memory/doc-lifecycle.y*'",
+        "rm -rf memory",
+        "mv memory /tmp/memory-away",
+        "git rm -r memory",
+        f"shred {REGISTRY_REL}",
+        "rm memory/doc-lifecycle.y*",
+        "cd memory\nrm doc-lifecycle.yaml",
+        f": > {REGISTRY_REL}",
+        "cd memory && : > doc-lifecycle.yaml",
+        f"cp /dev/null {REGISTRY_REL}",
+        f'env -S "rm {REGISTRY_REL}"',
+        f'env --split-string="rm {REGISTRY_REL}"',
+        f"timeout 5s rm {REGISTRY_REL}",
     ):
         check(
             f"hook 拦 Bash wrapper/global-option 绕过：{wrapped.split()[0:3]}",
             pretooluse_reason("Bash", {"command": wrapped}, root) is not None,
+        )
+    for literal_glob in (
+        "rm 'memory/doc-lifecycle.y*'",
+        r"rm memory/doc-lifecycle.y\*",
+        "cd memory && command rm 'doc-lifecycle.y*'",
+        "nice rm 'memory/doc-lifecycle.y*'",
+    ):
+        check(
+            f"hook 放行 shell-literal glob：{literal_glob}",
+            pretooluse_reason("Bash", {"command": literal_glob}, root) is None,
+        )
+    check(
+        "hook 放行 root nonrecursive rm *（* 不跨 slash）",
+        pretooluse_reason("Bash", {"command": "rm *"}, root) is None,
+    )
+    check(
+        "hook 拦 root recursive rm -rf *（展开含 registry ancestor）",
+        pretooluse_reason("Bash", {"command": "rm -rf *"}, root) is not None,
+    )
+    check(
+        "hook 拦 cwd + wrapper active glob 命中 registry",
+        pretooluse_reason(
+            "Bash", {"command": "cd memory && nice rm doc-lifecycle.y*"}, root
+        ) is not None,
+    )
+    traversal_del = (
+        "*** Begin Patch\n*** Delete File: memory/../memory/doc-lifecycle.yaml\n*** End Patch"
+    )
+    check(
+        "hook 拦 apply_patch 路径归一化绕过",
+        pretooluse_reason("apply_patch", {"command": traversal_del}, root) is not None,
+    )
+    alias_rel = "memory/registry-alias.yaml"
+    (root / alias_rel).symlink_to("doc-lifecycle.yaml")
+    alias_del = f"*** Begin Patch\n*** Delete File: {alias_rel}\n*** End Patch"
+    check(
+        "hook 拦 Write symlink alias 清空注册表",
+        pretooluse_reason(
+            "Write", {"file_path": str(root / alias_rel), "content": "docs: []\n"}, root
+        ) is not None,
+    )
+    check("hook 放行 apply_patch Delete final symlink alias",
+          pretooluse_reason("apply_patch", {"command": alias_del}, root) is None)
+    check("hook 放行 Bash rm final symlink alias",
+          pretooluse_reason("Bash", {"command": f"rm {alias_rel}"}, root) is None)
+    check("hook 放行 Bash mv final symlink alias",
+          pretooluse_reason("Bash", {"command": f"mv {alias_rel} /tmp/alias"}, root) is None)
+    check("hook 拦 Bash truncate final symlink alias",
+          pretooluse_reason("Bash", {"command": f"truncate -s 0 {alias_rel}"}, root) is not None)
+    check("hook 拦 Bash shred final symlink alias",
+          pretooluse_reason("Bash", {"command": f"shred {alias_rel}"}, root) is not None)
+    check("hook 拦重定向覆盖 final symlink alias",
+          pretooluse_reason("Bash", {"command": f": > {alias_rel}"}, root) is not None)
+    check("hook 拦 cp 覆盖 final symlink alias",
+          pretooluse_reason("Bash", {"command": f"cp /dev/null {alias_rel}"}, root) is not None)
+    check("hook 放行 Bash rm -rf final symlink alias",
+          pretooluse_reason("Bash", {"command": f"rm -rf {alias_rel}"}, root) is None)
+    alias_update = (
+        f"*** Begin Patch\n*** Update File: {alias_rel}\n@@\n"
+        "-docs:\n+docs: []\n*** End Patch"
+    )
+    check("hook 拦 apply_patch Update final symlink alias",
+          pretooluse_reason("apply_patch", {"command": alias_update}, root) is not None)
+    check(
+        "hook 拦 Edit final symlink alias",
+        pretooluse_reason(
+            "Edit", {"file_path": str(root / alias_rel), "old_string": "docs:",
+                     "new_string": "docs: []\nlegacy:"}, root
+        ) is not None,
+    )
+    plan_alias_rel = "plan-alias.md"
+    (root / plan_alias_rel).symlink_to("plans/demo.zh.md")
+    check(
+        "hook 拦 Write managed plan final alias 的违规 target content",
+        pretooluse_reason(
+            "Write",
+            {"file_path": plan_alias_rel,
+             "content": "# alias\n\nStatus: approved · 2026-07-13 · synthetic\n"},
+            root,
+        ) is not None,
+    )
+    check(
+        "hook 拦 Edit managed plan final alias 的违规 target content",
+        pretooluse_reason(
+            "Edit",
+            {"file_path": plan_alias_rel, "old_string": "- plans/demo.zh.md",
+             "new_string": "- [ ] TODO"},
+            root,
+        ) is not None,
+    )
+    plan_alias_update = (
+        f"*** Begin Patch\n*** Update File: {plan_alias_rel}\n@@\n"
+        "-- plans/demo.zh.md\n+- [ ] TODO\n*** End Patch"
+    )
+    check(
+        "hook 拦 apply_patch Update managed plan final alias 的违规 target content",
+        pretooluse_reason("apply_patch", {"command": plan_alias_update}, root) is not None,
+    )
+    plan_alias_delete = (
+        f"*** Begin Patch\n*** Delete File: {plan_alias_rel}\n*** End Patch"
+    )
+    check(
+        "hook 放行 apply_patch Delete managed plan final alias",
+        pretooluse_reason("apply_patch", {"command": plan_alias_delete}, root) is None,
+    )
+    dir_alias = root / "memory-alias"
+    dir_alias.symlink_to(root / "memory", target_is_directory=True)
+    check("hook 拦 Bash rm intermediate-dir symlink 下的 registry",
+          pretooluse_reason("Bash", {"command": "rm memory-alias/doc-lifecycle.yaml"}, root)
+          is not None)
+    check(
+        "hook 拦 apply_patch Delete intermediate-dir symlink 下的 registry",
+        pretooluse_reason(
+            "apply_patch",
+            {"command": "*** Begin Patch\n*** Delete File: memory-alias/doc-lifecycle.yaml\n*** End Patch"},
+            root,
+        ) is not None,
+    )
+    outside_same_suffix = "/tmp/not-this-repo/memory/doc-lifecycle.yaml"
+    check(
+        "hook 放行 Write repo 外同 suffix 路径",
+        pretooluse_reason(
+            "Write", {"file_path": outside_same_suffix, "content": "docs: []\n"}, root
+        ) is None,
+    )
+    check(
+        "hook 放行 apply_patch Delete repo 外同 suffix 路径",
+        pretooluse_reason(
+            "apply_patch",
+            {"command": f"*** Begin Patch\n*** Delete File: {outside_same_suffix}\n*** End Patch"},
+            root,
+        ) is None,
+    )
+    for harmless in (
+        f"rm {outside_same_suffix}",
+        "cd /tmp && rm not-this-repo/memory/doc-lifecycle.yaml",
+        "git -C /tmp rm not-this-repo/memory/doc-lifecycle.yaml",
+        "git --work-tree /tmp rm not-this-repo/memory/doc-lifecycle.yaml",
+        "git --work-tree=/tmp rm not-this-repo/memory/doc-lifecycle.yaml",
+        "env --chdir=/tmp rm not-this-repo/memory/doc-lifecycle.yaml",
+        "env -C /tmp rm not-this-repo/memory/doc-lifecycle.yaml",
+        "env -C/tmp rm not-this-repo/memory/doc-lifecycle.yaml",
+        "git rm -- 'memory/not-doc-lifecycle.*'",
+        "git rm -- ':(glob)memory/not-doc-lifecycle.y*'",
+        "rm -rf /tmp/not-this-repo/memory",
+        "mv /tmp/not-this-repo/memory /tmp/memory-away",
+        "rm /tmp/not-this-repo/memory/doc-lifecycle.y*",
+        ": > /tmp/not-this-repo/memory/doc-lifecycle.yaml",
+        "cp /dev/null /tmp/not-this-repo/memory/doc-lifecycle.yaml",
+        f'env -S "echo {REGISTRY_REL}"',
+        f'env --split-string="echo {REGISTRY_REL}"',
+        f"timeout 5s echo {REGISTRY_REL}",
+        f"echo {REGISTRY_REL}",
+        f"nice -n 10 echo {REGISTRY_REL}",
+        f"nice -n10 echo {REGISTRY_REL}",
+        f"nohup cat {REGISTRY_REL}",
+    ):
+        check(
+            f"hook 不误拦 repo 外/只读 control：{harmless.split()[0:4]}",
+            pretooluse_reason("Bash", {"command": harmless}, root) is None,
+        )
+    with tempfile.TemporaryDirectory() as outside_dir:
+        outside_alias = Path(outside_dir) / "registry-alias.yaml"
+        outside_alias.symlink_to(root / REGISTRY_REL)
+        check(
+            "hook 拦 Write repo 外 final symlink alias",
+            pretooluse_reason(
+                "Write", {"file_path": str(outside_alias), "content": "docs: []\n"}, root
+            ) is not None,
+        )
+        check("hook 放行 Bash rm repo 外 final symlink alias",
+              pretooluse_reason("Bash", {"command": f"rm {outside_alias}"}, root) is None)
+        check("hook 拦 Bash shred repo 外 final symlink alias",
+              pretooluse_reason("Bash", {"command": f"shred {outside_alias}"}, root) is not None)
+        outside_del = (
+            f"*** Begin Patch\n*** Delete File: {outside_alias}\n*** End Patch"
+        )
+        check("hook 放行 apply_patch Delete repo 外 final symlink alias",
+              pretooluse_reason("apply_patch", {"command": outside_del}, root) is None)
+    with tempfile.NamedTemporaryFile() as outside_registry:
+        (root / REGISTRY_REL).unlink()
+        (root / REGISTRY_REL).symlink_to(outside_registry.name)
+        check(
+            "registry 即使 symlink 到 repo 外仍按词法路径受保护",
+            pretooluse_reason("apply_patch", {"command": del_patch}, root) is not None,
         )
     check("hook 放行 Bash 只读触碰注册表",
           pretooluse_reason(
@@ -1296,6 +2145,231 @@ def self_test() -> int:
     errs, warns = validate_repo(root)
     check("无四类文档时注册表缺失不报", errs == [] and warns == [])
     td.cleanup()
+
+    # 19. fresh review MAJOR-1：受管文档存在时，空文件或 docs: [] 不得静默关闭注册表。
+    for label, empty_registry in (("空文件", ""), ("docs: []", "docs: []\n")):
+        td, root = fresh({"plans/demo.zh.md": _OK_PLAN, REGISTRY_REL: empty_registry})
+        errs, _ = validate_repo(root)
+        check(f"{label} 注册表被 validator 报错", any("不能为空" in e for e in errs))
+        check(
+            f"hook 拦 Write {label} 注册表",
+            pretooluse_reason(
+                "Write", {"file_path": str(root / REGISTRY_REL), "content": empty_registry}, root
+            ) is not None,
+        )
+        td.cleanup()
+
+    # 20. fresh review MAJOR-2：状态锚点必须完整，日期真实且 ref 非占位。
+    bad_anchors = (
+        ("仅状态", "Status: approved", "格式非法"),
+        ("draft 仅状态", "Status: draft", "格式非法"),
+        ("非法日期", "Status: approved · 2026-02-30 · human 批准", "日期非法"),
+        ("占位 ref", "Status: approved · 2026-07-12 · TODO", "ref"),
+        ("占位 ref 前缀", "Status: approved · 2026-07-12 · TODO: replace", "ref"),
+        ("占位 ref 方括号", "Status: approved · 2026-07-12 · [TODO]", "ref"),
+        ("占位 ref N/A 前缀", "Status: approved · 2026-07-12 · N/A pending", "ref"),
+        ("占位 ref 列表前缀", "Status: approved · 2026-07-12 · - TODO", "ref"),
+    )
+    for label, bad_anchor, needle in bad_anchors:
+        malformed = _OK_PLAN.replace(
+            "Status: approved · 2026-07-12 · human 批准（demo）", bad_anchor
+        )
+        td, root = fresh({"plans/demo.zh.md": malformed, REGISTRY_REL: _OK_REGISTRY})
+        errs, _ = validate_repo(root)
+        check(f"{label}锚点被 validator 报错", any(needle in e for e in errs))
+        check(
+            f"hook 拦 Write {label}锚点",
+            pretooluse_reason(
+                "Write", {"file_path": str(root / "plans/demo.zh.md"), "content": malformed}, root
+            ) is not None,
+        )
+        td.cleanup()
+
+    prose_ref_plan = _OK_PLAN.replace(
+        "human 批准（demo）", "review completed after checking TODO handling"
+    )
+    td, root = fresh({"plans/demo.zh.md": prose_ref_plan, REGISTRY_REL: _OK_REGISTRY})
+    errs, _ = validate_repo(root)
+    check("ref prose 中间含 TODO 不误判", errs == [])
+    check(
+        "hook 放行 ref prose 中间含 TODO",
+        pretooluse_reason(
+            "Write", {"file_path": str(root / "plans/demo.zh.md"), "content": prose_ref_plan}, root
+        ) is None,
+    )
+    td.cleanup()
+    for prose in (
+        "None of the risks remain; review approved",
+        "TODO detector regression verified",
+        "TBD detector regression verified",
+    ):
+        prose_plan = _OK_PLAN.replace("human 批准（demo）", prose)
+        td, root = fresh({"plans/demo.zh.md": prose_plan, REGISTRY_REL: _OK_REGISTRY})
+        errs, _ = validate_repo(root)
+        check(f"合法 evidence prose 开头不误判：{prose.split()[0]}", errs == [])
+        td.cleanup()
+
+    for association in ("todo/fix-parser", "none-feature", "null-safety"):
+        check(
+            f"合法 association 名不误判：{association}",
+            not _is_association_missing_or_placeholder(association),
+        )
+
+    # 21. fresh review MAJOR-3a：进阶态 approval 的常见占位值一律拒绝。
+    scalar_placeholders = (
+        "TODO", "TBD", "N/A", "-", "TODO: replace", "[TODO]", "N/A pending", "- TODO",
+        "TBD pending",
+    )
+    for placeholder in scalar_placeholders:
+        placeholder_reg = _OK_REGISTRY.replace(
+            'approval: "human 批准（demo）"', f'approval: "{placeholder}"'
+        )
+        td, root = fresh({"plans/demo.zh.md": _OK_PLAN, REGISTRY_REL: placeholder_reg})
+        errs, _ = validate_repo(root)
+        check(
+            f"approval={placeholder} 被 validator 报错",
+            any("approval 证据缺失/占位" in e for e in errs),
+        )
+        check(
+            f"hook 拦 approval={placeholder} 注册表写入",
+            pretooluse_reason(
+                "Write", {"file_path": str(root / REGISTRY_REL), "content": placeholder_reg}, root
+            ) is not None,
+        )
+        td.cleanup()
+
+    typed_yaml_values = (
+        ("list", "[]"), ("map", "{}"), ("bool", "false"), ("int", "0"),
+        ("yes", "yes"), ("no", "no"), ("on", "on"), ("off", "off"),
+        ("float", "1.0"), ("hex", "0x10"), ("date", "2026-07-13"), ("inf", ".inf"),
+        ("binary", "0b1010"), ("datetime", "2026-07-13T12:34:56Z"),
+        ("sexagesimal", "12:34:56"),
+        ("underscore-int", "1_000"), ("null-inline-comment", "null # pending"),
+    )
+    for label, yaml_value in typed_yaml_values:
+        non_scalar_reg = _OK_REGISTRY.replace(
+            'approval: "human 批准（demo）"', f"approval: {yaml_value}"
+        )
+        td, root = fresh({"plans/demo.zh.md": _OK_PLAN, REGISTRY_REL: non_scalar_reg})
+        errs, _ = validate_repo(root)
+        check(
+            f"approval 非 string {label} 被 validator 报错",
+            any("approval 证据缺失/占位" in e for e in errs),
+        )
+        check(
+            f"hook 拦 approval 非 string {label}",
+            pretooluse_reason(
+                "Write", {"file_path": str(root / REGISTRY_REL), "content": non_scalar_reg}, root
+            ) is not None,
+        )
+        restricted_entries, restricted_errors = _parse_restricted(non_scalar_reg)
+        check(
+            f"受限 parser 保留 approval {label} 的非 string 类型",
+            restricted_errors == []
+            and bool(restricted_entries)
+            and not isinstance(restricted_entries[0].get("approval"), str),
+        )
+        td.cleanup()
+
+    for quoted_value in (
+        "yes", "no", "on", "off", "1.0", "0x10", "2026-07-13", ".inf",
+        "0b1010", "2026-07-13T12:34:56Z", "12:34:56",
+        "1_000",
+    ):
+        quoted_reg = _OK_REGISTRY.replace(
+            'approval: "human 批准（demo）"', f'approval: "{quoted_value}"'
+        )
+        td, root = fresh({"plans/demo.zh.md": _OK_PLAN, REGISTRY_REL: quoted_reg})
+        entries, perr = _parse_restricted(quoted_reg)
+        errs, _ = validate_repo(root)
+        check(
+            f"quoted approval={quoted_value} 保持 string 并通过",
+            perr == [] and isinstance(entries[0].get("approval"), str) and errs == [],
+        )
+        td.cleanup()
+
+    exponent_string_reg = _OK_REGISTRY.replace(
+        'approval: "human 批准（demo）"', "approval: 1.2e3"
+    )
+    td, root = fresh({"plans/demo.zh.md": _OK_PLAN, REGISTRY_REL: exponent_string_reg})
+    entries, perr = _parse_restricted(exponent_string_reg)
+    errs, _ = validate_repo(root)
+    check(
+        "unquoted approval=1.2e3 与 PyYAML 一致保持 string",
+        perr == [] and entries[0].get("approval") == "1.2e3" and errs == [],
+    )
+    td.cleanup()
+
+    quoted_hash_reg = _OK_REGISTRY.replace(
+        'approval: "human 批准（demo）"', 'approval: "commit #123 verified"'
+    )
+    td, root = fresh({"plans/demo.zh.md": _OK_PLAN, REGISTRY_REL: quoted_hash_reg})
+    entries, perr = _parse_restricted(quoted_hash_reg)
+    errs, _ = validate_repo(root)
+    check(
+        "quoted approval 内 # 保持正文而非 inline comment",
+        perr == [] and entries[0].get("approval") == "commit #123 verified" and errs == [],
+    )
+    td.cleanup()
+
+    prose_approval_reg = _OK_REGISTRY.replace(
+        'approval: "human 批准（demo）"',
+        'approval: "review completed after checking TODO handling"',
+    )
+    td, root = fresh({"plans/demo.zh.md": _OK_PLAN, REGISTRY_REL: prose_approval_reg})
+    errs, _ = validate_repo(root)
+    check("approval prose 中间含 TODO 不误判", errs == [])
+    check(
+        "hook 放行 approval prose 中间含 TODO",
+        pretooluse_reason(
+            "Write", {"file_path": str(root / REGISTRY_REL), "content": prose_approval_reg}, root
+        ) is None,
+    )
+    td.cleanup()
+
+    # 22. fresh review MAJOR-3b：剥掉列表/checkbox 前缀后，段落仅余占位值仍视为空。
+    placeholder_sections = (
+        "- TODO", "* TBD", "+ N/A", "-", "- [ ] TODO", "1. TBD",
+        "- - TODO", "- [ ] [TODO]", "```\n```", "```text\n```", "``", "<code></code>",
+        "```text\nTODO\n```", "### TODO", "---",
+        "> TODO", "> [ ] TODO", "[TODO](#replace)",
+        "| |\n| --- |",
+    )
+    for placeholder_line in placeholder_sections:
+        placeholder_plan = _OK_PLAN.replace("- plans/demo.zh.md", placeholder_line)
+        td, root = fresh({"plans/demo.zh.md": placeholder_plan, REGISTRY_REL: _OK_REGISTRY})
+        errs, _ = validate_repo(root)
+        check(
+            f"Allowed paths={placeholder_line!r} 被 validator 报错",
+            any("Allowed paths" in e for e in errs),
+        )
+        check(
+            f"hook 拦 Allowed paths={placeholder_line!r}",
+            pretooluse_reason(
+                "Write", {"file_path": str(root / "plans/demo.zh.md"), "content": placeholder_plan}, root
+            ) is not None,
+        )
+        td.cleanup()
+
+    for real_line in (
+        "- prose documents how the TODO detector was verified",
+        "```bash\npython scripts/check-doc-lifecycle.py\n```",
+        "- `python scripts/check-doc-lifecycle.py`",
+        "> approved scope path",
+        "[implementation](#section)",
+        "| Path |\n| --- |\n| plans/demo.zh.md |",
+    ):
+        real_plan = _OK_PLAN.replace("- plans/demo.zh.md", real_line)
+        td, root = fresh({"plans/demo.zh.md": real_plan, REGISTRY_REL: _OK_REGISTRY})
+        errs, _ = validate_repo(root)
+        check(f"合法 prose/code section 不误判：{real_line.splitlines()[0]!r}", errs == [])
+        check(
+            f"hook 放行合法 prose/code section：{real_line.splitlines()[0]!r}",
+            pretooluse_reason(
+                "Write", {"file_path": str(root / "plans/demo.zh.md"), "content": real_plan}, root
+            ) is None,
+        )
+        td.cleanup()
 
     n = len(failures)
     print(f"[check-doc-lifecycle] self-test {'OK' if not n else 'FAIL'} — {n} failure(s)")

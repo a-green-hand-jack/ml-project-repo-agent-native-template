@@ -47,12 +47,9 @@ PROTECTED_BRANCHES = {"main", "master"}
 PUSH_ESCAPE_ENVS = ("CLAUDE_ALLOW_PUSH_MAIN", "CODEX_ALLOW_PUSH_MAIN")
 
 # doc-lifecycle 机械拦截（issue #13）：判定本体在 scripts/check-doc-lifecycle.py（runtime-neutral），
-# 这里只做薄接线 + 廉价预过滤。human 显式绕过：DOC_LIFECYCLE_SKIP=1（判定层内识别）。
+# 这里只做薄接线。路径身份必须交给判定本体解析；字面量预过滤会漏掉 cwd/symlink alias。
+# human 显式绕过：DOC_LIFECYCLE_SKIP=1（判定层内识别）。
 DOC_LIFECYCLE_SCRIPT = REPO_ROOT / "scripts" / "check-doc-lifecycle.py"
-DOC_LIFECYCLE_HINTS = (
-    "plans/", "human/briefs/", "human/reviews/", "human/decisions/",
-    "memory/doc-lifecycle.yaml",
-)
 
 # rm -r 允许递归删除的安全目标（缓存/构建/临时，可再生）。
 SAFE_RM_BASENAMES = {
@@ -286,8 +283,6 @@ def _doc_lifecycle_reason(tool: str, tool_input: dict) -> str | None:
     """doc-lifecycle 完整性拦截（见 plans/20260712-plan-lifecycle-state.zh.md 已决策 2/4）。
     只拦「状态跃迁到进阶态但状态/引用完整性不成立」这类可判定事实；判定层任何异常
     保守放行——本函数绝不能反噬上面的安全地板逻辑。"""
-    if not any(h in str(tool_input) for h in DOC_LIFECYCLE_HINTS):
-        return None  # 廉价预过滤：与四类文档/注册表无关的写入不加载判定模块
     if not DOC_LIFECYCLE_SCRIPT.is_file():
         return None
     try:
