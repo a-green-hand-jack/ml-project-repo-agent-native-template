@@ -80,8 +80,8 @@ prefix_rule(
 )
 
 # Wrapper 变体加宽（issue #16 Codex 初审 BLOCKER-1）：静态前缀只能覆盖有限包装形态
-# （env/nohup/nice/setsid/stdbuf 直接包一层、python -u）；带参数的 wrapper（timeout 60、
-# nice -n 10）与更深组合由共享 pre_tool_guard 地板（launch_gate.py 的 wrapper 剥离）兜底。
+# （env/nohup/nice/setsid/stdbuf 直接包一层、python -u）；共享 pre_tool_guard 地板会解析
+# 带参数的 wrapper（timeout 60、nice -n 10 / -n10）与更深组合。
 prefix_rule(
     pattern = [["env", "nohup", "nice", "setsid", "stdbuf"], ["sbatch", "scancel", "srun", "runai"]],
     decision = "prompt",
@@ -92,6 +92,12 @@ prefix_rule(
     pattern = ["timeout"],
     decision = "prompt",
     justification = "timeout options can hide a scheduler command; the shared hook parses option operands and remains the non-overridable floor.",
+)
+
+prefix_rule(
+    pattern = ["nice"],
+    decision = "prompt",
+    justification = "nice accepts attached option operands such as -n10 that can hide a scheduler command; the shared hook parses the wrapped command and remains the non-overridable floor.",
 )
 
 prefix_rule(
@@ -173,6 +179,15 @@ prefix_rule(
     pattern = [["python", "python3"], "-c"],
     decision = "prompt",
     justification = "Dynamic Python evaluation can create compute side effects and needs human review.",
+)
+
+# Execpolicy prefix rules match literal argv tokens and cannot express `-c<arbitrary-command>`.
+# Prompt all direct CPython CLI uses at this advisory layer so attached command strings cannot miss
+# the prompt. The shared hook performs the precise check and continues to allow normal Python scripts.
+prefix_rule(
+    pattern = [["python", "python3"]],
+    decision = "prompt",
+    justification = "Codex literal-prefix policy cannot selectively match arbitrary attached Python -c command tokens; the shared hook distinguishes dynamic -c from safe normal Python invocations.",
 )
 
 prefix_rule(

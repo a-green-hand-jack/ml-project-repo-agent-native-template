@@ -172,6 +172,7 @@ def _strip_wrapper_once(tokens: list[str]) -> list[str]:
         if i < len(tokens) and tokens[i] in ("-n", "--adjustment"):
             i += 2
         elif i < len(tokens) and (tokens[i].startswith("--adjustment=")
+                                  or re.match(r"^-n[+-]?[0-9]+$", tokens[i])
                                   or re.match(r"^-[0-9]+$", tokens[i])):
             i += 1
         return tokens[i:]
@@ -278,7 +279,10 @@ def _dynamic_eval_surface(tokens: list[str]) -> str | None:
             for token in rest[1:]
         ):
             return f"{base} -c/-lc"
-        if _INTERPRETER.match(base) and "-c" in rest[1:]:
+        if _INTERPRETER.match(base) and any(
+            token == "-c" or token.startswith("-c") and len(token) > 2
+            for token in rest[1:]
+        ):
             return f"{base} -c"
     return None
 
@@ -374,6 +378,8 @@ def _self_test() -> int:
         "timeout --signal TERM 60 sbatch train.sh",
         "env -u FOO sbatch train.sh",
         "nice -n 10 scancel 12345",
+        "nice -n10 sbatch train.sh",
+        "nice -n-10 srun --pty bash",
         "stdbuf -oL srun --pty bash",
         "setsid runai submit job1 -i image",
         "nohup nice -n 5 sbatch train.sh",  # 嵌套 wrapper
@@ -392,6 +398,8 @@ def _self_test() -> int:
         'bash -c "printf safe"',  # 动态执行面本身 fail-closed，不只检查表面 payload
         'env -S "printf safe"',
         'python -c "print(1)"',
+        "python -c'print(1)'",
+        "env python3 -cprint(1)",
         'python3 -I -c "import subprocess; subprocess.run([\"sbatch\", \"x\"])"',
         "python lab/infra/launch/./fake_job.py launch --run-id r1 --workdir /tmp/r1",
         "python lab/infra/launch/../launch/fake_job.py restart --run-id r1 --workdir /tmp/r1",
@@ -413,6 +421,8 @@ def _self_test() -> int:
         "git status",
         "squeue --job 1",
         "timeout 60 pytest -q",  # wrapper + 非 gated 命令不拦
+        "nice -n10 pytest -q",  # attached adjustment + 非 gated 命令仍放行
+        "python -S scripts/validate-governance.py",  # 非 -c 解释器选项不误拦
     ]
     failed = 0
     for c in cases_block:

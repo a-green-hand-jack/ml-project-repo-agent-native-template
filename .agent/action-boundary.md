@@ -14,7 +14,8 @@
 - agent 内启动/kill/restart 训练或作业：launch hook 永久拒绝；调用者自设的
   `CLAUDE_ALLOW_LAUNCH` / `CODEX_ALLOW_LAUNCH` 不构成批准。human 如需执行，必须在
   agent hook 外亲自运行已审阅命令。
-- 调用者可编程的动态命令面：shell `-c/-lc`、`env -S/--split-string`、`python -c`；
+- 调用者可编程的动态命令面：shell `-c/-lc`、`env -S/--split-string`、`python -c`（含
+  attached argv token `-c<command>`）；
   它们可隐藏任意 scheduler/worker 启动，hook 无法把字符串内容当通用 sandbox 安全执行。
 - 派发无边界的 `general-purpose` 大 agent。
 

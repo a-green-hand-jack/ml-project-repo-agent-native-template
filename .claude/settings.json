@@ -65,6 +65,7 @@
       "Bash(nohup scancel *)",
       "Bash(nohup srun *)",
       "Bash(nohup runai *)",
+      "Bash(nice *)",
       "Bash(timeout *)",
       "Bash(python -u lab/infra/launch/fake_job.py *)",
       "Bash(python3 -u lab/infra/launch/fake_job.py *)",
@@ -107,7 +108,9 @@
       "Bash(nohup zsh *)",
       "Bash(nohup dash *)",
       "Bash(python -c *)",
+      "Bash(python -c*)",
       "Bash(python3 -c *)",
+      "Bash(python3 -c*)",
       "Bash(gh pr create *)",
       "Bash(gh pr merge *)"
     ],

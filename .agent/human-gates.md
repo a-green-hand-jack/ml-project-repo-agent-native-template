@@ -29,14 +29,18 @@
   的命令，匹配 wrapper-robust（`env python -u …`、`nohup sbatch` 等包装绕不过；即使
   bypass/自主窗口下仍生效）。相对路径中的 `.`/`..`、`python -m` 与私有 `_worker`
   入口也覆盖；带 operand 的 `timeout --signal TERM 60`、`env -u FOO` 不会藏住真实命令。
-  `env -S`、`env --split-string`、`bash|sh|zsh|dash -c/-lc`、`python -c` 属调用者可编程的
-  动态执行面，在 agent hook 内整体 fail-closed。该地板只覆盖 registry 入口和已知别名，
+  `env -S`、`env --split-string`、`bash|sh|zsh|dash -c/-lc`、`python -c`（含
+  `-c<command>` attached argv token）属调用者可编程的动态执行面，在 agent hook 内整体
+  fail-closed。`nice -n10 <command>` 等 GNU attached wrapper operand 也会先被剥离再检查。
+  该地板只覆盖 registry 入口和已知别名，
   不宣称是通用进程 sandbox。
   `CLAUDE_ALLOW_LAUNCH=1` / `CODEX_ALLOW_LAUNCH=1` 是调用者可写输入，**永不放行**；
   human 必须在 agent hook 外亲自运行审阅过的命令。
 - permission 层（额外提示，不是 override）：`.claude/settings.json` 的 `ask` 与
   `.codex/rules/default.rules` 的 `prompt`，与 registry 手工双写、同 commit 对齐。静态
-  模式覆盖 canonical 直写形态 + 有限 wrapper / shell-eval 变体；无论 human 是否在
+  模式覆盖 canonical 直写形态 + 有限 wrapper / shell-eval 变体；Codex execpolicy 只能做
+  literal argv prefix，因而对 direct CPython CLI 采用 broad prompt，精确区分仍由共享 hook
+  完成；无论 human 是否在
   permission prompt 点确认，agent 命令仍受 hook 地板拒绝。
 - 新增任何 launch 入口（含薄 wrapper）必须同 commit 登记进 registry 并补两侧规则，
   否则等于绕过门禁。

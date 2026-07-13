@@ -15,7 +15,7 @@
 | `registry.yaml` | launch adapter 描述（local-fake / slurm / runai）+ 门禁命令前缀的单一真源 |
 | `expctl.py` | 控制面 CLI：`detect`（adapter 可用性/降级）/ `plan`（命令草案，不执行）/ `watch`（一次性有界快照检查，只读）/ `validate-recovery`（只读校验 ledger 提案）；`apply-recovery` 因缺可信 provenance/原子 consumer 始终 fail-closed |
 | `fake_job.py` | local-fake 后端：仅允许字面 `/tmp/.../<run-id>` workdir；status/受信 worker argv 绑定同一 run，control lock 串行控制动作，pidfd 固定 signal 目标；支持 NaN/stall fixture |
-| `launch_gate.py` | 门禁判定模块：被共享 `pre_tool_guard.py` hook 加载；registered launch 命中永拒，路径别名/`python -m`/`_worker` 同样覆盖，env split/shell eval/`python -c` 动态面整体 fail-closed，caller-set env 不放行 |
+| `launch_gate.py` | 门禁判定模块：被共享 `pre_tool_guard.py` hook 加载；registered launch 命中永拒，路径别名/`python -m`/`_worker` 同样覆盖，env split/shell eval/`python -c`（含 `-c<command>` attached token）动态面整体 fail-closed，`nice -n10` 等 attached wrapper operand 会被解析，caller-set env 不放行 |
 
 门禁不是通用进程 sandbox：它只对 registry 已登记的启动入口、已知 wrapper/路径/模块别名
 和无法静态证明安全的动态执行面 fail-closed；普通只读命令、测试与
