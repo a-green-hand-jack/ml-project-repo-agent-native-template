@@ -17,9 +17,9 @@ exit 0 = 放行。解析失败保守放行。无第三方依赖。push 到受保
 `CLAUDE_ALLOW_PUSH_MAIN=1` 或 `CODEX_ALLOW_PUSH_MAIN=1`（见 `.agent/autonomous-window.md`）。
 
 另挂 doc-lifecycle 机械拦截（issue #13，安全地板之外的完整性层）：对 brief/plan/review/decision
-四类文档与 memory/doc-lifecycle.yaml 的写入，调 scripts/check-doc-lifecycle.py 的
-pretooluse_reason() 拦「状态跃迁到进阶态但完整性不成立」的可判定事实；判定层异常保守放行，
-human 显式绕过 DOC_LIFECYCLE_SKIP=1。
+四类文档与 memory/doc-lifecycle.yaml 的写入/删除（Edit|Write|apply_patch|Bash），调
+scripts/check-doc-lifecycle.py 的 pretooluse_reason() 拦「状态跃迁到进阶态但完整性不成立」
+「删除/移走注册表」等可判定事实；判定层自身异常保守放行，human 显式绕过 DOC_LIFECYCLE_SKIP=1。
 """
 import json
 import os
@@ -317,6 +317,9 @@ def main() -> None:
 
     if tool == "Bash":
         _check_bash(tool_input.get("command", "") or "")
+        reason = _doc_lifecycle_reason(tool, tool_input)  # 拦 rm/mv 等删除/移走注册表
+        if reason:
+            _block(reason)
     elif tool in ("Edit", "Write", "NotebookEdit"):
         path = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
         if path and _is_protected_file(path):

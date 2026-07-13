@@ -29,7 +29,8 @@ maintenance: |
 ## 只有 README 的 leaf 层
 
 `models/`、`runs/`、`traces/human-cc/`、`recipes/claude-code/`、`evals/cc-workflow/`、
-`evals/adoption/`、`reports/cc-workflow/`、`docs/{reference,research-narrative,audits}/`
+`evals/adoption/`、`evals/doc-lifecycle/`（issue #13 冒烟探针 + runtime 冒烟清单）、
+`reports/cc-workflow/`、`docs/{reference,research-narrative,audits}/`
 为 leaf/scaffold，只有 `README.md` 或单脚本 smoke，无独立 anatomy（`docs/` 三个子目录的用途见
 `human/decisions/20260709-lab-docs-reference-and-external-vendor-placement.md`；`reference/`、
 `research-narrative/` 目前无真实内容，暂未物理创建，仅 `audits/` 已落地）。

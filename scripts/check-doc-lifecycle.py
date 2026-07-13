@@ -18,6 +18,10 @@
 6. approved/implementing 态的「## Human 批注区」不得残留 `[?]` / `[改]` 未决批注
    （格式约定 + 模式匹配，不做语义分类；防止未收敛被误判为已收敛）。
 7. 文档状态锚点必须与注册表一致（矛盾即错）；四类文档（导航四件套除外）必须登记。
+8. kind 必须与路径类别一致（plans/ 只能登记 kind=plan，human/decisions/ 只能 kind=decision，
+   以此类推；防止谎报 kind 绕过 plan 必填段校验）。路径不在四类目录内才允许自由声明 kind（告警）。
+9. 存在四类受管文档但注册表缺失 → error（非 strict 也 fail）：注册表一旦建立就是治理面，
+   缺失/被删即异常。
 
 复用 check_release_gates / check_regression_matrix 的「占位符容忍 + 非默认态需真实证据」范式：
 draft/in-review 天然通过，状态进阶才强制证据。PyYAML 可选：缺依赖时用受限解析器
@@ -25,7 +29,10 @@ draft/in-review 天然通过，状态进阶才强制证据。PyYAML 可选：缺
 
 同时暴露 `pretooluse_reason(tool_name, tool_input, repo_root)` 给
 `.claude/hooks/pre_tool_guard.py` 做机械拦截（Claude/Codex 共用同一物理 hook）：
-在编辑动作阶段拦「状态跃迁到进阶态但完整性不成立」的写入。hook 侧任何解析失败保守放行；
+在编辑动作阶段拦「状态跃迁到进阶态但完整性不成立」的写入。hook 侧解析失败原则上保守放行，
+两个例外**保守拦截**（宁可要求换工具，不能静默放行）：
+- 删除/移走 `memory/doc-lifecycle.yaml`（apply_patch Delete/Move、Bash rm/mv 等）——治理面不可拆除；
+- apply_patch Update 触碰受管文档/注册表但 hunk 无法可靠重建 patch 后全文——提示改用 Edit 或分两步。
 human 显式绕过：`DOC_LIFECYCLE_SKIP=1`（validator 仍会事后校验）。
 
 用法：
@@ -37,6 +44,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import sys
 from pathlib import Path
 
@@ -257,6 +265,14 @@ def registry_errors(entries: list[dict], repo: Path, *, check_paths: bool = True
             errs.append(f"{eid}: 缺 path")
         elif check_paths and not (repo / str(path)).is_file():
             errs.append(f"{eid}: path 指向不存在的文件：{path}（悬空引用）")
+        # kind 与路径类别一致性：四类目录内的文档不允许谎报 kind（否则可绕过 plan 必填段校验）。
+        if path and kind in KINDS:
+            expected = doc_kind(str(path))
+            if expected is not None and expected != kind:
+                errs.append(
+                    f"{eid}: kind={kind} 与路径类别不符：{path} 属 {expected} 目录，"
+                    f"必须登记为 kind={expected}（防止谎报 kind 绕过必填段校验）"
+                )
         if status in APPROVAL_REQUIRED and (not e.get("approval") or _is_placeholder(str(e.get("approval")))):
             errs.append(f"{eid}: status={status} 但 approval 证据缺失/占位（human gate 引用必填）")
         for field in LIST_FIELDS:
@@ -306,6 +322,19 @@ def doc_errors_for_entry(e: dict, repo: Path) -> list[str]:
     return errs
 
 
+def kind_path_warnings(entries: list[dict]) -> list[str]:
+    """路径不在四类目录内的条目：kind 为自由声明，允许但告警（校验按声明 kind 执行）。"""
+    warns = []
+    for e in entries:
+        kind, path = e.get("kind"), e.get("path")
+        if path and kind in KINDS and doc_kind(str(path)) is None:
+            warns.append(
+                f"{e.get('id')}: path 不在四类目录（{'、'.join(DOC_DIRS)}）内：{path}——"
+                f"kind={kind} 为自由声明，必填段校验按声明 kind 执行"
+            )
+    return warns
+
+
 def coverage_errors(entries: list[dict], repo: Path) -> list[str]:
     registered = {str(e.get("path")) for e in entries}
     return [
@@ -316,15 +345,16 @@ def coverage_errors(entries: list[dict], repo: Path) -> list[str]:
 
 
 def validate_repo(repo: Path):
-    """返回 (errors, warnings)。注册表缺失时只告警（模板下游未启用不视为硬错误）。"""
+    """返回 (errors, warnings)。存在四类受管文档但注册表缺失 → error（非 strict 也 fail）：
+    注册表一旦建立就是治理面，缺失/被删即异常（删除注册表不能静默关闭治理）。"""
     errors: list[str] = []
     warnings: list[str] = []
     reg = repo / REGISTRY_REL
     if not reg.is_file():
         if scan_docs(repo):
-            warnings.append(
-                f"存在四类文档但 {REGISTRY_REL} 不存在——doc-lifecycle 未启用；"
-                "启用方法见 plans/ANATOMY.md"
+            errors.append(
+                f"存在四类受管文档但 {REGISTRY_REL} 缺失——注册表是治理面，缺失/被删即异常；"
+                "恢复注册表并登记全部四类文档（schema 见 plans/ANATOMY.md）"
             )
         return errors, warnings
     entries, perr = parse_registry_text(reg.read_text(encoding="utf-8", errors="replace"))
@@ -332,6 +362,7 @@ def validate_repo(repo: Path):
     if perr:
         return errors, warnings
     errors += registry_errors(entries, repo)
+    warnings += kind_path_warnings(entries)
     for e in entries:
         errors += doc_errors_for_entry(e, repo)
     errors += coverage_errors(entries, repo)
@@ -429,27 +460,149 @@ def _registry_write_reason(content: str, repo: Path) -> str | None:
 
 
 def _patch_ops(patch_text: str):
+    """解析 apply_patch 文本为操作列表 dict(op, path, move_to, lines)。
+    lines 为该操作块内的原始行（Add 全为 `+` 前缀；Update 为 hunk 行，含 `@@`/上下文/±行）。"""
     ops: list[dict] = []
     cur: dict | None = None
     for line in patch_text.splitlines():
         if line.startswith("*** Add File: "):
-            cur = {"op": "add", "path": line[len("*** Add File: "):].strip(), "added": []}
+            cur = {"op": "add", "path": line[len("*** Add File: "):].strip(),
+                   "move_to": None, "lines": []}
             ops.append(cur)
         elif line.startswith("*** Update File: "):
-            cur = {"op": "update", "path": line[len("*** Update File: "):].strip(), "added": []}
+            cur = {"op": "update", "path": line[len("*** Update File: "):].strip(),
+                   "move_to": None, "lines": []}
             ops.append(cur)
         elif line.startswith("*** Delete File: "):
+            ops.append({"op": "delete", "path": line[len("*** Delete File: "):].strip(),
+                        "move_to": None, "lines": []})
             cur = None
+        elif line.startswith("*** Move to: ") and cur is not None and cur["op"] == "update":
+            cur["move_to"] = line[len("*** Move to: "):].strip()
+        elif line.startswith("*** End of File"):
+            continue  # hunk 延伸到文件尾的标记，不影响行归属
         elif line.startswith("***"):
-            cur = None
-        elif cur is not None and line.startswith("+"):
-            cur["added"].append(line[1:])
-    return [(c["op"], c["path"], "\n".join(c["added"])) for c in ops]
+            cur = None  # Begin/End Patch 等边界
+        elif cur is not None:
+            cur["lines"].append(line)
+    return ops
+
+
+def _added_text(op: dict) -> str:
+    return "\n".join(ln[1:] for ln in op["lines"] if ln.startswith("+"))
+
+
+def _find_seq(haystack: list[str], needle: list[str], start: int) -> int:
+    for i in range(start, len(haystack) - len(needle) + 1):
+        if haystack[i:i + len(needle)] == needle:
+            return i
+    return -1
+
+
+def _reconstruct_update(current: str, hunk_lines: list[str]) -> str | None:
+    """按 apply_patch Update 语义把 hunk 应用到 current，返回 patch 后全文。
+    无法可靠重建（上下文对不上/行前缀不明/纯新增无定位）返回 None——调用方**保守拦截**，
+    不再用「旧全文+新增行」联合语料（那会先读到旧状态，静默放行状态跃迁，见初审 MAJOR-1）。"""
+    orig = current.split("\n")
+    hunks: list[list[str]] = [[]]
+    for ln in hunk_lines:
+        if ln.startswith("@@"):
+            if hunks[-1]:
+                hunks.append([])
+        else:
+            hunks[-1].append(ln)
+    out: list[str] = []
+    pos = 0
+    for hunk in hunks:
+        if not hunk:
+            continue
+        old_seq: list[str] = []
+        new_seq: list[str] = []
+        for ln in hunk:
+            if ln.startswith("+"):
+                new_seq.append(ln[1:])
+            elif ln.startswith("-"):
+                old_seq.append(ln[1:])
+            elif ln.startswith(" "):
+                old_seq.append(ln[1:])
+                new_seq.append(ln[1:])
+            elif ln == "":
+                old_seq.append("")
+                new_seq.append("")
+            else:
+                return None  # 行前缀不属于 apply_patch 语法，语义不明
+        if not old_seq:
+            return None  # 纯新增且无上下文行，无法可靠定位
+        idx = _find_seq(orig, old_seq, pos)
+        if idx < 0:
+            return None  # hunk 上下文与当前文件对不上
+        out.extend(orig[pos:idx])
+        out.extend(new_seq)
+        pos = idx + len(old_seq)
+    out.extend(orig[pos:])
+    return "\n".join(out)
+
+
+def _read_rel(repo: Path, rel: str) -> str | None:
+    try:
+        return (repo / rel).read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+_REGISTRY_REMOVE_MSG = (
+    f"doc-lifecycle: 禁止删除/移走 {REGISTRY_REL}——注册表是治理面，"
+    f"删除等于静默关闭 doc-lifecycle 校验。{_ESCAPE_HINT}"
+)
+# Bash 侧只拦「删除/移走注册表」这一件可判定的事；其余 Bash 写入由 validator 兜底。
+_DELETIONISH = {"rm", "unlink", "shred", "srm", "truncate", "mv"}
+
+
+def _is_registry_path(raw: str, repo: Path) -> bool:
+    if _rel_to_repo(raw, repo) == REGISTRY_REL:
+        return True
+    p = (raw or "").strip().strip('"').strip("'")
+    return p == REGISTRY_REL or p.endswith("/" + REGISTRY_REL)
+
+
+def _bash_reason(cmd: str, repo: Path) -> str | None:
+    """Bash 命令中对注册表的删除/移动（rm/unlink/shred/truncate/mv/git rm）→ 拦。"""
+    if REGISTRY_REL.rsplit("/", 1)[-1] not in cmd:
+        return None  # 廉价预过滤：命令未提及注册表文件名
+    try:
+        lex = shlex.shlex(cmd, posix=True, punctuation_chars=True)
+        lex.whitespace_split = True
+        toks = list(lex)
+    except ValueError:
+        toks = cmd.split()
+    segs: list[list[str]] = [[]]
+    for t in toks:
+        if t and set(t) <= set(";|&<>()"):
+            segs.append([])
+        else:
+            segs[-1].append(t)
+    for seg in segs:
+        i = 0
+        while i < len(seg) and re.match(r"^[A-Za-z_]\w*=", seg[i]):
+            i += 1  # 跳过前导 env 赋值
+        seg = seg[i:]
+        if not seg:
+            continue
+        name = seg[0].rsplit("/", 1)[-1]
+        args = seg[1:]
+        if name == "git" and args[:1] == ["rm"]:
+            name, args = "rm", args[1:]
+        if name not in _DELETIONISH:
+            continue
+        if any(not a.startswith("-") and _is_registry_path(a, repo) for a in args):
+            return _REGISTRY_REMOVE_MSG
+    return None
 
 
 def pretooluse_reason(tool_name: str, tool_input: dict, repo_root) -> str | None:
     """PreToolUse 机械拦截判定入口（pre_tool_guard.py 薄接线调用）。
-    返回 None = 放行；返回字符串 = 阻止理由。只判可判定事实；解析不确定时放行。"""
+    返回 None = 放行；返回字符串 = 阻止理由。只判可判定事实；解析不确定时原则上放行，
+    两个例外保守拦截：删除/移走注册表；apply_patch Update 触碰受管目标但无法可靠重建全文。"""
     if _skip_by_env():
         return None
     repo = Path(repo_root)
@@ -483,32 +636,60 @@ def pretooluse_reason(tool_name: str, tool_input: dict, repo_root) -> str | None
             return _doc_write_reason(rel, kind, prospective, prospective, repo)
         return None
 
+    if tool_name == "Bash":
+        return _bash_reason(tool_input.get("command") or "", repo)
+
     if tool_name == "apply_patch":
         patch = tool_input.get("command") or tool_input.get("patch") or ""
-        for op, raw_path, added in _patch_ops(patch):
-            rel = _rel_to_repo(raw_path, repo)
+        for op in _patch_ops(patch):
+            rel = _rel_to_repo(op["path"], repo)
             if rel is None:
                 continue
-            if rel == REGISTRY_REL:
-                if op == "add":
-                    reason = _registry_write_reason(added, repo)
-                    if reason:
-                        return reason
-                continue  # update：patch 无法重建全文，validator 事后兜底
-            kind = doc_kind(rel)
+            dest = _rel_to_repo(op["move_to"], repo) if op["move_to"] else rel
+
+            if op["op"] == "delete":
+                if rel == REGISTRY_REL:
+                    return _REGISTRY_REMOVE_MSG
+                continue
+
+            if rel == REGISTRY_REL or dest == REGISTRY_REL:
+                if op["op"] == "update" and dest != REGISTRY_REL:
+                    return _REGISTRY_REMOVE_MSG  # Move to 把注册表移走 = 变相删除
+                if op["op"] == "add":
+                    prospective = _added_text(op)
+                else:
+                    current = _read_rel(repo, rel)
+                    if current is None:
+                        continue  # 文件不存在：apply_patch 本身会失败，无需拦
+                    prospective = _reconstruct_update(current, op["lines"])
+                    if prospective is None:
+                        return (
+                            f"doc-lifecycle: 无法可靠重建对 {REGISTRY_REL} 的 apply_patch Update"
+                            f" 结果（hunk 上下文与当前文件对不上/语法不明）——保守拦截，"
+                            f"请改用 Edit 工具或拆成更小的 patch。{_ESCAPE_HINT}"
+                        )
+                reason = _registry_write_reason(prospective, repo)
+                if reason:
+                    return reason
+                continue
+
+            kind = doc_kind(rel) or (doc_kind(dest) if dest else None)
             if not kind:
                 continue
-            if op == "add":
-                reason = _doc_write_reason(rel, kind, added, added, repo)
+            if op["op"] == "add":
+                prospective = _added_text(op)
             else:
-                if extract_status(added) is None:
-                    continue  # 本次 patch 未触碰状态锚点：纯内容修改不拦
-                try:
-                    current = (repo / rel).read_text(encoding="utf-8")
-                except OSError:
-                    current = ""
-                corpus = current + "\n" + added  # 联合语料：只可能漏拦、不误拦
-                reason = _doc_write_reason(rel, kind, corpus, added, repo)
+                current = _read_rel(repo, rel)
+                if current is None:
+                    continue  # 文件不存在：apply_patch 本身会失败，无需拦
+                prospective = _reconstruct_update(current, op["lines"])
+                if prospective is None:
+                    return (
+                        f"doc-lifecycle: 无法可靠重建对 {rel} 的 apply_patch Update 结果"
+                        f"（hunk 上下文与当前文件对不上/语法不明）——保守拦截，"
+                        f"请改用 Edit 工具或拆成更小的 patch。{_ESCAPE_HINT}"
+                    )
+            reason = _doc_write_reason(rel, kind, prospective, prospective, repo)
             if reason:
                 return reason
     return None
@@ -699,6 +880,97 @@ def self_test() -> int:
         and entries[0]["downstream"] == ["z"]
         and entries[0]["superseded_by"] is None,
     )
+
+    # 13. hook：apply_patch Update 状态跃迁 verified→approved 但缺段 → 拦（初审 MAJOR-1 PoC）
+    doc_v = "# demo\n\nStatus: verified · 2026-07-12 · done\n\n## Human 批注区\n\n- [OK] 同意\n"
+    td, root = fresh({
+        "plans/demo.zh.md": doc_v,
+        REGISTRY_REL: _OK_REGISTRY.replace("status: approved", "status: verified"),
+    })
+    up = (
+        "*** Begin Patch\n*** Update File: plans/demo.zh.md\n@@\n"
+        "-Status: verified · 2026-07-12 · done\n"
+        "+Status: approved · 2026-07-13 · human ok\n*** End Patch"
+    )
+    check("hook 拦 apply_patch(Update 跃迁 approved 缺段)",
+          pretooluse_reason("apply_patch", {"command": up}, root) is not None)
+    ok_up = (
+        "*** Begin Patch\n*** Update File: plans/demo.zh.md\n@@\n"
+        "-- [OK] 同意\n+- [OK] 同意（补充说明）\n*** End Patch"
+    )
+    check("hook 放行 apply_patch(Update 合规内容修改)",
+          pretooluse_reason("apply_patch", {"command": ok_up}, root) is None)
+    bad_ctx = (
+        "*** Begin Patch\n*** Update File: plans/demo.zh.md\n@@\n"
+        "-这一行不存在于当前文件\n+Status: approved · x · y\n*** End Patch"
+    )
+    check("hook 保守拦 apply_patch(Update 无法重建全文)",
+          pretooluse_reason("apply_patch", {"command": bad_ctx}, root) is not None)
+    td.cleanup()
+
+    # 14. hook：apply_patch Update 注册表 → 重建全文判定（初审 MAJOR-1 PoC：悬空 upstream）
+    td, root = fresh({"plans/demo.zh.md": _OK_PLAN, REGISTRY_REL: _OK_REGISTRY})
+    reg_up = (
+        f"*** Begin Patch\n*** Update File: {REGISTRY_REL}\n@@\n"
+        "-    upstream: []\n+    upstream: [ghost-entry]\n*** End Patch"
+    )
+    check("hook 拦 apply_patch(注册表 Update 悬空 upstream)",
+          pretooluse_reason("apply_patch", {"command": reg_up}, root) is not None)
+    reg_ok = (
+        f"*** Begin Patch\n*** Update File: {REGISTRY_REL}\n@@\n"
+        "-    status: approved\n+    status: implementing\n*** End Patch"
+    )
+    check("hook 放行 apply_patch(注册表 Update 合法)",
+          pretooluse_reason("apply_patch", {"command": reg_ok}, root) is None)
+    td.cleanup()
+
+    # 15. hook：删除/移走注册表 → 拦（初审 MAJOR-2 PoC：apply_patch Delete；另覆盖 Move/Bash）
+    td, root = fresh({"plans/demo.zh.md": _OK_PLAN, REGISTRY_REL: _OK_REGISTRY})
+    del_patch = f"*** Begin Patch\n*** Delete File: {REGISTRY_REL}\n*** End Patch"
+    check("hook 拦 apply_patch(Delete 注册表)",
+          pretooluse_reason("apply_patch", {"command": del_patch}, root) is not None)
+    mv_patch = (
+        f"*** Begin Patch\n*** Update File: {REGISTRY_REL}\n"
+        "*** Move to: /tmp/graveyard.yaml\n@@\n-# demo registry\n+# gone\n*** End Patch"
+    )
+    check("hook 拦 apply_patch(Move 注册表)",
+          pretooluse_reason("apply_patch", {"command": mv_patch}, root) is not None)
+    check("hook 拦 Bash rm 注册表",
+          pretooluse_reason("Bash", {"command": f"rm {REGISTRY_REL}"}, root) is not None)
+    check("hook 拦 Bash mv 注册表",
+          pretooluse_reason("Bash", {"command": f"cd /x && mv {REGISTRY_REL} /tmp/"}, root)
+          is not None)
+    check("hook 放行 Bash 只读触碰注册表",
+          pretooluse_reason(
+              "Bash", {"command": f"cat {REGISTRY_REL} && grep status {REGISTRY_REL}"}, root
+          ) is None)
+    td.cleanup()
+
+    # 16. kind 谎报（初审 MAJOR-3 PoC）：plans/ 下登记成 decision → error + hook 拦
+    lie = _OK_REGISTRY.replace("kind: plan", "kind: decision")
+    plan_bare = "# demo\n\nStatus: approved · 2026-07-12 · human ok\n"
+    td, root = fresh({"plans/demo.zh.md": plan_bare, REGISTRY_REL: lie})
+    errs, _ = validate_repo(root)
+    check("kind 与路径类别不符被报错", any("路径类别不符" in e for e in errs))
+    w_lie = {"file_path": str(root / REGISTRY_REL), "content": lie}
+    check("hook 拦注册表 kind 谎报写入", pretooluse_reason("Write", w_lie, root) is not None)
+    td.cleanup()
+    outside = _OK_REGISTRY.replace("plans/demo.zh.md", "notes/demo.md")
+    td, root = fresh({"notes/demo.md": _OK_PLAN, REGISTRY_REL: outside})
+    errs, warns = validate_repo(root)
+    check("四类目录外路径自由声明 kind 仅告警",
+          errs == [] and any("自由声明" in w for w in warns))
+    td.cleanup()
+
+    # 17. 注册表缺失（初审 MAJOR-2）：有受管文档 → error；完全未启用 → 不报
+    td, root = fresh({"plans/demo.zh.md": _OK_PLAN})
+    errs, _ = validate_repo(root)
+    check("有受管文档但注册表缺失升级为 error", any("缺失" in e for e in errs))
+    td.cleanup()
+    td, root = fresh({"docs/x.md": "# x\n"})
+    errs, warns = validate_repo(root)
+    check("无四类文档时注册表缺失不报", errs == [] and warns == [])
+    td.cleanup()
 
     n = len(failures)
     print(f"[check-doc-lifecycle] self-test {'OK' if not n else 'FAIL'} — {n} failure(s)")

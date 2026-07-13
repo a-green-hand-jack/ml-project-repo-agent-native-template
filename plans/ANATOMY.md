@@ -45,8 +45,8 @@ draft → in-review → approved → implementing → verified
 
 | 层 | 位置 | 拦什么 |
 | --- | --- | --- |
-| 机械拦截 | `.claude/hooks/pre_tool_guard.py` → `check-doc-lifecycle.py:pretooluse_reason` | 写入使文档进入 approved/implementing 但 scope/forbidden/verification 缺失、批注区残留 `[?]`/`[改]`、上游已 superseded、注册表引用悬空 |
-| 事后校验 | `scripts/check-doc-lifecycle.py`（`validate-governance.py` 拉起） | 上述全部 + 锚点/注册表一致 + 四类文档必须登记 |
+| 机械拦截 | `.claude/hooks/pre_tool_guard.py` → `check-doc-lifecycle.py:pretooluse_reason` | 写入使文档进入 approved/implementing 但 scope/forbidden/verification 缺失、批注区残留 `[?]`/`[改]`、上游已 superseded、注册表引用悬空/kind 与路径类别不符（谎报 kind）；删除/移走注册表（apply_patch Delete/Move、Bash rm/mv/git rm）；apply_patch Update 按 hunk 重建 patch 后全文再判定，无法可靠重建时保守拦截（提示改用 Edit） |
+| 事后校验 | `scripts/check-doc-lifecycle.py`（`validate-governance.py` 拉起） | 上述全部 + 锚点/注册表一致 + 四类文档必须登记 + 存在受管文档但注册表缺失 = error（非 strict 也 fail） |
 
 human 显式绕过 hook：`DOC_LIFECYCLE_SKIP=1`（validator 仍会事后校验）。
 批注收敛辅助只是格式约定：`[OK]` / `[改]` / `[?]` 可选前缀 + 模式匹配，不做语义分类。
