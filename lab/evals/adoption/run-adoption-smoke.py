@@ -62,6 +62,19 @@ Fixtures (plan B5, plans/20260712-bootstrap-adoption-proof.zh.md):
     (`git ls-files` collects everything), so the integrity proof's hash
     index must find it after the move — no false "missing" from pruned
     walk dirs.
+16. `test_state_leaf_symlinks_redirected` (fresh review BLOCKER): each
+    canonical state leaf (`adoption-plan.json`, `baseline.json`,
+    `phase-log.jsonl`) is part of the redirect decision; no leaf symlink is
+    followed.
+17. `test_fallback_root_symlink_refused` (fresh review BLOCKER): a
+    pre-positioned symlink at deterministic fallback root fails closed and
+    leaves its external target untouched.
+18. `test_fallback_intermediate_symlink_refused` (fresh review BLOCKER):
+    the fallback's absolute lstat walk catches an intermediate symlink
+    supplied through `TMPDIR`, before creating the deterministic root.
+19. `test_fallback_leaf_symlinks_refused` (fresh review BLOCKER): each
+    pre-positioned fallback state leaf fails closed rather than being read
+    or written through.
 
 If no writable temp directory is available (sandboxes without /tmp), the
 whole smoke prints an explicit SKIP and exits 0 instead of crashing.
@@ -70,6 +83,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -81,8 +95,14 @@ ADOPTER = REPO / "scripts" / "adopt-existing-repo.py"
 INTEGRITY = REPO / "scripts" / "check-adoption-integrity.py"
 
 
-def run(cmd: list[str], cwd: Path, *, check: bool = True) -> subprocess.CompletedProcess[str]:
-    proc = subprocess.run(cmd, cwd=cwd, text=True, capture_output=True, check=False)
+def run(
+    cmd: list[str],
+    cwd: Path,
+    *,
+    check: bool = True,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    proc = subprocess.run(cmd, cwd=cwd, text=True, capture_output=True, check=False, env=env)
     if check and proc.returncode != 0:
         print("$ " + " ".join(cmd))
         print(proc.stdout)
@@ -114,6 +134,18 @@ def state_fallback(target: Path) -> Path:
     the canonical state dir path crosses a symlink."""
     digest = hashlib.sha256(str(target.resolve()).encode("utf-8")).hexdigest()[:12]
     return Path(tempfile.gettempdir()) / f"template-adoption-state-{digest}"
+
+
+def fallback_at(target: Path, temp_root: Path) -> Path:
+    digest = hashlib.sha256(str(target.resolve()).encode("utf-8")).hexdigest()[:12]
+    return temp_root / f"template-adoption-state-{digest}"
+
+
+def remove_path(path: Path) -> None:
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+    elif path.exists():
+        shutil.rmtree(path)
 
 
 def classification_by_path(plan: dict) -> dict[str, dict]:
@@ -849,6 +881,194 @@ def test_state_docs_symlink_redirected(root: Path) -> None:
     print("[adoption-smoke] test_state_docs_symlink_redirected OK")
 
 
+def test_state_leaf_symlinks_redirected(root: Path) -> None:
+    """Fresh-review BLOCKER: every canonical state-file leaf participates
+    in the state-area lstat gate, not just the directories above it."""
+    for leaf in ("adoption-plan.json", "baseline.json", "phase-log.jsonl"):
+        case = root / leaf.replace(".", "-")
+        external = case / "external"
+        sentinel = external / "sentinel.txt"
+        write(sentinel, f"external bytes for {leaf}\n")
+        original = sentinel.read_text(encoding="utf-8")
+        target = case / "target"
+        git_init(target)
+        write(target / "README.md", (REPO / "README.md").read_text(encoding="utf-8"))
+        run(["git", "add", "README.md"], target)
+        run(["git", "commit", "-m", "initial"], target)
+        state_dir = target / "lab" / "docs" / "audits" / "template-adoption" / "state"
+        state_dir.mkdir(parents=True)
+        (state_dir / leaf).symlink_to(sentinel)
+        fallback = state_fallback(target)
+        remove_path(fallback)
+        try:
+            proc = run(
+                [
+                    sys.executable,
+                    str(ADOPTER),
+                    str(target),
+                    "--phase",
+                    "all",
+                    "--test-command",
+                    "none",
+                    "--project-name",
+                    f"canonical-leaf-{leaf}",
+                ],
+                REPO,
+                check=False,
+            )
+            if proc.returncode == 0:
+                raise SystemExit(
+                    f"canonical state leaf symlink {leaf} must block the pipeline — "
+                    f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+                )
+            combined = proc.stdout + proc.stderr
+            if "state-redirect" not in combined or leaf not in combined:
+                raise SystemExit(
+                    f"canonical leaf redirect did not name {leaf} — "
+                    f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+                )
+            if sentinel.read_text(encoding="utf-8") != original:
+                raise SystemExit(f"canonical state leaf symlink was written through: {leaf}")
+            if not (state_dir / leaf).is_symlink():
+                raise SystemExit(f"canonical state leaf symlink was replaced: {leaf}")
+            plan_path = fallback / "adoption-plan.json"
+            if not plan_path.is_file() or plan_path.is_symlink():
+                raise SystemExit(f"safe fallback plan missing for canonical leaf {leaf}: {plan_path}")
+        finally:
+            remove_path(fallback)
+    print("[adoption-smoke] test_state_leaf_symlinks_redirected OK")
+
+
+def test_fallback_root_symlink_refused(root: Path) -> None:
+    """Fresh-review BLOCKER: a pre-created fallback-root symlink is not a
+    second redirect opportunity; adoption fails closed before state I/O."""
+    external_lab = root / "external-lab"
+    write(external_lab / "keep.md", "canonical external bytes\n")
+    target = root / "target"
+    git_init(target)
+    write(target / "README.md", (REPO / "README.md").read_text(encoding="utf-8"))
+    run(["git", "add", "README.md"], target)
+    run(["git", "commit", "-m", "initial"], target)
+    (target / "lab").symlink_to(external_lab, target_is_directory=True)
+
+    external_fallback = root / "external-fallback"
+    write(external_fallback / "sentinel.txt", "fallback external bytes\n")
+    fallback = state_fallback(target)
+    remove_path(fallback)
+    fallback.symlink_to(external_fallback, target_is_directory=True)
+    try:
+        before = external_tree_names(external_fallback)
+        proc = run(
+            [sys.executable, str(ADOPTER), str(target), "--phase", "discover", "--test-command", "none"],
+            REPO,
+            check=False,
+        )
+        combined = proc.stdout + proc.stderr
+        if proc.returncode == 0 or "unsafe state fallback" not in combined:
+            raise SystemExit(
+                "symlinked fallback root did not fail closed — "
+                f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+            )
+        if external_tree_names(external_fallback) != before:
+            raise SystemExit("fallback-root symlink was written through")
+        if not fallback.is_symlink():
+            raise SystemExit("fallback-root symlink was replaced")
+    finally:
+        remove_path(fallback)
+    print("[adoption-smoke] test_fallback_root_symlink_refused OK")
+
+
+def test_fallback_intermediate_symlink_refused(root: Path) -> None:
+    """Fresh-review BLOCKER: an intermediate component of the fallback's
+    absolute path is lstat-checked too (exercised via TMPDIR)."""
+    external_lab = root / "external-lab"
+    write(external_lab / "keep.md", "canonical external bytes\n")
+    target = root / "target"
+    git_init(target)
+    write(target / "README.md", (REPO / "README.md").read_text(encoding="utf-8"))
+    run(["git", "add", "README.md"], target)
+    run(["git", "commit", "-m", "initial"], target)
+    (target / "lab").symlink_to(external_lab, target_is_directory=True)
+
+    tmp_parent = root / "tmp-parent"
+    tmp_parent.mkdir()
+    external_tmp = root / "external-tmp"
+    write(external_tmp / "sentinel.txt", "temporary external bytes\n")
+    tmp_link = tmp_parent / "redirect"
+    tmp_link.symlink_to(external_tmp, target_is_directory=True)
+    expected_fallback = fallback_at(target, tmp_link)
+    env = os.environ.copy()
+    env["TMPDIR"] = str(tmp_link)
+    before = external_tree_names(external_tmp)
+    proc = run(
+        [sys.executable, str(ADOPTER), str(target), "--phase", "discover", "--test-command", "none"],
+        REPO,
+        check=False,
+        env=env,
+    )
+    combined = proc.stdout + proc.stderr
+    if proc.returncode == 0 or "unsafe state fallback" not in combined or str(tmp_link) not in combined:
+        raise SystemExit(
+            "symlinked fallback intermediate did not fail closed — "
+            f"expected fallback={expected_fallback}\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+        )
+    if external_tree_names(external_tmp) != before:
+        raise SystemExit("fallback-intermediate symlink was written through")
+    if expected_fallback.exists() or expected_fallback.is_symlink():
+        raise SystemExit(f"fallback root was created through an intermediate symlink: {expected_fallback}")
+    print("[adoption-smoke] test_fallback_intermediate_symlink_refused OK")
+
+
+def test_fallback_leaf_symlinks_refused(root: Path) -> None:
+    """Fresh-review BLOCKER: no deterministic fallback state leaf may be a
+    pre-positioned symlink, even when another leaf would be written first."""
+    for leaf in ("adoption-plan.json", "baseline.json", "phase-log.jsonl"):
+        case = root / leaf.replace(".", "-")
+        external_lab = case / "external-lab"
+        write(external_lab / "keep.md", "canonical external bytes\n")
+        target = case / "target"
+        git_init(target)
+        write(target / "README.md", (REPO / "README.md").read_text(encoding="utf-8"))
+        run(["git", "add", "README.md"], target)
+        run(["git", "commit", "-m", "initial"], target)
+        (target / "lab").symlink_to(external_lab, target_is_directory=True)
+
+        fallback = state_fallback(target)
+        remove_path(fallback)
+        fallback.mkdir()
+        sentinel = case / "external-state" / "sentinel.txt"
+        write(sentinel, f"fallback external bytes for {leaf}\n")
+        original = sentinel.read_text(encoding="utf-8")
+        (fallback / leaf).symlink_to(sentinel)
+        try:
+            proc = run(
+                [
+                    sys.executable,
+                    str(ADOPTER),
+                    str(target),
+                    "--phase",
+                    "discover",
+                    "--test-command",
+                    "none",
+                ],
+                REPO,
+                check=False,
+            )
+            combined = proc.stdout + proc.stderr
+            if proc.returncode == 0 or "unsafe state fallback" not in combined or leaf not in combined:
+                raise SystemExit(
+                    f"fallback state leaf symlink {leaf} did not fail closed — "
+                    f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+                )
+            if sentinel.read_text(encoding="utf-8") != original:
+                raise SystemExit(f"fallback state leaf symlink was written through: {leaf}")
+            if not (fallback / leaf).is_symlink():
+                raise SystemExit(f"fallback state leaf symlink was replaced: {leaf}")
+        finally:
+            remove_path(fallback)
+    print("[adoption-smoke] test_fallback_leaf_symlinks_refused OK")
+
+
 def test_archive_path_symlink_refused(root: Path) -> None:
     """Review round 3 BLOCKER-C negative test (conflict archive): the
     target's `human/imported` is a symlink to an external tree. When
@@ -1001,6 +1221,14 @@ def main() -> int:
         test_state_dir_symlink_redirected(Path(tmp))
     with tempfile.TemporaryDirectory(prefix="adoption-smoke-docslink-") as tmp:
         test_state_docs_symlink_redirected(Path(tmp))
+    with tempfile.TemporaryDirectory(prefix="adoption-smoke-stateleaf-") as tmp:
+        test_state_leaf_symlinks_redirected(Path(tmp))
+    with tempfile.TemporaryDirectory(prefix="adoption-smoke-fallback-root-") as tmp:
+        test_fallback_root_symlink_refused(Path(tmp))
+    with tempfile.TemporaryDirectory(prefix="adoption-smoke-fallback-mid-") as tmp:
+        test_fallback_intermediate_symlink_refused(Path(tmp))
+    with tempfile.TemporaryDirectory(prefix="adoption-smoke-fallback-leaf-") as tmp:
+        test_fallback_leaf_symlinks_refused(Path(tmp))
     with tempfile.TemporaryDirectory(prefix="adoption-smoke-archivelink-") as tmp:
         test_archive_path_symlink_refused(Path(tmp))
     with tempfile.TemporaryDirectory(prefix="adoption-smoke-longslug-") as tmp:

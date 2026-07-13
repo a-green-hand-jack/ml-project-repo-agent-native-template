@@ -6,8 +6,10 @@ The script is intentionally conservative:
 - no overwrites without first preserving the original file;
 - no protected data/model/checkpoint byte moves;
 - state is written into lab/docs/audits/template-adoption/state (or a
-  /tmp fallback plus a blocker when that path crosses a symlink — see
-  `state_root`, review round 3 BLOCKER-C).
+  /tmp fallback plus a blocker when that path, including a state-file
+  leaf, crosses a symlink — see `state_root`). The fallback's absolute
+  path and state-file leaves are also checked before use; an unsafe
+  fallback fails closed instead of redirecting again.
 
 Residual risk (accepted, review round 3): the symlink/containment checks
 (lstat / resolve) and the writes that follow them (mkdir / copy2 / move)
@@ -57,6 +59,7 @@ REPORT_PATH = Path("lab/docs/audits/template-adoption-report.md")
 PLAN_FILE = "adoption-plan.json"
 BASELINE_FILE = "baseline.json"
 LOG_FILE = "phase-log.jsonl"
+STATE_FILES = (PLAN_FILE, BASELINE_FILE, LOG_FILE)
 
 CONTROL_ITEMS = [
     "AGENTS.md",
@@ -182,24 +185,92 @@ def safe_target_path(root: Path, *parts: str) -> Path:
     return probe
 
 
+def absolute_symlink_hit(path: Path) -> Path | None:
+    """Return the first symlink on an absolute path, including its leaf.
+
+    The target-repo helper above can trust an already-resolved repo root
+    and report repo-relative hits. The deterministic state fallback has no
+    equivalent trusted anchor, so it must lstat every component from the
+    filesystem root through the requested leaf. This remains a
+    check-then-use guard; see the module-level TOCTOU note.
+    """
+    if not path.is_absolute():
+        raise ValueError(f"expected absolute path, got: {path}")
+    probe = Path(path.anchor)
+    for piece in path.parts[1:]:
+        probe = probe / piece
+        if probe.is_symlink():
+            return probe
+    return None
+
+
 def state_fallback_root(target: Path) -> Path:
     """Deterministic per-target /tmp location used when the canonical
-    state dir path crosses a symlink: re-runs and later phases of the same
-    adoption find the same state, and nothing is ever written through the
-    symlink. Deliberately outside the target repo and never auto-deleted —
-    it is the audit trail for a blocked adoption."""
+    state area crosses a symlink: re-runs and later phases of the same
+    adoption find the same state. Deliberately outside the target repo and
+    never auto-deleted — it is the audit trail for a blocked adoption.
+    Callers must use ``checked_state_fallback_root`` or
+    ``checked_fallback_path`` before I/O; this function only derives the
+    stable name."""
     digest = hashlib.sha256(str(target.resolve()).encode("utf-8")).hexdigest()[:12]
     return Path(tempfile.gettempdir()) / f"template-adoption-state-{digest}"
 
 
 def state_symlink_hit(target: Path) -> str | None:
-    """First symlink segment on the canonical state dir path (repo-root
-    relative), or None when the state dir is safe to write into."""
-    try:
-        safe_target_path(target, *STATE_DIR.parts)
-    except SymlinkOnPath as e:
-        return e.rel
+    """First symlink on the canonical state area, repo-root-relative.
+
+    The three state-file leaves are part of the safety decision. Checking
+    only ``.../state`` would still let ``Path.write_text``/``open('a')``
+    follow a pre-positioned ``adoption-plan.json``, ``baseline.json`` or
+    ``phase-log.jsonl`` symlink.
+    """
+    candidates = [STATE_DIR, *(STATE_DIR / name for name in STATE_FILES)]
+    for candidate in candidates:
+        try:
+            safe_target_path(target, *candidate.parts)
+        except SymlinkOnPath as e:
+            return e.rel
     return None
+
+
+def fallback_state_symlink_hit(target: Path) -> Path | None:
+    """First symlink on the fallback root or any state-file leaf.
+
+    Each absolute candidate check includes all intermediate path segments,
+    so a symlink supplied through e.g. ``TMPDIR=/safe/link`` is rejected as
+    firmly as a symlink at the deterministic fallback root or leaf.
+    """
+    root = state_fallback_root(target)
+    candidates = [root, *(root / name for name in STATE_FILES)]
+    for candidate in candidates:
+        hit = absolute_symlink_hit(candidate)
+        if hit is not None:
+            return hit
+    return None
+
+
+def checked_state_fallback_root(target: Path) -> Path:
+    """Return the fallback root only when its full state area is safe."""
+    root = state_fallback_root(target)
+    hit = fallback_state_symlink_hit(target)
+    if hit is not None:
+        raise SystemExit(
+            f"unsafe state fallback: '{hit}' is a symlink on deterministic fallback "
+            f"path {root}; refusing to read or write adoption state"
+        )
+    return root
+
+
+def checked_fallback_path(target: Path, name: str) -> Path:
+    """Return one non-state fallback leaf after an absolute lstat walk."""
+    path = state_fallback_root(target) / name
+    hit = absolute_symlink_hit(path)
+    if hit is not None:
+        raise SystemExit(
+            f"unsafe state fallback: '{hit}' is a symlink on fallback path {path}; "
+            "refusing to write"
+        )
+    return path
 
 
 def state_redirect_blocker(target: Path) -> str | None:
@@ -211,24 +282,29 @@ def state_redirect_blocker(target: Path) -> str | None:
     if hit is None:
         return None
     return (
-        f"state-redirect: '{hit}' on the state dir path ({STATE_DIR.as_posix()}) is a "
-        f"symlink; adoption state was written to {state_fallback_root(target)} instead "
-        "of through the symlink — reconcile the symlink and re-run"
+        f"state-redirect: '{hit}' on the canonical state path ({STATE_DIR.as_posix()}) "
+        f"is a symlink; canonical state is disabled and {state_fallback_root(target)} "
+        "will be used only if its full fallback safety check passes — reconcile the "
+        "canonical symlink and re-run"
     )
 
 
 def state_root(target: Path) -> Path:
-    """Canonical state dir, unless any segment of its path is a symlink
-    (e.g. the target's `lab` or `lab/docs` points at an external tree —
-    review round 3 BLOCKER-C): then state reads/writes are redirected to
-    `state_fallback_root` and every phase registers/prints the
-    `state_redirect_blocker` describing the redirect."""
+    """Canonical state dir unless its path or a known leaf is a symlink.
+
+    For example, the target's ``lab``/``lab/docs`` may point at an external
+    tree, or ``adoption-plan.json`` itself may be pre-positioned as a
+    symlink. In either case state reads/writes are redirected to the checked
+    fallback and every phase registers/prints ``state_redirect_blocker``.
+    """
     if state_symlink_hit(target) is None:
         return target / STATE_DIR
-    return state_fallback_root(target)
+    return checked_state_fallback_root(target)
 
 
 def state_path(target: Path, name: str) -> Path:
+    if name not in STATE_FILES:
+        raise ValueError(f"unrecognized adoption state file: {name}")
     return state_root(target) / name
 
 
@@ -1402,7 +1478,7 @@ def write_report(target: Path, plan: dict[str, Any], proof: dict[str, Any]) -> N
     try:
         path = safe_target_path(target, *REPORT_PATH.parts)
     except SymlinkOnPath as e:
-        path = state_fallback_root(target) / REPORT_PATH.name
+        path = checked_fallback_path(target, REPORT_PATH.name)
         print(
             f"[prove] BLOCKER report-redirect: '{e.rel}' on the report path is a "
             f"symlink; report written to {path} instead"
