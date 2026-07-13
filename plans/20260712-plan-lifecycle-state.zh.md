@@ -216,10 +216,11 @@ repo 里已经有好几套相邻但不统一的"状态/审批"机制，设计新
 
 - **全部 open question 已收敛，功能实现与 C1-C3/X1-X3 runtime evidence 已完成。** 当前处于
   final-review 收口，不再等待进入实现的批准。
-- 修复受审提交 `1a970291` 报告的四个 MAJOR，补 normal/`python -S` 对抗 fixtures；提交新
-  code target 后，在该精确 target 重跑顶层 Claude G1/G2 并保存 raw gzip + SHA256。
-- 将 runtime evidence 作为 code target 的 direct evidence-only child 纳入，跑全 strict gates；
-  仅当新的 symbolic `HEAD` 获独立 fresh `APPROVE` 后，才把本 plan 标为 verified 并本地合入。
+- `1a970291` 报告的四个 MAJOR 已在 code target `22d7572` 修复，normal/`python -S` 对抗
+  fixtures 与 exact-target 顶层 Claude G1/G2 均完成，raw gzip + SHA256 已纳入 direct
+  evidence-only child。
+- 对新的 symbolic `HEAD` 跑全 strict gates；仅当它获独立 fresh `APPROVE` 后，才把本 plan
+  标为 verified 并本地合入。
 
 ## Plan revision log
 
@@ -249,3 +250,4 @@ repo 里已经有好几套相邻但不统一的"状态/审批"机制，设计新
 - 2026-07-13 **status-only `df61087` 独立 final review：`CHANGES_REQUESTED`（3 MAJOR）**。(1) durable status 把 evidence parent `f31e5d3` 误称 exact HEAD；最终记录改用可由 Git 直接核验的 symbolic `HEAD` + parent 关系，避免要求 commit 正文预知自身 SHA。(2) `_parse_status_anchor()` 在第一条非空行不是 H1 时仍接受 Status；现强制 H1 标题并补“无标题/标题晚于锚点”两组 validator、normal hook、真实 `python -S` hook 对抗 fixtures。(3) 旧 G1/G2 raw 只证明 hook deny/allow，没有记录 disposable clone 的 exact HEAD、G2 pathspec bytes 与 post-probe clean/registry-preserved 状态；必须在新代码 target 上重跑三个顶层 Claude sessions，并把上述 pre/post 输出与 hook 原文封进同一 raw artifact 后才可恢复 PASS。reviewer 的 Python 测试因其只读 sandbox 未启动，不计失败；实现 owner 已在可写 worktree 串行重跑 normal/`python -S` self-test 与 guard regression，均 0 failure。
 - 2026-07-13 **最终 code target `8eea18e` 的 G1/G2 raw-bound runtime PASS**。三个新 disposable clones 与顶层 Claude Code 2.1.207 / Opus 4.8 sessions 均在 typescript 开头记录 exact HEAD、空 pre-status 与 registry present。G1 默认 Write 的 hook exit 2，post-status 仍空且 probe missing；独立 `DOC_LIFECYCLE_SKIP=1` 进程的同一 Write exit 0，post-status 只含 probe，并记录 probe SHA256/正文与 registry present。G2 在调用前记录 pathspec 为 26 bytes、SHA256 `6432e13b...613a9`、正文 `memory/doc-lifecycle.yaml`，真实 Bash tool call 被 hook deny；post-status 仍空、registry present、pathspec SHA256 未变。六份 raw/debug gzip 与 SHA256 已纳入 evidence child；下一门槛为全 strict gates 与 symbolic `HEAD` 的独立 final fresh review。
 - 2026-07-13 **evidence-only `1a970291` 独立 final review：`CHANGES_REQUESTED`（4 MAJOR）**。reviewer 认可 62 份 raw gzip/SHA256、G1/G2 exact-target 绑定与全 strict gates，但新增四个对抗发现：(1) 无 PyYAML fallback 忽略缩进层级，把 `meta:` 下的 `kind/status` 扁平化并 fail-open；(2) Bash `dd of=` 与 `tee` 可覆盖注册表；(3) 四空格 Markdown 代码块可冒充 Status 锚点；(4) durable status 与本节「下一步」仍描述已完成步骤。恢复门槛固定为：同一 code target 修复四项并补 normal/`python -S` validator/真实 hook fixtures，在该精确 target 重跑 G1/G2，evidence-only direct child 后跑全 strict gates与独立 final fresh review；记录使用 symbolic `HEAD` 与 direct parent，避免要求 commit 正文预知自身 SHA。
+- 2026-07-13 **最终 code target `22d7572` 修复四项 MAJOR，G1/G2 exact-target runtime PASS**。受限 parser 改为精确缩进语法并拒绝嵌套 mapping；Status/H1 只接受 0–3 个前导空格；Bash guard 覆盖 `dd of=` 与 `tee` 的普通、symlink 与外部 control。normal/`python -S` self-test 与真实 hook regression 均锁定这些对抗 case。三个新 disposable clones 中，独立顶层 Claude sessions 分别完成 malformed Write 默认 deny、进程级 `DOC_LIFECYCLE_SKIP=1` 下唯一 Write allow、opaque `git rm --pathspec-from-file` registry delete deny；wrapper 记录 exact HEAD、pre/post status、registry/pathspec/probe SHA 与正文，六份 raw/debug 以 `gzip -n` 和 SHA256 纳入 direct evidence-only child。状态保持 implementing，下一门槛仅为该 symbolic `HEAD` 的全 strict gates 与独立 final fresh review。
