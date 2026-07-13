@@ -1,23 +1,74 @@
 # 实验台账。每个 run 一条。experiment card 落地为这里的一行 + lab/code/experiments/<id>.md。
 # run bytes（logs/checkpoints/outputs）不进 Git，只留 index/summary（见 lab/runs/、lab/artifacts/）。
 #
-# status: planned | running | done | failed | superseded
+# 状态机（scripts/validate-experiment-state.py 机器强制，validate-governance 拉起）：
+#   planned → approved → running → done | failed；done|failed → superseded。其他转换非法。
+#   - status_history：每次状态转换追加一条 {status, at, by}；validator 逐步校验合法性，
+#     所以「done 又转回 running」「跳过 approved」都会被拦。只有 planned 可省略 history。
+#   - 进入 approved 前必填（缺一不可）：commit / config / data_split /
+#     expected_runtime（budget）/ success_metric，且落 approved_by / approved_at。
+# alerts：watcher（python lab/infra/launch/expctl.py watch）检出的异常并入对应条目的
+#   alerts 列表（结构见下方 run-000 注释）；approved_by / approved_at / approved_action
+#   只作 human 审计记录，不是防伪造 capability。当前无外部可信 provenance + 原子 consumer，
+#   所以只用 `expctl.py validate-recovery` 做只读校验；actual `apply-recovery` fail-closed。
+# status=done 的 run_summary 必须是 `lab/code/experiments/` 内 repo-relative、非 symlink
+# regular file；绝对路径、`..` traversal、repo/目录逃逸都会被 validator 拒绝。
+# status: planned | approved | running | done | failed | superseded
 # promote: no | unclear | yes  （是否应升级为 evidence/paper claim；yes 走 human gate）
+#
+# 注意：本文件保持 block-style YAML（无 flow mapping），保证无 PyYAML 环境下
+# validate-experiment-state.py 的受限解析器可读。
+# provenance：只有 status=done 且 run_summary 已填的「已闭环 run」才允许被
+# evidence / artifact index 引用为来源（scripts/check-provenance-chain.py 校验）。
+schema_version: 1
 
 experiments:
+  # run-000 是新 schema 的活样例（2026-07-13 依 plan #16 决策升级）：一个已通过
+  # human 审批门、待启动的 fake/local smoke。新实验照此填写；不需要时可整条删除。
   - id: run-000
-    question: "<这个 run 测试哪个 claim？>"
-    hypothesis: "<假设>"
-    status: planned
-    commit: "<git sha>"
-    config: "<lab/code/configs/... 路径>"
-    data_split: "<dataset-index split id>"
-    baseline: "<对比对象>"
-    launch_ref: "<lab/infra/launch/ 里的可复现命令>"
-    tracker: "<wandb/mlflow run id 或 name>"
-    expected_runtime: "<预计时长>"
-    success_metric: "<成功判据>"
+    question: "控制面 smoke：状态机 + launch gate + watcher + recovery 是否闭环？"
+    hypothesis: "fake/local job 能在零真实算力下走通 planned→approved→running→done 全链"
+    status: approved
+    status_history:
+      - status: planned
+        at: "2026-07-13"
+        by: "experiment-orchestrator"
+      - status: approved
+        at: "2026-07-13"
+        by: "example-human"
+    approved_by: "example-human"
+    approved_at: "2026-07-13"
+    commit: "f31923d"
+    config: "lab/infra/launch/registry.yaml"
+    data_split: "none (infrastructure smoke, no dataset)"
+    baseline: "none (infrastructure smoke)"
+    launch_ref: "python lab/infra/launch/expctl.py plan --action launch --backend local-fake --run-id run-000"
+    tracker: "local status files (fake_job workdir /tmp/ml-template-fake-jobs/run-000)"
+    expected_runtime: "under 1 minute (fake job)"
+    success_metric: "fake job reaches done; validate-experiment-state closure passes"
     failure_signals: [OOM, NaN, metric-stall, missing-checkpoint, data-mismatch]
-    run_summary: "<lab/code/experiments/<id>.md 或 run summary 路径>"
+    run_summary: "lab/code/experiments/run-000.md"
+    # alerts 条目结构（由 expctl.py watch 生成、orchestrator 并入；三个 approved_*
+    # 审计字段若出现必须同时落，且 approved_action 与 proposal.command 逐字一致）：
+    #   - id: alert-<ts>-<type>
+    #     type: metric-stall | crash | OOM | NaN | missing-checkpoint | stale-checkpoint
+    #           | config-mismatch | failure | <card failure_signals 自定义项>
+    #     at: "<时间戳>"
+    #     evidence: "<有界证据摘要，不贴长日志>"
+    #     proposal:
+    #       action: restart | kill | launch
+    #       command: "<确切命令>"
+    #       workdir: "/tmp/.../<同一 run-id>"
+    #       radius: "<影响半径>"
+    #     approved_by: null
+    #     approved_at: null
+    #     approved_action: null
+    #     approval_provenance: null  # 无 verifier 前只能为 null；非 null 会被 validator 拒绝
+    #     consumed_at: null
+    #     consumed_by: null
+    #     execution_status: pending  # pending | executing | succeeded | failed
+    #     execution_exit_code: null
+    #     resolved: false
+    alerts: []
     promote: no
-    updated: "YYYY-MM-DD"
+    updated: "2026-07-13"

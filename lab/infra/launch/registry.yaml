@@ -1,0 +1,87 @@
+# lab/infra/launch/registry.yaml — launch registry（launch 命令识别的单一真源）
+#
+# 角色（见 plans/20260712-experiment-control-plane.zh.md 任务 C1/C1b）：
+# 1. adapters：把「本地 fake job」与可选的 Slurm / RunAI 后端统一成同一套
+#    launch/status/kill/restart 命令**草案**描述。adapter 只生成命令文本，
+#    不代替 human 按下启动键；local-fake 的 {trusted_python} 只由 expctl.py 注入当前
+#    进程的 canonical 解释器绝对路径，后端 CLI 不存在时优雅降级 local-only。
+# 2. gated_prefixes：哪些命令前缀属于「launch/kill/restart 类计算副作用入口」。
+#    由 .claude/hooks/pre_tool_guard.py（Claude 与 Codex 共享）经
+#    lab/infra/launch/launch_gate.py 消费：命中即拒绝，不存在 env 放行；调用者自设
+#    CLAUDE_ALLOW_LAUNCH/CODEX_ALLOW_LAUNCH 不构成批准。匹配是 wrapper-robust 的：脚本类前缀按
+#    「归一化脚本路径 + 紧邻 action」任意位置匹配，可执行类前缀先剥常见 wrapper
+#    （env/nohup/nice/stdbuf/timeout/setsid 等）再匹配——env python -u 之类的包装
+#    绕不过地板；env -S/--split-string、shell -c/-lc 与 python -c 动态执行面整体
+#    fail-closed。脚本内部 `.`/`..` 路径、`python -m` 与私有 `_worker` 入口也登记在下方。
+#    permission 层（.claude/settings.json 的 ask + .codex/rules/default.rules 的 prompt）
+#    是额外提示而非 override，与本清单同步手工维护（三处同 commit）。
+#    permission 层的静态模式只能覆盖 canonical 直写形态与有限 wrapper 变体；
+#    更深的 wrapper 组合由 hook 地板兜底。
+#
+# 维护规则：
+# - 新增任何 wrapper / launch 入口（哪怕只是薄包装脚本）必须同 commit 登记进
+#   gated_prefixes，并补 settings.json ask + default.rules prompt，否则会绕过前缀门禁。
+# - gated_prefixes 保持「每行一条、双引号字符串」的格式：launch_gate.py 在无
+#   PyYAML 环境下按行提取，不做完整 YAML 解析。
+# - 裸 `kill` 故意不在本清单（误伤日常进程管理的风险高）；它已由 permission 层
+#   ask/prompt 双侧覆盖（settings.json + default.rules 现状）。
+# - 本文件保持 block-style YAML（无 flow mapping），保证受限解析器可读。
+
+version: 1
+
+adapters:
+  - id: local-fake
+    kind: local
+    description: "本地 fake job（sleep + status/heartbeat/metrics 文件），零算力，供 smoke 与恢复演练"
+    detect_executables: []
+    commands:
+      launch: "{trusted_python} lab/infra/launch/fake_job.py launch --run-id {run_id} --workdir {workdir}"
+      status: "{trusted_python} lab/infra/launch/fake_job.py status --run-id {run_id} --workdir {workdir}"
+      kill: "{trusted_python} lab/infra/launch/fake_job.py kill --run-id {run_id} --workdir {workdir}"
+      restart: "{trusted_python} lab/infra/launch/fake_job.py restart --run-id {run_id} --workdir {workdir}"
+
+  - id: slurm
+    kind: remote
+    description: "Slurm 集群（可选后端；仅在检测到 CLI 时生成草案，绝不自动执行）"
+    detect_executables: [sbatch, squeue, scancel]
+    commands:
+      launch: "sbatch {script}"
+      status: "squeue --job {job_id}"
+      kill: "scancel {job_id}"
+      restart: "scancel {job_id} && sbatch {script}"
+
+  - id: runai
+    kind: remote
+    description: "RunAI/Kubernetes GPU 集群（可选后端；仅在检测到 CLI 时生成草案，绝不自动执行）"
+    detect_executables: [runai]
+    commands:
+      launch: "runai submit {job_name} {submit_args}"
+      status: "runai describe job {job_name}"
+      kill: "runai delete job {job_name}"
+      restart: "runai delete job {job_name} && runai submit {job_name} {submit_args}"
+
+# launch/kill/restart 类命令前缀（human gate 地板）。status/plan/watch 等只读入口不在此列。
+gated_prefixes:
+  - "python lab/infra/launch/fake_job.py launch"
+  - "python lab/infra/launch/fake_job.py kill"
+  - "python lab/infra/launch/fake_job.py restart"
+  - "python lab/infra/launch/fake_job.py _worker"
+  - "python3 lab/infra/launch/fake_job.py launch"
+  - "python3 lab/infra/launch/fake_job.py kill"
+  - "python3 lab/infra/launch/fake_job.py restart"
+  - "python3 lab/infra/launch/fake_job.py _worker"
+  - "python -m lab.infra.launch.fake_job launch"
+  - "python -m lab.infra.launch.fake_job kill"
+  - "python -m lab.infra.launch.fake_job restart"
+  - "python -m lab.infra.launch.fake_job _worker"
+  - "python3 -m lab.infra.launch.fake_job launch"
+  - "python3 -m lab.infra.launch.fake_job kill"
+  - "python3 -m lab.infra.launch.fake_job restart"
+  - "python3 -m lab.infra.launch.fake_job _worker"
+  - "python lab/infra/launch/expctl.py apply-recovery"
+  - "python3 lab/infra/launch/expctl.py apply-recovery"
+  - "sbatch"
+  - "scancel"
+  - "srun"
+  - "runai submit"
+  - "runai delete"

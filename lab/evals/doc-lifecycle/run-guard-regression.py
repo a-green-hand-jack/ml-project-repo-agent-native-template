@@ -123,6 +123,21 @@ def main() -> int:
             ("underscore-int", "1_000"), ("null-inline-comment", "null # pending"),
         )
     }
+    malformed_field_registries = {
+        "id-list": placeholder_approval_registry.replace(
+            "id: placeholder-approval", "id: [placeholder-approval]"
+        ),
+        "path-list": placeholder_approval_registry.replace(
+            f"path: {TMP_ANCHOR_PLAN_REL}", f"path: [{TMP_ANCHOR_PLAN_REL}]"
+        ),
+        "kind-list": placeholder_approval_registry.replace("kind: plan", "kind: [plan]"),
+        "status-list": placeholder_approval_registry.replace(
+            "status: verified", "status: [verified]"
+        ),
+        "upstream-map": placeholder_approval_registry.replace(
+            "upstream: []", "upstream: {bad: ref}"
+        ),
+    }
     quoted_scalar_registries = {
         value: placeholder_approval_registry.replace("approval: TODO", f'approval: "{value}"')
         for value in (
@@ -453,8 +468,8 @@ def main() -> int:
          {"command": ": > /tmp/not-this-repo/memory/doc-lifecycle.yaml"}, 0, None),
         ("control: repo 外 cp overwrite 放行", "Bash",
          {"command": "cp /dev/null /tmp/not-this-repo/memory/doc-lifecycle.yaml"}, 0, None),
-        ("control: env -S echo literal registry 放行", "Bash",
-         {"command": f'env -S "echo {REGISTRY}"'}, 0, None),
+        ("integration: #16 launch floor 对 env -S 动态执行面 fail-closed", "Bash",
+         {"command": f'env -S "echo {REGISTRY}"'}, 2, None),
         ("control: timeout echo literal registry 放行", "Bash",
          {"command": f"timeout 5s echo {REGISTRY}"}, 0, None),
         ("control: echo literal registry 放行", "Bash",
@@ -485,6 +500,11 @@ def main() -> int:
     for label, content in non_string_approval_registries.items():
         cases.append((
             f"fresh-review-6e: registry approval 非 string {label} 拦", "Write",
+            {"file_path": REGISTRY, "content": content}, 2, None,
+        ))
+    for label, content in malformed_field_registries.items():
+        cases.append((
+            f"exact-head: registry 非标量字段 {label} fail-closed", "Write",
             {"file_path": REGISTRY, "content": content}, 2, None,
         ))
     for label, content in quoted_scalar_registries.items():

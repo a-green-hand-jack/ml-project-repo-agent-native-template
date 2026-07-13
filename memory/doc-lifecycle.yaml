@@ -59,6 +59,66 @@ docs:
     downstream: []
     superseded_by: null
 
+  - id: plan-20260712-bootstrap-adoption-proof
+    path: plans/20260712-bootstrap-adoption-proof.zh.md
+    kind: plan
+    status: verified
+    issue: "#12"
+    branch: "feat/12-bootstrap-adoption-proof + feat/12c-smoke-contract + feat/12b-semantic-classification"
+    worktree: null
+    approval: "fresh APPROVE 6182630/35c6196/f33ff9c；本地 merges 3bad60d/1a72762/36ce42a；27 场景 smoke 全绿"
+    upstream: []
+    downstream: []
+    superseded_by: null
+
+  - id: plan-20260712-multi-agent-control-plane
+    path: plans/20260712-multi-agent-control-plane.zh.md
+    kind: plan
+    status: verified
+    issue: "#14"
+    branch: feat/14-multi-agent-control-plane
+    worktree: null
+    approval: "fresh APPROVE e0a32b5；本地 main 已含该提交；harness follow-up e24a652"
+    upstream: []
+    downstream: []
+    superseded_by: null
+
+  - id: plan-20260712-outcome-aware-routing
+    path: plans/20260712-outcome-aware-routing.zh.md
+    kind: plan
+    status: verified
+    issue: "#15"
+    branch: feat/15-outcome-aware-routing
+    worktree: null
+    approval: "fresh APPROVE 94cb678；本地 merge 8b2bb93；47/47 与 strict schema gate 全绿"
+    upstream: []
+    downstream: []
+    superseded_by: null
+
+  - id: plan-20260712-experiment-control-plane
+    path: plans/20260712-experiment-control-plane.zh.md
+    kind: plan
+    status: verified
+    issue: "#16"
+    branch: feat/16-experiment-control-plane
+    worktree: null
+    approval: "fresh APPROVE ecf0c80；本地 merge cbf6ab6；四 interpreter 模式与 strict gates 全绿"
+    upstream: []
+    downstream: []
+    superseded_by: null
+
+  - id: plan-20260712-artifact-evidence-chain
+    path: plans/20260712-artifact-evidence-chain.zh.md
+    kind: plan
+    status: verified
+    issue: "#17"
+    branch: feat/17-artifact-evidence-chain
+    worktree: null
+    approval: "fresh APPROVE 52f83aa；本地 merge 405c542；strict provenance/integration gates 全绿"
+    upstream: []
+    downstream: []
+    superseded_by: null
+
   - id: plan-20260712-plan-lifecycle-state
     path: plans/20260712-plan-lifecycle-state.zh.md
     kind: plan

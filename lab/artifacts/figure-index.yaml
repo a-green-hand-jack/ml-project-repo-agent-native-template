@@ -1,12 +1,22 @@
 # 图索引。防止「figure 对应哪个 commit / run」被遗忘。
+# 共同 provenance 字段（location / commit+config+run_id 三元组 / checksum 三件套 /
+# schema_version）见 .agent/artifact-policy.md；校验：scripts/check-provenance-chain.py。
+schema_version: 1
 
 figures:
   - id: figure-000
     caption: "<图标题/用途>"
-    source_path: "<生成脚本 / 原始数据路径>"
-    generated_by_run: "<run-id>"
+    location: "<生成产物路径或 URI>"
+    how_to_inspect: "<怎么看，例如打开命令>"
     commit: "<git sha>"
+    config: "<config 路径>"
+    run_id: "<run-id>"
     appears_in: "<deliverables/... 或 paper section>"
     supports_claim: "<claim id>"
     status: unknown        # active | superseded | archived | unknown
+    checksum: "<sha256 hex；本地可算时必填>"
+    checksum_algorithm: sha256
+    # 无法校验时删掉上两行，改填（两者都要）：
+    # checksum_unavailable_reason: external-uri-no-checksum
+    # checksum_unavailable_justification: "<具体情境说明，禁 TBD/N-A 类占位>"
     updated: "YYYY-MM-DD"

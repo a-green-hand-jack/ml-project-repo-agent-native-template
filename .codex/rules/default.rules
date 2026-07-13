@@ -56,6 +56,141 @@ prefix_rule(
 )
 
 prefix_rule(
+    pattern = [["scancel", "srun"]],
+    decision = "prompt",
+    justification = "Slurm job control/launch side effects need human approval (launch registry, issue #16).",
+)
+
+prefix_rule(
+    pattern = [["python", "python3"], "lab/infra/launch/fake_job.py", ["launch", "kill", "restart", "_worker"]],
+    decision = "prompt",
+    justification = "Registered launch-registry entry (lab/infra/launch/registry.yaml): launch/kill/restart are human gates even for the local fake backend.",
+)
+
+prefix_rule(
+    pattern = [["python", "python3"], "-m", "lab.infra.launch.fake_job", ["launch", "kill", "restart", "_worker"]],
+    decision = "prompt",
+    justification = "Module-form local fake launch and its private worker are still launch-registry side effects.",
+)
+
+prefix_rule(
+    pattern = [["python", "python3"], "lab/infra/launch/expctl.py", "apply-recovery"],
+    decision = "prompt",
+    justification = "Registered launch-registry entry: recovery validation is gated and actual execution is fail-closed until trusted provenance plus atomic consumption exist.",
+)
+
+# Wrapper 变体加宽（issue #16 Codex 初审 BLOCKER-1）：静态前缀只能覆盖有限包装形态
+# （env/nohup/nice/setsid/stdbuf 直接包一层、python -u）；共享 pre_tool_guard 地板会解析
+# 带参数的 wrapper（timeout 60、nice -n 10 / -n10）与更深组合。
+prefix_rule(
+    pattern = [["env", "nohup", "nice", "setsid", "stdbuf"], ["sbatch", "scancel", "srun", "runai"]],
+    decision = "prompt",
+    justification = "Wrapped scheduler commands are still compute side effects (launch registry, issue #16); deeper wrapper variants are caught by the shared pre_tool_guard floor.",
+)
+
+prefix_rule(
+    pattern = ["timeout"],
+    decision = "prompt",
+    justification = "timeout options can hide a scheduler command; the shared hook parses option operands and remains the non-overridable floor.",
+)
+
+prefix_rule(
+    pattern = ["nice"],
+    decision = "prompt",
+    justification = "nice accepts attached option operands such as -n10 that can hide a scheduler command; the shared hook parses the wrapped command and remains the non-overridable floor.",
+)
+
+prefix_rule(
+    pattern = ["env", ["python", "python3"], "lab/infra/launch/fake_job.py", ["launch", "kill", "restart", "_worker"]],
+    decision = "prompt",
+    justification = "env-wrapped launch-registry entry: still a human gate.",
+)
+
+prefix_rule(
+    pattern = [["python", "python3"], "-u", "lab/infra/launch/fake_job.py", ["launch", "kill", "restart", "_worker"]],
+    decision = "prompt",
+    justification = "python -u variant of a launch-registry entry: still a human gate.",
+)
+
+prefix_rule(
+    pattern = ["env", ["python", "python3"], "lab/infra/launch/expctl.py", "apply-recovery"],
+    decision = "prompt",
+    justification = "env-wrapped launch-registry entry: still a human gate.",
+)
+
+prefix_rule(
+    pattern = [["python", "python3"], "-u", "lab/infra/launch/expctl.py", "apply-recovery"],
+    decision = "prompt",
+    justification = "python -u variant of a launch-registry entry: still a human gate.",
+)
+
+prefix_rule(
+    pattern = ["env", ["python", "python3"], "-u", "lab/infra/launch/fake_job.py", ["launch", "kill", "restart", "_worker"]],
+    decision = "prompt",
+    justification = "env + python -u variant of a launch-registry entry: still a human gate.",
+)
+
+prefix_rule(
+    pattern = ["env", ["python", "python3"], "-u", "lab/infra/launch/expctl.py", "apply-recovery"],
+    decision = "prompt",
+    justification = "env + python -u variant of a launch-registry entry: still a human gate.",
+)
+
+# Caller-controlled env assignments are never human approval. These broad
+# wrapper/eval rules keep nested launch attempts at the Codex prompt layer;
+# the shared hook additionally parses their inner command and denies it.
+prefix_rule(
+    pattern = [["env", "/usr/bin/env"]],
+    decision = "prompt",
+    justification = "env can add caller-controlled assignments or hide dynamic command parsing; the hook remains the non-overridable launch floor.",
+)
+
+prefix_rule(
+    pattern = [["env", "/usr/bin/env"], ["-S", "--split-string"]],
+    decision = "prompt",
+    justification = "env split-string can hide a launch command; caller-controlled environment is not approval.",
+)
+
+prefix_rule(
+    pattern = [["env", "/usr/bin/env"], ["CLAUDE_ALLOW_LAUNCH=1", "CODEX_ALLOW_LAUNCH=1"]],
+    decision = "prompt",
+    justification = "CLAUDE/CODEX_ALLOW_LAUNCH are caller-forgeable and never bypass the launch gate.",
+)
+
+prefix_rule(
+    pattern = [["CLAUDE_ALLOW_LAUNCH=1", "CODEX_ALLOW_LAUNCH=1"]],
+    decision = "prompt",
+    justification = "Direct caller-controlled launch env assignments are not human approval and never bypass the hook.",
+)
+
+prefix_rule(
+    pattern = [["bash", "/bin/bash", "sh", "/bin/sh", "zsh", "/bin/zsh", "dash", "/bin/dash"], ["-c", "-lc"]],
+    decision = "prompt",
+    justification = "Shell eval can hide a launch command; the shared hook fails this dynamic surface closed.",
+)
+
+prefix_rule(
+    pattern = [["nohup", "nice", "setsid", "stdbuf", "timeout", "command", "exec", "ionice"], ["bash", "/bin/bash", "sh", "/bin/sh", "zsh", "/bin/zsh", "dash", "/bin/dash"]],
+    decision = "prompt",
+    justification = "A wrapped shell evaluator is still a dynamic execution surface; the hook fails it closed.",
+)
+
+prefix_rule(
+    pattern = [["python", "python3"], "-c"],
+    decision = "prompt",
+    justification = "Dynamic Python evaluation can create compute side effects and needs human review.",
+)
+
+# Execpolicy prefix rules match literal argv tokens and cannot express `-c<arbitrary-command>`.
+# Prompt all direct CPython CLI uses at this advisory layer so attached command strings cannot miss
+# the prompt. The shared hook performs the precise check and continues to allow normal Python scripts.
+prefix_rule(
+    pattern = [["python", "python3"]],
+    decision = "prompt",
+    justification = "Codex literal-prefix policy cannot selectively match arbitrary attached Python -c command tokens; the shared hook distinguishes dynamic -c from safe normal Python invocations.",
+)
+
+prefix_rule(
     pattern = ["gh", "pr", ["create", "merge"]],
     decision = "prompt",
     justification = "PR creation/merge is an external collaboration side effect.",
@@ -95,6 +230,12 @@ prefix_rule(
     pattern = [["python", "python3"], "scripts/check-doc-lifecycle.py"],
     decision = "allow",
     justification = "Doc lifecycle validator (brief/plan/review/decision status + registry integrity).",
+)
+
+prefix_rule(
+    pattern = [["python", "python3"], "scripts/check-provenance-chain.py"],
+    decision = "allow",
+    justification = "Repo provenance chain validator (read-only, in-process sha256).",
 )
 
 prefix_rule(

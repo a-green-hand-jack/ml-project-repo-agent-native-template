@@ -13,6 +13,8 @@ recommended effort:  <low | medium | high>
 quota snapshot:      <current/weekly remaining + reset for Codex and Claude Code>
 usage velocity:      <recent token/message burn proxy>
 paseo preference:    <role default provider or missing/defaulted>
+outcome decision id: <d-xxxx | none —— 走了 outcome 层就填 decision_id，完整证据链按 ID 查 outcome ledger，不在此内嵌>
+outcome degraded:    <false | true: <一行原因，已回退 quota-only 推荐>>
 allowed paths:       <可读/可写路径>
 forbidden paths:     <绝对不碰>
 tools:               <允许工具>
@@ -21,5 +23,6 @@ evidence required:   <返回什么算完成>
 stop condition:      <何时停>
 escalate condition:  <何时上报 main / 升 tier>
 self-check:          <每次写操作（Edit/Write/git）前先 pwd + git rev-parse --show-toplevel 核对所在 worktree，不要只在任务开头 cd 一次就假设之后都对>
+state registration:  <并行/持久 agent 开工前登记控制面状态（owned/forbidden/worktree 供冲突检测）：python scripts/agent-state.py register "<name>" --task "..." --owned <paths> --forbidden <paths>（见 .agent/multi-agent-control-plane.md）>
 report path:         <.claude/agent-reports/<task>.md>
 ```

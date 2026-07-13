@@ -16,6 +16,10 @@ Claude command and run `python scripts/sync-codex-adapters.py`.
 先检查证据门槛（见 `.agent/artifact-policy.md`）：run 可定位、config 可复现、metric 来源清楚、
 与 baseline 比较清楚、caveat 写明。
 
+promote 前跑 `python scripts/check-provenance-chain.py`：run 必须已闭环（experiment-ledger
+`status: done` + `run_summary`），result-index 条目 checksum（统一 sha256）与引用链必须通过；
+无法校验的 checksum 需填固定枚举 reason + 非占位人工理由（见 `.agent/artifact-policy.md`）。
+
 promote 是 human gate（见 `.agent/human-gates.md`）：用 tier 4 fresh verifier 复核后，
 附 run id / config / commit / checkpoint / data split / metric source，再请求人工批准。
 不要在有旧训练日志的当前上下文里直接下 claim。

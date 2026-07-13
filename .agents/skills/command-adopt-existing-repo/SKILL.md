@@ -38,7 +38,12 @@ Claude command and run `python scripts/sync-codex-adapters.py`.
 4. 汇报：
    - state dir：`lab/docs/audits/template-adoption/state/`
    - report：`lab/docs/audits/template-adoption-report.md`
-   - integrity / governance / original test return code
-   - blockers（如有）
+   - integrity / governance return code
+   - normalize blockers（如有；conflict/受保护路径未解决 = adoption 自身 integrity 失败，两个脚本
+     都应非 0 exit）
+   - smoke（原生测试）结果：`pass`/`fail`/`skipped`/`unknown` + `command_source` + `unverified_reason`
+     ——**注意**：smoke 非 pass 不会让 `prove` / `check-adoption-integrity.py` 的 exit code 变非 0
+     （已决策，见 `plans/20260712-bootstrap-adoption-proof.zh.md` 开放问题 5），必须转述报告里显式的
+     `warnings` / `smoke_warnings` 字段，不要把它当作静默通过
 
 不要 push、开 PR、merge 或 release；这些仍走 human gate。

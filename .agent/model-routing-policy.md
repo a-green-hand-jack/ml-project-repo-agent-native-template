@@ -57,6 +57,27 @@ Launch packet 必须记录：
 
 硬约束优先于 quota：例如 transfer experiment 要证明跨 provider 时，provider/model/policy 必须在启动前冻结，启动后不因后续 quota 变化临时切换。
 
+## Outcome-aware 整合（quota + outcome 两维）
+
+quota 说「还剩多少」，outcome ledger 说「这条路线历史上值不值」。两者都在
+`coding-agent-quota` skill 内（已决策：扩展该 skill，不另立新 skill）：
+
+- 何时参考 outcome 证据：反复出现的 task class / role 组合、tier ≥ 2 的正式派发。运行
+  `outcome_route.py`（`--record` 落一条 decision 记录），任务收尾用 `outcome_ledger.py
+  record-outcome` 补实际结果（实际 provider/model/原生 effort，不只是推荐值）。
+- 保守回退：quota snapshot 过期或 outcome 样本不足时输出 `degraded: true` + 原因，
+  推荐自动回退为 quota-only 结果——`--min-samples` 必须 ≥1，零 outcome 也必须回退，
+  缺数据时不伪装精确数字。
+- 证据隔离：只按 `provider + model + effort + role + task_class + routing_tier +
+  policy_version` 完整具体路线聚合；一个 provider 下其他 model/effort 或旧 policy 的结果
+  不得为当前路线背书。
+- 可追溯：launch packet 只嵌 `outcome decision id`（+ degraded 提示），完整证据链按 ID 存
+  `.claude/skills/coding-agent-quota/.outcome-ledger/`（gitignored 明细）。
+- 正式 benchmark 冻结规则：用 `.agent/templates/routing-benchmark-card.md`（模型池 /
+  policy_version / 预算上限 / fixture 版本一次性锁定），card 登记在
+  `.claude/skills/coding-agent-quota/benchmarks/`。本版成本口径只有订阅 `quota_cost`，
+  无 $/token 价格维度。
+
 ## 已知例外（`model: inherit` 不适用的情况）
 
 - `.claude/agents/zh-review-gate.md` 的 frontmatter 显式锁定 `model: haiku`，不遵循上面"model: inherit，不写死"的默认原则。这是刻意的、经 human 明确要求的窄例外，不是遗漏。

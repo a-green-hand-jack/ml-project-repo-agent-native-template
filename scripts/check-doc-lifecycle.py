@@ -179,13 +179,20 @@ def _scalar(raw: str):
     v = raw.strip()
     if len(v) >= 2 and v[0] == v[-1] and v[0] in "'\"":
         return v[1:-1]
-    if v in ("", "null", "~"):
+    lower = v.lower()
+    if not v or lower == "null" or v == "~":
         return None
     if v == "[]":
         return []
     if v == "{}":
         return {}
-    lower = v.lower()
+    if v.startswith("[") and v.endswith("]"):
+        inner = v[1:-1].strip()
+        return [_scalar(item) for item in inner.split(",") if item.strip()] if inner else []
+    if v.startswith("{") and v.endswith("}"):
+        # The restricted parser only needs type parity here. Registry fields never accept mappings,
+        # so preserving the mapping type is sufficient to reject it deterministically.
+        return {"__inline_mapping__": v[1:-1].strip()}
     if lower in ("true", "false", "yes", "no", "on", "off"):
         return lower in ("true", "yes", "on")
     if re.fullmatch(r"[+-]?0x[0-9a-f]+", lower):
@@ -496,9 +503,14 @@ def _active_plan_association_errors(e: dict, repo: Path) -> list[str]:
     锁定明确坐标。branch/worktree 是本地实体，分别核验 Git ref 与 `git worktree list`，且
     implementing worktree 必须绑定同一 branch。
     """
-    eid = str(e.get("id") or "<no-id>")
+    raw_id = e.get("id")
+    eid = raw_id if isinstance(raw_id, str) and raw_id else "<invalid-id>"
     status = e.get("status")
-    if e.get("kind") != "plan" or status not in ACTIVE_PLAN_ASSOC_REQUIRED:
+    if (
+        e.get("kind") != "plan"
+        or not isinstance(status, str)
+        or status not in ACTIVE_PLAN_ASSOC_REQUIRED
+    ):
         return []
 
     errors: list[str] = []
@@ -539,47 +551,73 @@ def registry_errors(entries: list[dict], repo: Path, *, check_paths: bool = True
         )
     ids: dict[str, dict] = {}
     for e in entries:
-        eid = e.get("id")
-        if not eid:
-            errs.append("注册表存在缺 id 的条目")
+        raw_id = e.get("id")
+        if not isinstance(raw_id, str) or not raw_id.strip():
+            errs.append(f"注册表 id 应为非空字符串，实际：{raw_id!r}")
             continue
+        eid = raw_id.strip()
         if eid in ids:
             errs.append(f"注册表 id 重复：{eid}")
-        ids[str(eid)] = e
+        ids[eid] = e
     for e in entries:
-        eid = str(e.get("id") or "<no-id>")
+        raw_id = e.get("id")
+        eid = raw_id.strip() if isinstance(raw_id, str) and raw_id.strip() else "<invalid-id>"
         kind, status, path = e.get("kind"), e.get("status"), e.get("path")
-        if kind not in KINDS:
+        if not isinstance(kind, str):
+            errs.append(f"{eid}: kind 应为字符串，实际：{kind!r}")
+        elif kind not in KINDS:
             errs.append(f"{eid}: kind 非法：{kind}（合法：{'/'.join(sorted(KINDS))}）")
-        if status not in VALID_STATUS:
+        if not isinstance(status, str):
+            errs.append(f"{eid}: status 应为字符串，实际：{status!r}")
+        elif status not in VALID_STATUS:
             errs.append(f"{eid}: status 非法：{status}（合法：{'/'.join(sorted(VALID_STATUS))}）")
-        if not path:
-            errs.append(f"{eid}: 缺 path")
-        elif check_paths and not (repo / str(path)).is_file():
+        if not isinstance(path, str) or not path.strip():
+            errs.append(f"{eid}: path 应为非空字符串，实际：{path!r}")
+        elif check_paths and not (repo / path).is_file():
             errs.append(f"{eid}: path 指向不存在的文件：{path}（悬空引用）")
         # kind 与路径类别一致性：四类目录内的文档不允许谎报 kind（否则可绕过 plan 必填段校验）。
-        if path and kind in KINDS:
-            expected = doc_kind(str(path))
+        if isinstance(path, str) and isinstance(kind, str) and kind in KINDS:
+            expected = doc_kind(path)
             if expected is not None and expected != kind:
                 errs.append(
                     f"{eid}: kind={kind} 与路径类别不符：{path} 属 {expected} 目录，"
                     f"必须登记为 kind={expected}（防止谎报 kind 绕过必填段校验）"
                 )
-        if status in APPROVAL_REQUIRED and _is_evidence_missing_or_placeholder(e.get("approval")):
+        if (
+            isinstance(status, str)
+            and status in APPROVAL_REQUIRED
+            and _is_evidence_missing_or_placeholder(e.get("approval"))
+        ):
             errs.append(f"{eid}: status={status} 但 approval 证据缺失/占位（human gate 引用必填）")
         for field in LIST_FIELDS:
-            for ref in e.get(field) or []:
-                if str(ref) not in ids:
+            raw_refs = e.get(field)
+            if raw_refs is None:
+                refs = []
+            elif not isinstance(raw_refs, list):
+                errs.append(f"{eid}: {field} 应为字符串列表，实际：{raw_refs!r}")
+                refs = []
+            else:
+                refs = raw_refs
+            for ref in refs:
+                if not isinstance(ref, str) or not ref.strip():
+                    errs.append(f"{eid}: {field} 条目应为非空字符串，实际：{ref!r}")
+                elif ref not in ids:
                     errs.append(f"{eid}: {field} 引用不存在的条目：{ref}（悬空引用）")
         sb = e.get("superseded_by")
-        if sb and str(sb) not in ids:
+        if sb is not None and not isinstance(sb, str):
+            errs.append(f"{eid}: superseded_by 应为字符串或 null，实际：{sb!r}")
+        elif isinstance(sb, str) and sb and sb not in ids:
             errs.append(f"{eid}: superseded_by 引用不存在的条目：{sb}（悬空引用）")
         errs += _active_plan_association_errors(e, repo)
     # 过期 approval（唯一触发，human 拍板）：上游被标 superseded → 本条进阶态失效。
     for e in entries:
-        if e.get("status") in SCOPE_REQUIRED:
-            for ref in e.get("upstream") or []:
-                up = ids.get(str(ref))
+        status = e.get("status")
+        upstream = e.get("upstream")
+        if isinstance(status, str) and status in SCOPE_REQUIRED and isinstance(upstream, list):
+            for ref in upstream:
+                if not isinstance(ref, str):
+                    continue
+                up = ids.get(ref)
                 if up is not None and up.get("status") == "superseded":
                     errs.append(
                         f"{e.get('id')}: 过期 approval——上游 {ref} 已 superseded，"
@@ -591,9 +629,9 @@ def registry_errors(entries: list[dict], repo: Path, *, check_paths: bool = True
 def doc_errors_for_entry(e: dict, repo: Path) -> list[str]:
     errs: list[str] = []
     path = e.get("path")
-    if not path:
+    if not isinstance(path, str) or not path:
         return errs
-    f = repo / str(path)
+    f = repo / path
     if not f.is_file():
         return errs  # registry_errors 已报悬空
     try:
@@ -608,9 +646,9 @@ def doc_errors_for_entry(e: dict, repo: Path) -> list[str]:
         errs.append(f"{path}: 缺状态锚点行（Status: <enum> · <date> · <ref>）")
     elif anchor != status:
         errs.append(f"{path}: 状态锚点 {anchor} 与注册表 {status} 矛盾（同 commit 对齐两处）")
-    if e.get("kind") == "plan" and status in SCOPE_REQUIRED:
+    if e.get("kind") == "plan" and isinstance(status, str) and status in SCOPE_REQUIRED:
         errs += [f"{path}: {m}（{status} 态必填）" for m in missing_plan_sections(text)]
-    if status in SCOPE_REQUIRED and annotation_conflict(text):
+    if isinstance(status, str) and status in SCOPE_REQUIRED and annotation_conflict(text):
         errs.append(
             f"{path}: Human 批注区仍有 [?]/[改] 未决批注，不能停留在 {status}——先收敛或回 in-review"
         )
@@ -622,7 +660,12 @@ def kind_path_warnings(entries: list[dict]) -> list[str]:
     warns = []
     for e in entries:
         kind, path = e.get("kind"), e.get("path")
-        if path and kind in KINDS and doc_kind(str(path)) is None:
+        if (
+            isinstance(path, str)
+            and isinstance(kind, str)
+            and kind in KINDS
+            and doc_kind(path) is None
+        ):
             warns.append(
                 f"{e.get('id')}: path 不在四类目录（{'、'.join(DOC_DIRS)}）内：{path}——"
                 f"kind={kind} 为自由声明，必填段校验按声明 kind 执行"
@@ -631,7 +674,7 @@ def kind_path_warnings(entries: list[dict]) -> list[str]:
 
 
 def coverage_errors(entries: list[dict], repo: Path) -> list[str]:
-    registered = {str(e.get("path")) for e in entries}
+    registered = {e["path"] for e in entries if isinstance(e.get("path"), str)}
     return [
         f"{rel}: 四类文档未登记进 {REGISTRY_REL}"
         for rel in scan_docs(repo)
@@ -753,12 +796,17 @@ def _stale_reason(rel: str, status: str, repo: Path) -> str | None:
     entries = _load_registry(repo)
     if not entries:
         return None
-    by_id = {str(e.get("id")): e for e in entries if e.get("id")}
+    by_id = {e["id"]: e for e in entries if isinstance(e.get("id"), str) and e["id"]}
     for e in entries:
-        if str(e.get("path")) != rel:
+        if e.get("path") != rel:
             continue
-        for ref in e.get("upstream") or []:
-            up = by_id.get(str(ref))
+        upstream = e.get("upstream")
+        if not isinstance(upstream, list):
+            continue
+        for ref in upstream:
+            if not isinstance(ref, str):
+                continue
+            up = by_id.get(ref)
             if up is not None and up.get("status") == "superseded":
                 return (
                     f"doc-lifecycle: {rel} 标记 {status} 但其上游 {ref} 已 superseded"
@@ -2268,6 +2316,51 @@ def self_test() -> int:
             restricted_errors == []
             and bool(restricted_entries)
             and not isinstance(restricted_entries[0].get("approval"), str),
+        )
+        td.cleanup()
+
+    # Exact-head final review: fallback must match PyYAML's case-insensitive nulls while quoted
+    # values stay strings; malformed non-scalar registry fields must fail closed, never raise.
+    for raw_null in ("null", "Null", "NULL", "~"):
+        check(f"受限 parser 将 {raw_null!r} 解析为 null", _scalar(raw_null) is None)
+    for quoted_null in ('"Null"', "'NULL'"):
+        check(
+            f"受限 parser 保留 quoted null {quoted_null}",
+            isinstance(_scalar(quoted_null), str),
+        )
+
+    malformed_fields = (
+        ("id-list", "id: plan-demo", "id: [plan-demo]", "id 应为非空字符串"),
+        ("path-list", "path: plans/demo.zh.md", "path: [plans/demo.zh.md]", "path 应为非空字符串"),
+        ("kind-list", "kind: plan", "kind: [plan]", "kind 应为字符串"),
+        ("status-list", "status: approved", "status: [approved]", "status 应为字符串"),
+        ("upstream-map", "upstream: []", "upstream: {bad: ref}", "upstream 应为字符串列表"),
+    )
+    for label, old, new, needle in malformed_fields:
+        malformed_registry = _OK_REGISTRY.replace(old, new, 1)
+        td, root = fresh({"plans/demo.zh.md": _OK_PLAN, REGISTRY_REL: malformed_registry})
+        entries, perr = parse_registry_text(malformed_registry)
+        try:
+            typed_errors = registry_errors(entries, root) if not perr else perr
+        except Exception as exc:  # noqa: BLE001  regression assertion: never fail open via TypeError
+            typed_errors = [f"unexpected exception: {type(exc).__name__}: {exc}"]
+        check(f"非标量 registry {label} 返回结构化错误", any(needle in e for e in typed_errors))
+        check(
+            f"hook 拦非标量 registry {label}",
+            pretooluse_reason(
+                "Write", {"file_path": str(root / REGISTRY_REL), "content": malformed_registry}, root
+            ) is not None,
+        )
+        restricted_entries, restricted_perr = _parse_restricted(malformed_registry)
+        try:
+            restricted_errors = (
+                registry_errors(restricted_entries, root) if not restricted_perr else restricted_perr
+            )
+        except Exception as exc:  # noqa: BLE001
+            restricted_errors = [f"unexpected exception: {type(exc).__name__}: {exc}"]
+        check(
+            f"受限 parser 非标量 registry {label} 同样拒绝",
+            any(needle in e for e in restricted_errors),
         )
         td.cleanup()
 

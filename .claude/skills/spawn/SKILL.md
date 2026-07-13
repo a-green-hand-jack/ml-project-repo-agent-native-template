@@ -76,7 +76,27 @@ python3 .claude/hooks/agent_name_set.py "$NAME" --register --paseo-id "$CHILD" -
 
 ### 6. 收尾
 - agent↔agent 通信：用花名册（`memory/agents-roster.md`）把 name 解析成 paseo-id，再 `paseo send <id> "<消息>"`（`send` 认 id 不认 name）。
-- 子 agent 结束/归档：在 roster 该行标 done（不立即删，留痕）。
+- 子 agent 结束/归档：在 roster 该行标 done（不立即删，留痕），并
+  `python scripts/agent-state.py set-status "<name>" done`（控制面状态同步终态）。
+
+## 查询已在跑的 agent（list/status，issue #14 控制面）
+
+起新 agent 前先看现有的（human 拍板：查询能力并入本 skill，不独立成新 skill）：
+
+```
+python scripts/agent-status.py            # 谁在跑 / 做什么 / active|idle|blocked|done|stale / 心跳 / 未读数
+python scripts/agent-status.py --json     # 机器可读
+python scripts/check-agent-conflicts.py scan   # 活跃 agent owned_paths 有无重叠（并行前必查）
+```
+
+- 数据源：roster（本 skill 维护的总览）+ `memory/agents/<name>.yaml` 状态明细；有 `paseo` CLI 时
+  自动叠加 `paseo ls --json` 校验「登记的 paseo-id 是否还活着」，缺 Paseo 降级纯 repo 视图。
+- 30 分钟无心跳 → `stale`（该 agent 的 owned_paths 声明不再被冲突检测强制）。
+- 与控制面的挂接（schema/协议见 `.agent/multi-agent-control-plane.md`）：`agent_name_set.py`
+  自命名/`--register` 时已自动初始化 `memory/agents/<name>.yaml` + mailbox；派发方在 launch packet
+  里让子 agent 开工先 `python scripts/agent-state.py register "<name>" --task ... --owned ... --forbidden ...`
+  声明边界，session boundary 跑 `agent-state.py heartbeat`；关键消息/交接走
+  `python scripts/agent-mailbox.py send/handoff/ack`（`paseo send` 只做实时提醒，mailbox 落盘才是真相层）。
 
 ## 允许修改的路径
 

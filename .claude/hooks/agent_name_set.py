@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Agent self-naming setter —— agent 据 doctrine 选定名字后调用，做「机械」那部分：
 ① 写 worktree 根的 `.agent-identity`；② `paseo agent update <id> --name`（**默认开启**，清理
-垃圾 tab 名）；③ upsert `memory/agents-roster.md` 花名册一行。
+垃圾 tab 名）；③ upsert `memory/agents-roster.md` 花名册一行；④ 尽力初始化控制面状态文件
+`memory/agents/<name>.yaml`（经 `scripts/agent-state.py`，见 `.agent/multi-agent-control-plane.md`；
+roster 尾列 `state` 指向该文件——roster 管总览索引，yaml 管状态明细，不重复同一批字段）。
 
 命名 doctrine（`<persona>·<动作字>·<focus>`）见 `.agent/agent-identity.md`——**选名由 agent 做**
 （据真实任务），本脚本只负责落地。
@@ -37,9 +39,10 @@ ROSTER = REPO_ROOT / "memory" / "agents-roster.md"
 ROSTER_HEADER = (
     "# agents-roster —— 活 agent 花名册（运行时 · 项目层 · 不随 template sync）\n\n"
     "> 由 `.claude/hooks/agent_name_set.py` 维护；命名 doctrine 见 `.agent/agent-identity.md`。\n"
-    "> 每个 project 各自的活 agent，不继承、不同步。\n\n"
-    "| name | 做什么 | focus | branch/worktree | paseo-id | status | updated |\n"
-    "| --- | --- | --- | --- | --- | --- | --- |\n"
+    "> 每个 project 各自的活 agent，不继承、不同步。\n"
+    "> `state` 列指向 `memory/agents/<name>.yaml` 状态明细（`.agent/multi-agent-control-plane.md`）。\n\n"
+    "| name | 做什么 | focus | branch/worktree | paseo-id | status | updated | state |\n"
+    "| --- | --- | --- | --- | --- | --- | --- | --- |\n"
 )
 
 
@@ -106,24 +109,95 @@ def _cell(s: str) -> str:
     return s.replace("|", "\\|").replace("\n", " ").strip() or "-"
 
 
+def _state_helpers():
+    """尽力加载 scripts/agent-state.py（issue #14 控制面）；缺失/失败返回 None（不 block）。"""
+    script = REPO_ROOT / "scripts" / "agent-state.py"
+    if not script.is_file():
+        return None
+    try:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("agent_state", script)
+        if spec is None or spec.loader is None:
+            return None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:  # noqa: BLE001  控制面是增量层，任何失败不影响命名主流程
+        return None
+
+
+def _register_state(name: str, pid: str, worktree: str | None, branch: str | None) -> str:
+    """初始化/刷新 `memory/agents/<name>.yaml`（心跳+mailbox）。返回状态串（供日志）。"""
+    mod = _state_helpers()
+    if mod is None:
+        return "state-skip(no agent-state.py)"
+    try:
+        root = mod.control_plane_root(REPO_ROOT)
+        mod.register(root, name, paseo_id=pid or None, worktree=worktree, branch=branch)
+        return "state-registered"
+    except Exception:  # noqa: BLE001
+        return "state-failed"
+
+
+def _state_ref(name: str) -> str:
+    mod = _state_helpers()
+    if mod is None:
+        return "-"
+    try:
+        return f"memory/agents/{mod.sanitize_name(name)}.yaml"
+    except Exception:  # noqa: BLE001
+        return "-"
+
+
+def _split_cols(row: str) -> list[str]:
+    """按「未转义」的 | 切表格行：先把 \\| 占位，切完再还原（防 name/focus 里的真实 |）。"""
+    return [c.replace("\x00", "|").strip()
+            for c in row.strip("|").replace("\\|", "\x00").split("|")]
+
+
+def _migrate_roster(lines: list[str]) -> list[str]:
+    """旧 7 列表头（无尾列 `state`）原位升级为 8 列：表头/分隔行补列、7 列旧数据行补默认值
+    `-`。否则合并后会出现七列表头配八列数据（新行由本脚本按 8 列写出）。幂等：已是 8 列表头
+    原样返回；已有 8 列的数据行不再补。"""
+    header_i = next((i for i, ln in enumerate(lines) if ln.strip().startswith("| name ")), None)
+    if header_i is None or "| state |" in lines[header_i]:
+        return lines
+    out: list[str] = []
+    for ln in lines:
+        s = ln.strip()
+        if not s.startswith("|"):
+            out.append(ln)
+        elif s.startswith("| name "):
+            out.append(s + " state |\n")
+        elif s.startswith("| ---"):
+            out.append(s + " --- |\n")
+        elif len(_split_cols(s)) == 7:
+            out.append(s + " - |\n")
+        else:
+            out.append(ln)
+    return out
+
+
 def _upsert_roster(name: str, doing: str, focus: str, bw: str, pid: str) -> None:
     ts = time.strftime("%Y-%m-%d %H:%M")
-    row = f"| {_cell(name)} | {_cell(doing)} | {_cell(focus)} | {_cell(bw)} | {_cell(pid or '-')} | active | {ts} |\n"
+    row = (f"| {_cell(name)} | {_cell(doing)} | {_cell(focus)} | {_cell(bw)} | {_cell(pid or '-')} "
+           f"| active | {ts} | {_cell(_state_ref(name))} |\n")
     try:
         ROSTER.parent.mkdir(parents=True, exist_ok=True)
         text = ROSTER.read_text(encoding="utf-8") if ROSTER.is_file() else ROSTER_HEADER
     except (OSError, ValueError):
         text = ROSTER_HEADER
-    lines = text.splitlines(keepends=True)
+    lines = _migrate_roster(text.splitlines(keepends=True))
     # 找同一 agent 的数据行替换；否则追加。数据行 = 以 | 开头且不是表头/分隔行。
     replaced = False
     for i, ln in enumerate(lines):
         s = ln.strip()
         if not s.startswith("|") or s.startswith("| ---") or s.startswith("| name "):
             continue
-        # 按「未转义」的 | 切列：先把 \| 占位，切完再还原——否则 name/focus 里的真实 |
+        # 按「未转义」的 | 切列（_split_cols）——否则 name/focus 里的真实 |
         # 会多切出一列、错位 paseo-id、导致去重失败而重复行（无限增长）。
-        cols = [c.replace("\x00", "|").strip() for c in s.strip("|").replace("\\|", "\x00").split("|")]
+        cols = _split_cols(s)
         row_name = cols[0] if cols else ""
         row_pid = cols[4] if len(cols) >= 5 else ""
         if pid:
@@ -145,11 +219,74 @@ def _upsert_roster(name: str, doing: str, focus: str, bw: str, pid: str) -> None
 
 
 def _register_child(name: str, pid: str, worktree: str) -> int:
-    """launcher 用：只把「已出生即命名」的子 agent 登记进 roster。不写自身文件、不 rename。"""
+    """launcher 用：把「已出生即命名」的子 agent 登记进 roster + 初始化控制面状态文件。
+    不写自身 `.agent-identity`、不 rename。worktree 参数是展示标签（`branch (wt)`），
+    子 agent 的实际 worktree 路径由它自己首次 register/heartbeat 时补。"""
     doing, focus = _split_name(name)
     _upsert_roster(name, doing, focus, worktree or "-", pid)
-    print(f"[agent-name] 已登记子 agent {name}（paseo-id={pid or '-'}；仅 roster）", file=sys.stderr)
+    state_status = _register_state(name, pid, None, None)
+    print(f"[agent-name] 已登记子 agent {name}（paseo-id={pid or '-'}；roster + {state_status}）",
+          file=sys.stderr)
     return 0
+
+
+def _self_test() -> int:
+    """roster 读写自检（只写 /tmp 临时目录，可在只读 repo 下跑）。"""
+    global ROSTER
+    import tempfile
+
+    failures: list[str] = []
+
+    def check(cond: bool, label: str) -> None:
+        print(("  ok    " if cond else "  FAIL  ") + label)
+        if not cond:
+            failures.append(label)
+
+    saved_roster = ROSTER
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            ROSTER = Path(td) / "agents-roster.md"
+            # [MINOR 回归] 旧 7 列表头 roster（无 state 列）→ upsert 时原位升级为 8 列
+            ROSTER.write_text(
+                "# agents-roster —— 活 agent 花名册\n\n"
+                "| name | 做什么 | focus | branch/worktree | paseo-id | status | updated |\n"
+                "| --- | --- | --- | --- | --- | --- | --- |\n"
+                "| 旧·将·one | 旧·将 | one | main (repo) | p-1 | active | 2026-07-01 10:00 |\n",
+                encoding="utf-8",
+            )
+            _upsert_roster("干将·修·two", "干将·修", "two", "feat/x (wt)", "p-2")
+            lines = ROSTER.read_text(encoding="utf-8").splitlines()
+            header = next(ln for ln in lines if ln.startswith("| name "))
+            sep = next(ln for ln in lines if ln.startswith("| ---"))
+            rows = {_split_cols(ln)[0]: _split_cols(ln) for ln in lines
+                    if ln.startswith("|") and not ln.startswith(("| name ", "| ---"))}
+            check(header.rstrip().endswith("| state |") and len(_split_cols(header)) == 8,
+                  "旧 7 列表头升级为含 state 的 8 列")
+            check(len(_split_cols(sep)) == 8, "分隔行同步补到 8 列")
+            check(len(rows["旧·将·one"]) == 8 and rows["旧·将·one"][7] == "-",
+                  "旧数据行补默认值 `-`（7 列 → 8 列）")
+            check(len(rows["干将·修·two"]) == 8 and rows["干将·修·two"][4] == "p-2",
+                  "新行按 8 列写出、paseo-id 不错位")
+
+            # 幂等：8 列 roster 再 upsert 不再迁移、按 paseo-id 去重不重复行
+            _upsert_roster("干将·修·two", "干将·修", "two", "feat/x (wt)", "p-2")
+            lines2 = ROSTER.read_text(encoding="utf-8").splitlines()
+            check(sum(1 for ln in lines2 if ln.startswith("| name ")) == 1
+                  and sum("p-2" in ln for ln in lines2) == 1,
+                  "8 列 roster 幂等：不重复迁移、同 paseo-id 不重复行")
+
+            # 全新 roster（无文件）→ 直接 8 列表头
+            ROSTER = Path(td) / "fresh-roster.md"
+            _upsert_roster("师爷·审·three", "师爷·审", "three", "main (repo)", "p-3")
+            fresh = ROSTER.read_text(encoding="utf-8")
+            check("| state |" in fresh and "| 师爷·审·three |" in fresh,
+                  "全新 roster 直接 8 列表头")
+    finally:
+        ROSTER = saved_roster
+
+    print(("agent-name-set self-test：全部通过" if not failures
+           else f"agent-name-set self-test：{len(failures)} 项失败"), file=sys.stderr)
+    return 1 if failures else 0
 
 
 def main() -> int:
@@ -159,7 +296,11 @@ def main() -> int:
                     help="只登记给定 name+id 到 roster（launcher 用），不改自身")
     ap.add_argument("--paseo-id", default="", help="--register 时要登记的子 agent id")
     ap.add_argument("--worktree", default="", help="--register 时该 agent 的 branch/worktree 标签")
+    ap.add_argument("--self-test", action="store_true")
     args, _ = ap.parse_known_args()
+
+    if args.self_test:
+        return _self_test()
 
     name = agent_identity._clean(args.name)
     if not name:
@@ -176,7 +317,7 @@ def main() -> int:
             return 0
         return _register_child(name, pid, args.worktree.strip())
 
-    # 自命名（本 agent）：① identity 文件 ② paseo rename（默认开启）③ roster
+    # 自命名（本 agent）：① identity 文件 ② paseo rename（默认开启）③ roster ④ 控制面状态文件
     try:
         IDENTITY_FILE.write_text(name + "\n", encoding="utf-8")
     except OSError:
@@ -185,7 +326,11 @@ def main() -> int:
     doing, focus = _split_name(name)
     pid = os.environ.get("PASEO_AGENT_ID", "").strip()
     _upsert_roster(name, doing, focus, _branch_worktree(), pid)
-    print(f"[agent-name] 已命名 {name}（{rename_status}；已写 .agent-identity + roster）", file=sys.stderr)
+    top = _git(["rev-parse", "--show-toplevel"])
+    branch = _git(["branch", "--show-current"])
+    state_status = _register_state(name, pid, top or None, branch or None)
+    print(f"[agent-name] 已命名 {name}（{rename_status}；已写 .agent-identity + roster + {state_status}）",
+          file=sys.stderr)
     return 0
 
 

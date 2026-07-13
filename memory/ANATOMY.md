@@ -16,8 +16,14 @@ memory/
 ├── doc-lifecycle.yaml       brief/plan/review/decision 生命周期注册表（schema 见 plans/ANATOMY.md，由 check-doc-lifecycle.py 校验）
 ├── gc/                      过期状态/handoff 归档区
 ├── branches/                <slug>.md 单分支状态
-└── handoffs/                <YYYYMMDD>-<slug>.md 交接文档
+├── handoffs/                <YYYYMMDD>-<slug>.md 交接文档
+├── agents-roster.md         活 agent 花名册总览（运行时，gitignored；agent_name_set.py 维护）
+├── agents/                  <name>.yaml 每 agent 状态明细（运行时，gitignored；agent-state.py 维护）
+└── mailbox/                 <name>/inbox.md+outbox.md agent 间消息落盘（运行时，gitignored）
 ```
+
+`agents-roster.md` / `agents/` / `mailbox/` 是多 agent 控制面（`.agent/multi-agent-control-plane.md`，
+issue #14）：格式/脚本随 template 继承，内容是每 project 运行时状态、不入 git（README 除外）。
 
 `worktree-status.md` 由 `branch-reporter` subagent（见 `.claude/agents/branch-reporter.md`）盘点所有 active branch/worktree 后写入，不是每个 session 都会更新的活文件——只在派生 branch-reporter 生成一次汇总报告时才出现/刷新。
 
