@@ -11,13 +11,12 @@
   target 上由独立顶层 Claude sessions 证明 default deny、显式 SKIP allow 与 registry delete
   deny。raw 转录、debug log 与 SHA256 见
   `lab/evals/doc-lifecycle/evidence-20260713-runtime-probes.md`。
-- symbolic `HEAD` 的上轮独立 fresh review（受审提交 `1a970291`）提出的四项 MAJOR 已在直接
-  code child `22d7572607c7708a4d35da09aa62d5afa877b008` 修复：受限 YAML 精确缩进语法、Bash
-  `dd`/`tee` 覆盖、四空格 Markdown 代码锚点与过时 durable 状态均有 normal/`python -S`
-  对抗 fixtures。G1/G2 又在该精确 code target 的三个独立顶层 Claude sessions 重跑 PASS，六份
-  raw/debug gzip 与 SHA256 已纳入当前 evidence-only symbolic `HEAD`。当前唯一门槛是对该
-  symbolic `HEAD` 跑全 strict gates 并取得独立 final fresh `APPROVE`；此前仍保持 implementing、
-  不得合入。
+- evidence-only `83be6d5` 的独立 final review 已完成并给出 `CHANGES_REQUESTED`：GNU
+  `cp -t/--target-directory` 可绕过 registry overwrite guard，且 plan/checklist/status 的 durable
+  记录仍有矛盾。前一 code target `22d7572` 的 G1/G2 raw evidence 仍可核验，但不能冒充本轮
+  修复的最终证据。当前正在修复这两项 MAJOR、补 normal/`python -S` 对抗 fixtures；修复提交后
+  必须在精确新 code target 重跑三个独立顶层 Claude G1/G2 sessions、全 strict gates 与独立
+  final fresh review。仅 `APPROVE` 后才可合入，期间保持 implementing。
 - 权威状态注册表：`memory/doc-lifecycle.yaml`（brief/plan/review/decision 四类统一，语义见 `plans/ANATOMY.md`）。
 - 其余存量 plan 均已 `verified`，decisions 均 `approved`（详见注册表）。
 - 本节由 agent 在状态流转时更新；compact/clear 后 `context_continuity.py` 会把本文件回注新上下文。
@@ -50,9 +49,10 @@
 
 ## 未合入 blocker
 
-- #13：C1-C3/X1-X3 真实 runtime evidence 有效；`1a970291` final review 的四项 MAJOR 已由
-  code target `22d7572` 修复并通过 exact-target G1/G2。仍须提交当前 evidence-only direct child、
-  完成全 strict gates 与 exact symbolic `HEAD` 独立 fresh `APPROVE`，否则不得合入。
+- #13：C1-C3/X1-X3 真实 runtime evidence 有效；evidence-only `83be6d5` 的独立 final review
+  因 GNU `cp -t/--target-directory` overwrite 绕过与 durable 状态矛盾给出 `CHANGES_REQUESTED`。
+  当前修复完成后仍须在精确新 code target 重跑 G1/G2、全 strict gates，并让 direct evidence
+  child 取得独立 fresh `APPROVE`，否则不得合入。
 - #18 `cebe427`：raw-evidence 绑定 validator 的代码 MAJOR 已修复并获 code APPROVE；仍须纳入
   #13 hook 兼容修复，在最终 exact target 完成 C1-C7/X1-X7、`--require-fresh` exit 0 与 fresh
   final review。未取得这些证据前不得合入。

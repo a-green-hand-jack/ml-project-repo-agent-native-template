@@ -103,64 +103,64 @@ repo 里已经有好几套相邻但不统一的"状态/审批"机制，设计新
 - 不 push / 开 PR / merge（human gate）
 - 不动 `.claude/worktrees/` 之外的其他 in-flight 分支/worktree
 
-## 任务树（草案，供批注；实现顺序/取舍待收敛）
+## 任务树（实现与验收项已完成；feature 状态仍待 final APPROVE/merge）
 
-- [ ] 状态模型设计（四类统一）
-  - [ ] 定四类文档（brief / plan / review / decision）共用的状态锚点格式（例如正文开头一行：`Status: <enum> · <date> · <approver/ref>`）；确认四类是否共用同一枚举，还是各类有少量差异态
-  - [ ] 定统一枚举：`draft · in-review · approved · implementing · verified · superseded`（覆盖四类，允许某类不经过某些态）
-  - [ ] 定四类之间的关联语义（brief → plan → review → decision 的牵引关系如何在注册表里表达）
-- [ ] YAML 注册表设计（新增 `memory/doc-lifecycle.yaml`，四类统一登记；落点已拍板，见已决策 3）
-  - [ ] 定注册表 schema：每条记录 = 文档路径 + 类型（brief/plan/review/decision）+ 当前状态 + 关联引用（linked issue / branch / worktree / human approval 引用 / 上游 brief / 下游 review·decision）
-  - [ ] [已决策] 注册表落点 = 新增专属 `memory/doc-lifecycle.yaml`（不扩展 `memory/change-control.yaml`，不复用 `human/decisions/`）——human 拍板，见已决策 3 / 未解决问题 2（已决策）
-  - [ ] 复用"占位符容忍 + 非默认态需真实证据"范式：状态一旦"进阶"（如转 approved），强制其引用的 issue/branch/approval/上下游文档真实存在
-  - [ ] 明确注册表由 agent 维护、human 不手填复杂 YAML
-- [ ] 校验规则设计
-  - [ ] 定义"approved 前必填"字段清单（Allowed paths / Forbidden paths / 验证标准 非空、非占位符）
-  - [ ] 定义注册表"引用完整性"规则（关联的 issue/branch/worktree/approval/上下游文档必须指向真实存在的实体，悬空即报错）
-  - [ ] [已决策] 实现"过期 approval"判定 = **仅"引用被标为 superseded 就算过期"**这一种触发（不做时间窗口、不做内容漂移 hash 判定）：某文档引用的 issue/branch/前置 plan/review/decision 被标 superseded 时，级联把本条 approval 判为失效——human 拍板，见已决策 7 / 已解决问题 5
-  - [ ] 定义"互相冲突批注"时的行为（不自动选边，升级为未解决问题，阻止误判为已收敛）
-  - [ ] 仿 `check_release_gates` / `check_regression_matrix` 模式实现四类 doc lifecycle 校验（新脚本 `check-doc-lifecycle.py` 或扩展 `validate-governance.py`）；**判定逻辑抽成可被 hook 复用的函数**
-- [ ] 机械拦截 hook 设计（扩展现有 `.claude/hooks/pre_tool_guard.py`，human 拍板，见已决策 2 / 4）
-  - [ ] 定拦截触发面：拦哪个 tool_input 阶段（Write/Edit 目标命中四类文档、或写注册表）、拦什么（状态跃迁到 approved 等进阶态但完整性不成立、注册表引用悬空、状态与注册表矛盾）
-  - [ ] [已决策] 实现方式 = 折进已有 `pre_tool_guard.py`（不新增独立 hook 文件）——human 拍板，见已决策 4；两侧 `.claude/settings.json`/`.codex/config.toml` 已挂载同一物理文件，本轮不需要新增挂载点，这是相比独立新建 hook 方案的优势
-  - [ ] hook 只调 runtime-neutral 的 `python scripts/...` 判定函数，逻辑不在 hook 内重复实现
-  - [ ] **双 runtime 挂载纪律（已简化）**：由于折进的是已挂载的 `pre_tool_guard.py`，两侧无需新增挂点；只需确认改动后重跑 `check-agent-harness.py` 确认现有 parity 未被破坏；若未来判定脚本需要新的 `python scripts/*` allowlist 条目，两侧手写同 commit 对齐（这条通用纪律保留，仅本轮触发面缩小）
-  - [ ] 明确 hook 的边界护栏：只判可判定事实，拦截信息里明确指向"缺哪个字段/哪个引用悬空"，不输出主观评价，不阻断 human 覆盖（human 可显式绕过）
-- [ ] skill / 流程接线
-  - [ ] `interactive-plan-doc`：起草时写 `Status: draft` 并在注册表登记；human 批注收敛并明确批准后转 `approved` 并回填 approval 引用；plan revision commit 前跑新校验
-  - [ ] `worktree-pr-flow`：进入实现前读 linked plan doc 状态，必须 `≥ approved`；开始实现时 **agent 自主**将状态转 `implementing`；merge 后视验证证据 **agent 自主**转 `verified`（[已决策] `approved→implementing→verified` 由 agent 据证据自主标记、human 审 PR 时复核，不逐次问 human——见已决策 10 / 已解决问题 9）
-  - [ ] **[决策 1（a）新增] 入口纪律接线**：在 `CLAUDE.md` / `AGENTS.md`（及 `.agent/` 相关入口文档）补一条——session 开始时主动查当前 approved plan（读 `memory/current-status.md` 指针 + `memory/doc-lifecycle.yaml` 注册表），不依赖 hook 自动注入；这是 fresh startup 无机械兜底时的纪律补位，与决策 1（b）的 hook 侧修复叠加使用
-  - [ ] brief / review / decision 三类的产出/收敛流程如何写各自的状态与注册表条目（若已有对应 skill/流程则接线，若无则在文档里约定谁维护）
-  - [ ] 同 topic 出新版 plan 时：旧 plan 顶部标 `superseded` 并指向新文件（不删除、不移动，保留历史）；注册表同步标 superseded（并据已决策 7 级联把引用旧 plan 的下游 approval 判为过期）
-  - [ ] 改动上述 skill 后重跑 `python scripts/sync-codex-adapters.py`，同 commit 更新 `.agents/skills/**` 生成产物
-- [ ] 双 runtime 状态感知接线
-  - [ ] **[决策 1（b）已定]** 把 fresh session 与 compact/clear 恢复拆开验收：已确认现有 `context_continuity.py` 只在 clear/compact 后回注 `memory/current-status.md`、且不读 plan；实现时把"当前 approved plan / 已 superseded"指针写入 `memory/current-status.md`（由现有共享 hook 回注），并**评估是否扩展 hook 覆盖 `startup` 场景**（Codex `SessionStart(startup|resume)` + Claude 对等事件）——见已决策 11 / 已解决问题 10。此项与 skill 分组的"入口纪律接线"（决策 1 a）两者都做，不是二选一
-  - [ ] 明确状态锚点格式对两 runtime 完全等价、不依赖 runtime 专属注入（写进 `plans/ANATOMY.md`）
-- [ ] 结构文档
-  - [ ] 新建 `plans/ANATOMY.md`（状态枚举、必填字段、注册表 schema、与 change-control/decisions/branch-status 的连接关系）
-  - [ ] 根 `ANATOMY.md` 分层地图补 `plans/` 与注册表文件一行
-  - [ ] 视需要补 brief/review/decision 所在目录的 ANATOMY 状态说明
-  - [ ] 视需要补 `.agent/session-protocol.md` / `.agent/human-gates.md` 引用（含 hook 与注册表说明）
-- [ ] fixtures（[已决策] **脚本内嵌 / 无依赖断言，不新开 `tests/` 目录**——与 #17 风格一致，测试样本随校验脚本自身内联，见已决策 8 / 已解决问题 7）
-  - [ ] 正向（approved 且字段齐全、注册表引用真实）
-  - [ ] 缺字段（approved 但 forbidden paths / 验证标准 为空）
-  - [ ] 悬空引用（注册表条目引用不存在的 issue/branch/上下游文档）
-  - [ ] 过期 approval（approved 但引用的 issue/branch/前置 plan/review/decision 已被标为 superseded —— 按已决策 7，只测这一种触发，不测时间窗口/内容漂移）
-  - [ ] 互相冲突批注（Human 批注区出现自相矛盾的两条意见，验证不会被误判为"已收敛"）
-  - [ ] hook 拦截样本（模拟"标 approved 但完整性不成立"的写入，验证 hook 会拦下并给出精确提示，且 human 显式覆盖可放行）
-- [ ] 迁移
-  - [ ] **[决策 5 已定] 批量回填存量 plan doc 状态**：对 `20260709/20260711/20260712` 这批已写好的 `plans/*.zh.md`（及既有 brief/review/decision 文档）逐份按**实际真实进展**回填 Status 锚点——已实现→`verified`、已归档/被取代→`superseded`、进行中→`implementing`，不留"未知状态"历史数据（见已决策 9 / 已解决问题 8）
-  - [ ] 现有文档回填进注册表（初始状态与上一步回填的 Status 一致）
-  - [ ] 回填触碰 anatomy/router 时按 same-commit 规则同步处理
-  - [ ] 若判定为模板框架层能力，登记 `template-manifest.toml`
-- [ ] 验证收口
-  - [ ] `python scripts/validate-governance.py`
-  - [ ] 对 fixtures 跑新校验：正向通过，异常（缺字段/悬空引用/过期 approval/冲突批注）各自精确报错
-  - [ ] hook 冒烟：构造"违规写入"确认 Claude 侧与 Codex 侧 hook 都能拦下并给出一致提示；构造 human 显式覆盖确认可放行
-  - [ ] `python scripts/check-anatomy-drift.py`
-  - [ ] `python scripts/sync-codex-adapters.py --check`（若改了 skill / 新增脚本，确认 Codex adapter 不 stale）
-  - [ ] `python scripts/check-agent-harness.py`（本轮必跑——新增 hook + 权限面双侧改动，确认 Claude/Codex 权限/hook 对齐无漂移）
-  - [ ] 双 runtime 冒烟：至少分别覆盖 fresh startup 与 compact/clear 恢复；确认两者读到同一当前 plan 指针与 `Status`，且遵守同一 draft/approved/superseded 语义（现状 Codex startup 探针已证明不会由 continuity hook 回注，不能用 clear/compact 冒烟替代）
+- [x] 状态模型设计（四类统一）
+  - [x] 定四类文档（brief / plan / review / decision）共用的状态锚点格式（例如正文开头一行：`Status: <enum> · <date> · <approver/ref>`）；确认四类是否共用同一枚举，还是各类有少量差异态
+  - [x] 定统一枚举：`draft · in-review · approved · implementing · verified · superseded`（覆盖四类，允许某类不经过某些态）
+  - [x] 定四类之间的关联语义（brief → plan → review → decision 的牵引关系如何在注册表里表达）
+- [x] YAML 注册表设计（新增 `memory/doc-lifecycle.yaml`，四类统一登记；落点已拍板，见已决策 3）
+  - [x] 定注册表 schema：每条记录 = 文档路径 + 类型（brief/plan/review/decision）+ 当前状态 + 关联引用（linked issue / branch / worktree / human approval 引用 / 上游 brief / 下游 review·decision）
+  - [x] [已决策] 注册表落点 = 新增专属 `memory/doc-lifecycle.yaml`（不扩展 `memory/change-control.yaml`，不复用 `human/decisions/`）——human 拍板，见已决策 3 / 未解决问题 2（已决策）
+  - [x] 复用"占位符容忍 + 非默认态需真实证据"范式：状态一旦"进阶"（如转 approved），强制其引用的 issue/branch/approval/上下游文档真实存在
+  - [x] 明确注册表由 agent 维护、human 不手填复杂 YAML
+- [x] 校验规则设计
+  - [x] 定义"approved 前必填"字段清单（Allowed paths / Forbidden paths / 验证标准 非空、非占位符）
+  - [x] 定义注册表"引用完整性"规则（关联的 issue/branch/worktree/approval/上下游文档必须指向真实存在的实体，悬空即报错）
+  - [x] [已决策] 实现"过期 approval"判定 = **仅"引用被标为 superseded 就算过期"**这一种触发（不做时间窗口、不做内容漂移 hash 判定）：某文档引用的 issue/branch/前置 plan/review/decision 被标 superseded 时，级联把本条 approval 判为失效——human 拍板，见已决策 7 / 已解决问题 5
+  - [x] 定义"互相冲突批注"时的行为（不自动选边，升级为未解决问题，阻止误判为已收敛）
+  - [x] 仿 `check_release_gates` / `check_regression_matrix` 模式实现四类 doc lifecycle 校验（新脚本 `check-doc-lifecycle.py` 或扩展 `validate-governance.py`）；**判定逻辑抽成可被 hook 复用的函数**
+- [x] 机械拦截 hook 设计（扩展现有 `.claude/hooks/pre_tool_guard.py`，human 拍板，见已决策 2 / 4）
+  - [x] 定拦截触发面：拦哪个 tool_input 阶段（Write/Edit 目标命中四类文档、或写注册表）、拦什么（状态跃迁到 approved 等进阶态但完整性不成立、注册表引用悬空、状态与注册表矛盾）
+  - [x] [已决策] 实现方式 = 折进已有 `pre_tool_guard.py`（不新增独立 hook 文件）——human 拍板，见已决策 4；两侧 `.claude/settings.json`/`.codex/config.toml` 已挂载同一物理文件，本轮不需要新增挂载点，这是相比独立新建 hook 方案的优势
+  - [x] hook 只调 runtime-neutral 的 `python scripts/...` 判定函数，逻辑不在 hook 内重复实现
+  - [x] **双 runtime 挂载纪律（已简化）**：由于折进的是已挂载的 `pre_tool_guard.py`，两侧无需新增挂点；只需确认改动后重跑 `check-agent-harness.py` 确认现有 parity 未被破坏；若未来判定脚本需要新的 `python scripts/*` allowlist 条目，两侧手写同 commit 对齐（这条通用纪律保留，仅本轮触发面缩小）
+  - [x] 明确 hook 的边界护栏：只判可判定事实，拦截信息里明确指向"缺哪个字段/哪个引用悬空"，不输出主观评价，不阻断 human 覆盖（human 可显式绕过）
+- [x] skill / 流程接线
+  - [x] `interactive-plan-doc`：起草时写 `Status: draft` 并在注册表登记；human 批注收敛并明确批准后转 `approved` 并回填 approval 引用；plan revision commit 前跑新校验
+  - [x] `worktree-pr-flow`：进入实现前读 linked plan doc 状态，必须 `≥ approved`；开始实现时 **agent 自主**将状态转 `implementing`；merge 后视验证证据 **agent 自主**转 `verified`（[已决策] `approved→implementing→verified` 由 agent 据证据自主标记、human 审 PR 时复核，不逐次问 human——见已决策 10 / 已解决问题 9）
+  - [x] **[决策 1（a）新增] 入口纪律接线**：在 `CLAUDE.md` / `AGENTS.md`（及 `.agent/` 相关入口文档）补一条——session 开始时主动查当前 approved plan（读 `memory/current-status.md` 指针 + `memory/doc-lifecycle.yaml` 注册表），不依赖 hook 自动注入；这是 fresh startup 无机械兜底时的纪律补位，与决策 1（b）的 hook 侧修复叠加使用
+  - [x] brief / review / decision 三类的产出/收敛流程如何写各自的状态与注册表条目（若已有对应 skill/流程则接线，若无则在文档里约定谁维护）
+  - [x] 同 topic 出新版 plan 时：旧 plan 顶部标 `superseded` 并指向新文件（不删除、不移动，保留历史）；注册表同步标 superseded（并据已决策 7 级联把引用旧 plan 的下游 approval 判为过期）
+  - [x] 改动上述 skill 后重跑 `python scripts/sync-codex-adapters.py`，同 commit 更新 `.agents/skills/**` 生成产物
+- [x] 双 runtime 状态感知接线
+  - [x] **[决策 1（b）已定]** 把 fresh session 与 compact/clear 恢复拆开验收：已确认现有 `context_continuity.py` 只在 clear/compact 后回注 `memory/current-status.md`、且不读 plan；实现时把"当前 approved plan / 已 superseded"指针写入 `memory/current-status.md`（由现有共享 hook 回注），并**评估是否扩展 hook 覆盖 `startup` 场景**（Codex `SessionStart(startup|resume)` + Claude 对等事件）——见已决策 11 / 已解决问题 10。此项与 skill 分组的"入口纪律接线"（决策 1 a）两者都做，不是二选一
+  - [x] 明确状态锚点格式对两 runtime 完全等价、不依赖 runtime 专属注入（写进 `plans/ANATOMY.md`）
+- [x] 结构文档
+  - [x] 新建 `plans/ANATOMY.md`（状态枚举、必填字段、注册表 schema、与 change-control/decisions/branch-status 的连接关系）
+  - [x] 根 `ANATOMY.md` 分层地图补 `plans/` 与注册表文件一行
+  - [x] 视需要补 brief/review/decision 所在目录的 ANATOMY 状态说明
+  - [x] 视需要补 `.agent/session-protocol.md` / `.agent/human-gates.md` 引用（含 hook 与注册表说明）
+- [x] fixtures（[已决策] **脚本内嵌 / 无依赖断言，不新开 `tests/` 目录**——与 #17 风格一致，测试样本随校验脚本自身内联，见已决策 8 / 已解决问题 7）
+  - [x] 正向（approved 且字段齐全、注册表引用真实）
+  - [x] 缺字段（approved 但 forbidden paths / 验证标准 为空）
+  - [x] 悬空引用（注册表条目引用不存在的 issue/branch/上下游文档）
+  - [x] 过期 approval（approved 但引用的 issue/branch/前置 plan/review/decision 已被标为 superseded —— 按已决策 7，只测这一种触发，不测时间窗口/内容漂移）
+  - [x] 互相冲突批注（Human 批注区出现自相矛盾的两条意见，验证不会被误判为"已收敛"）
+  - [x] hook 拦截样本（模拟"标 approved 但完整性不成立"的写入，验证 hook 会拦下并给出精确提示，且 human 显式覆盖可放行）
+- [x] 迁移
+  - [x] **[决策 5 已定] 批量回填存量 plan doc 状态**：对 `20260709/20260711/20260712` 这批已写好的 `plans/*.zh.md`（及既有 brief/review/decision 文档）逐份按**实际真实进展**回填 Status 锚点——已实现→`verified`、已归档/被取代→`superseded`、进行中→`implementing`，不留"未知状态"历史数据（见已决策 9 / 已解决问题 8）
+  - [x] 现有文档回填进注册表（初始状态与上一步回填的 Status 一致）
+  - [x] 回填触碰 anatomy/router 时按 same-commit 规则同步处理
+  - [x] 若判定为模板框架层能力，登记 `template-manifest.toml`
+- [x] 验证收口
+  - [x] `python scripts/validate-governance.py`
+  - [x] 对 fixtures 跑新校验：正向通过，异常（缺字段/悬空引用/过期 approval/冲突批注）各自精确报错
+  - [x] hook 冒烟：构造"违规写入"确认 Claude 侧与 Codex 侧 hook 都能拦下并给出一致提示；构造 human 显式覆盖确认可放行
+  - [x] `python scripts/check-anatomy-drift.py`
+  - [x] `python scripts/sync-codex-adapters.py --check`（若改了 skill / 新增脚本，确认 Codex adapter 不 stale）
+  - [x] `python scripts/check-agent-harness.py`（本轮必跑——新增 hook + 权限面双侧改动，确认 Claude/Codex 权限/hook 对齐无漂移）
+  - [x] 双 runtime 冒烟：至少分别覆盖 fresh startup 与 compact/clear 恢复；确认两者读到同一当前 plan 指针与 `Status`，且遵守同一 draft/approved/superseded 语义（现状 Codex startup 探针已证明不会由 continuity hook 回注，不能用 clear/compact 冒烟替代）
 
 ## Human 批注区
 
@@ -216,11 +216,12 @@ repo 里已经有好几套相邻但不统一的"状态/审批"机制，设计新
 
 - **全部 open question 已收敛，功能实现与 C1-C3/X1-X3 runtime evidence 已完成。** 当前处于
   final-review 收口，不再等待进入实现的批准。
-- `1a970291` 报告的四个 MAJOR 已在 code target `22d7572` 修复，normal/`python -S` 对抗
-  fixtures 与 exact-target 顶层 Claude G1/G2 均完成，raw gzip + SHA256 已纳入 direct
-  evidence-only child。
-- 对新的 symbolic `HEAD` 跑全 strict gates；仅当它获独立 fresh `APPROVE` 后，才把本 plan
-  标为 verified 并本地合入。
+- evidence-only `83be6d5` 的独立 final review 已完成并给出 `CHANGES_REQUESTED`：GNU
+  `cp -t/--target-directory` 可覆盖 registry 而 hook 放行，且 durable plan/checklist/status 记录
+  仍有矛盾。当前正在修复并补 normal/`python -S` 对抗 fixtures。
+- 形成新 code target 后，在该精确目标重跑三个独立顶层 Claude G1/G2 sessions，再提交 direct
+  evidence child、跑全 strict gates 与独立 fresh review。仅 `APPROVE` 后才把本 plan 标为
+  verified 并本地合入。
 
 ## Plan revision log
 
@@ -251,3 +252,4 @@ repo 里已经有好几套相邻但不统一的"状态/审批"机制，设计新
 - 2026-07-13 **最终 code target `8eea18e` 的 G1/G2 raw-bound runtime PASS**。三个新 disposable clones 与顶层 Claude Code 2.1.207 / Opus 4.8 sessions 均在 typescript 开头记录 exact HEAD、空 pre-status 与 registry present。G1 默认 Write 的 hook exit 2，post-status 仍空且 probe missing；独立 `DOC_LIFECYCLE_SKIP=1` 进程的同一 Write exit 0，post-status 只含 probe，并记录 probe SHA256/正文与 registry present。G2 在调用前记录 pathspec 为 26 bytes、SHA256 `6432e13b...613a9`、正文 `memory/doc-lifecycle.yaml`，真实 Bash tool call 被 hook deny；post-status 仍空、registry present、pathspec SHA256 未变。六份 raw/debug gzip 与 SHA256 已纳入 evidence child；下一门槛为全 strict gates 与 symbolic `HEAD` 的独立 final fresh review。
 - 2026-07-13 **evidence-only `1a970291` 独立 final review：`CHANGES_REQUESTED`（4 MAJOR）**。reviewer 认可 62 份 raw gzip/SHA256、G1/G2 exact-target 绑定与全 strict gates，但新增四个对抗发现：(1) 无 PyYAML fallback 忽略缩进层级，把 `meta:` 下的 `kind/status` 扁平化并 fail-open；(2) Bash `dd of=` 与 `tee` 可覆盖注册表；(3) 四空格 Markdown 代码块可冒充 Status 锚点；(4) durable status 与本节「下一步」仍描述已完成步骤。恢复门槛固定为：同一 code target 修复四项并补 normal/`python -S` validator/真实 hook fixtures，在该精确 target 重跑 G1/G2，evidence-only direct child 后跑全 strict gates与独立 final fresh review；记录使用 symbolic `HEAD` 与 direct parent，避免要求 commit 正文预知自身 SHA。
 - 2026-07-13 **最终 code target `22d7572` 修复四项 MAJOR，G1/G2 exact-target runtime PASS**。受限 parser 改为精确缩进语法并拒绝嵌套 mapping；Status/H1 只接受 0–3 个前导空格；Bash guard 覆盖 `dd of=` 与 `tee` 的普通、symlink 与外部 control。normal/`python -S` self-test 与真实 hook regression 均锁定这些对抗 case。三个新 disposable clones 中，独立顶层 Claude sessions 分别完成 malformed Write 默认 deny、进程级 `DOC_LIFECYCLE_SKIP=1` 下唯一 Write allow、opaque `git rm --pathspec-from-file` registry delete deny；wrapper 记录 exact HEAD、pre/post status、registry/pathspec/probe SHA 与正文，六份 raw/debug 以 `gzip -n` 和 SHA256 纳入 direct evidence-only child。状态保持 implementing，下一门槛仅为该 symbolic `HEAD` 的全 strict gates 与独立 final fresh review。
+- 2026-07-13 **evidence-only `83be6d5` 独立 final review：`CHANGES_REQUESTED`（2 MAJOR）**。(1) GNU `cp -t memory /tmp/doc-lifecycle.yaml` 与 `cp --target-directory=memory /tmp/doc-lifecycle.yaml` 的真实 hook 在 normal/`python -S` 均 exit 0，可覆盖 registry；guard 必须解析 target-directory 与有效目标路径并补真实 hook parity fixtures。(2) current-status 仍称 evidence child 待提交、runtime checklist 仍以 `8eea18e` 为当前 G1/G2 target，任务树全未勾选，三处与已完成实现/证据矛盾。修复后必须在精确新 code target 重跑 G1/G2、全 strict gates 与独立 final fresh review。

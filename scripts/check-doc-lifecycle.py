@@ -1577,6 +1577,84 @@ def _git_pathspec_covers_registry(
     return False
 
 
+def _cp_destination_paths(args: list[str], cwd: Path) -> list[str]:
+    """Return every path GNU cp can write for the supported invocation forms."""
+    target_dir: str | None = None
+    no_target_dir = False
+    parents = False
+    operands: list[str] = []
+    options = True
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if options and arg == "--":
+            options = False
+            i += 1
+            continue
+        if options and arg.startswith("--"):
+            if arg == "--target-directory":
+                if i + 1 >= len(args):
+                    return []
+                target_dir = args[i + 1]
+                i += 2
+                continue
+            if arg.startswith("--target-directory="):
+                target_dir = arg.split("=", 1)[1]
+            elif arg == "--no-target-directory":
+                no_target_dir = True
+            elif arg == "--parents":
+                parents = True
+            i += 1
+            continue
+        if options and arg.startswith("-") and arg != "-":
+            chars = arg[1:]
+            pos = 0
+            while pos < len(chars):
+                option = chars[pos]
+                if option == "t":
+                    if pos + 1 < len(chars):
+                        target_dir = chars[pos + 1:]
+                    elif i + 1 < len(args):
+                        target_dir = args[i + 1]
+                        i += 1
+                    else:
+                        return []
+                    break
+                if option == "S":
+                    if pos + 1 == len(chars):
+                        if i + 1 >= len(args):
+                            return []
+                        i += 1
+                    break
+                if option == "T":
+                    no_target_dir = True
+                pos += 1
+            i += 1
+            continue
+        operands.append(arg)
+        i += 1
+
+    def destination(directory: str, source: str) -> str | None:
+        restored = _restore_shell_literals(source).rstrip("/")
+        if not restored:
+            return None
+        suffix = restored.lstrip("/") if parents else Path(restored).name
+        return os.fspath(Path(directory) / suffix) if suffix else None
+
+    if target_dir is not None:
+        return [path for source in operands if (path := destination(target_dir, source))]
+    if len(operands) < 2:
+        return []
+
+    direct = operands[-1]
+    destinations = [direct]
+    if not no_target_dir and _lexical_path(direct, cwd).is_dir():
+        destinations.extend(
+            path for source in operands[:-1] if (path := destination(direct, source))
+        )
+    return destinations
+
+
 def _bash_reason(cmd: str, repo: Path) -> str | None:
     """Bash 命令中对注册表的删除、移动或覆盖（含 cp/dd/tee/git rm）→ 拦。"""
     try:
@@ -1622,13 +1700,15 @@ def _bash_reason(cmd: str, repo: Path) -> str | None:
             subcommand, args, command_cwd = _git_subcommand(args, command_cwd)
             name = subcommand.rsplit("/", 1)[-1]
         if name == "cp":
-            cp_targets = [arg for arg in args if not arg.startswith("-")]
-            if cp_targets and _path_covers_registry(
-                cp_targets[-1],
-                repo,
-                command_cwd,
-                follow_final_symlink=True,
-                include_ancestors=False,
+            if any(
+                _path_covers_registry(
+                    target,
+                    repo,
+                    command_cwd,
+                    follow_final_symlink=True,
+                    include_ancestors=False,
+                )
+                for target in _cp_destination_paths(args, command_cwd)
             ):
                 return _REGISTRY_REMOVE_MSG
             continue
@@ -2103,6 +2183,7 @@ def self_test() -> int:
 
     # 15. hook：删除/移走注册表 → 拦（初审 MAJOR-2 PoC：apply_patch Delete；另覆盖 Move/Bash）
     td, root = fresh({"plans/demo.zh.md": _OK_PLAN, REGISTRY_REL: _OK_REGISTRY})
+    _mk(root, {"source/memory/doc-lifecycle.yaml": "docs: []\n"})
     del_patch = f"*** Begin Patch\n*** Delete File: {REGISTRY_REL}\n*** End Patch"
     check("hook 拦 apply_patch(Delete 注册表)",
           pretooluse_reason("apply_patch", {"command": del_patch}, root) is not None)
@@ -2155,6 +2236,13 @@ def self_test() -> int:
         f": > {REGISTRY_REL}",
         "cd memory && : > doc-lifecycle.yaml",
         f"cp /dev/null {REGISTRY_REL}",
+        "cp /tmp/doc-lifecycle.yaml memory",
+        "cp -t memory /tmp/doc-lifecycle.yaml",
+        "cp -tmemory /tmp/doc-lifecycle.yaml",
+        "cp -vt memory /tmp/doc-lifecycle.yaml",
+        "cp --target-directory memory /tmp/doc-lifecycle.yaml",
+        "cp --target-directory=memory /tmp/doc-lifecycle.yaml",
+        "cd source && cp --parents memory/doc-lifecycle.yaml ..",
         f"dd if=/dev/null of={REGISTRY_REL}",
         f"printf x | tee {REGISTRY_REL}",
         f'env -S "rm {REGISTRY_REL}"',
@@ -2317,6 +2405,8 @@ def self_test() -> int:
         "rm /tmp/not-this-repo/memory/doc-lifecycle.y*",
         ": > /tmp/not-this-repo/memory/doc-lifecycle.yaml",
         "cp /dev/null /tmp/not-this-repo/memory/doc-lifecycle.yaml",
+        "cp -t /tmp/not-this-repo/memory /tmp/doc-lifecycle.yaml",
+        "cp --target-directory=/tmp/not-this-repo/memory /tmp/doc-lifecycle.yaml",
         "dd if=/dev/null of=/tmp/not-this-repo/memory/doc-lifecycle.yaml",
         "printf x | tee /tmp/not-this-repo/memory/doc-lifecycle.yaml",
         f'env -S "echo {REGISTRY_REL}"',
