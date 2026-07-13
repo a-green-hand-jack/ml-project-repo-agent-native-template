@@ -75,6 +75,14 @@ Fixtures (plan B5, plans/20260712-bootstrap-adoption-proof.zh.md):
 19. `test_fallback_leaf_symlinks_refused` (fresh review BLOCKER): each
     pre-positioned fallback state leaf fails closed rather than being read
     or written through.
+20. `test_unplanned_root_entry_rejected` (fresh review MAJOR): a protected
+    root entry added after discover (`checkpoints/model.bin`) is absent from
+    the persisted classification and must block the complete normalize
+    preflight before any otherwise-safe entry moves.
+21. `test_forged_template_control_item_rejected` (fresh review MAJOR): a
+    persisted `src` row forged to `template_control_item, blocker=false`
+    cannot skip current protection scanning and hide
+    `src/checkpoints/model.bin`; normalize fails before any move.
 
 If no writable temp directory is available (sandboxes without /tmp), the
 whole smoke prints an explicit SKIP and exits 0 instead of crashing.
@@ -475,6 +483,130 @@ def test_stale_plan_rejected(root: Path) -> None:
     if not (target / "tests" / "test_sample.py").exists():
         raise SystemExit("unknown-category entry 'tests' must not be moved")
     print("[adoption-smoke] test_stale_plan_rejected OK")
+
+
+def test_unplanned_root_entry_rejected(root: Path) -> None:
+    """Fresh-review MAJOR: normalize must validate complete current-root
+    coverage, not only the rows persisted by discover."""
+    target = make_conservative_fixture(root)
+    external = root / "unplanned-external"
+    write(external / "sentinel.txt", "must stay unchanged\n")
+    base_cmd = [
+        sys.executable,
+        str(ADOPTER),
+        str(target),
+        "--test-command",
+        "none",
+        "--project-name",
+        "unplanned-root",
+    ]
+    run(base_cmd + ["--phase", "discover"], REPO)
+    write(target / "checkpoints" / "model.bin", "appeared-after-discover\n")
+
+    proc = run(base_cmd + ["--phase", "normalize"], REPO, check=False)
+    if proc.returncode == 0:
+        raise SystemExit(
+            "an unplanned protected root entry must block normalize (non-zero exit) — "
+            f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+        )
+    combined = proc.stdout + proc.stderr
+    if "checkpoints" not in combined or "not recorded by discover" not in combined or "protected" not in combined:
+        raise SystemExit(
+            "unplanned-root blocker must name the entry, missing plan coverage, and protection — "
+            f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+        )
+    for rel in (
+        "checkpoints/model.bin",
+        "pyproject.toml",
+        "src/sample_existing.py",
+        "tests/test_sample.py",
+    ):
+        if not (target / rel).exists():
+            raise SystemExit(f"normalize moved content before completing its blocked preflight: {rel}")
+    if (target / "lab" / "code" / "imported" / "unplanned-root").exists():
+        raise SystemExit("normalize created an import tree despite the unplanned-root blocker")
+    if sorted(p.relative_to(external).as_posix() for p in external.rglob("*")) != ["sentinel.txt"]:
+        raise SystemExit("normalize wrote outside the target repo in the unplanned-root case")
+    if (external / "sentinel.txt").read_text(encoding="utf-8") != "must stay unchanged\n":
+        raise SystemExit("normalize changed external bytes in the unplanned-root case")
+
+    log_path = target / "lab" / "docs" / "audits" / "template-adoption" / "state" / "phase-log.jsonl"
+    rows = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line]
+    normalize_rows = [row for row in rows if row.get("phase") == "normalize"]
+    if not normalize_rows or normalize_rows[-1].get("status") != "blocked":
+        raise SystemExit("unplanned-root blocker was not recorded as a blocked normalize phase")
+    if not any("checkpoints" in blocker for blocker in normalize_rows[-1]["details"]["blockers"]):
+        raise SystemExit("unplanned-root blocker was not readable in phase-log.jsonl")
+    print("[adoption-smoke] test_unplanned_root_entry_rejected OK")
+
+
+def test_forged_template_control_item_rejected(root: Path) -> None:
+    """Fresh-review MAJOR: a forged template-control category must not skip
+    current-state protection scanning or authorize a non-CONTROL_ITEM."""
+    target = make_conservative_fixture(root)
+    external = root / "forged-control-external"
+    write(external / "sentinel.txt", "must stay unchanged\n")
+    base_cmd = [
+        sys.executable,
+        str(ADOPTER),
+        str(target),
+        "--test-command",
+        "none",
+        "--project-name",
+        "forged-control",
+    ]
+    run(base_cmd + ["--phase", "discover"], REPO)
+    write(target / "src" / "checkpoints" / "model.bin", "hidden-after-discover\n")
+    plan_path = target / "lab" / "docs" / "audits" / "template-adoption" / "state" / "adoption-plan.json"
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    for entry in plan["classification"]:
+        if entry["path"] == "src":
+            entry["category"] = "template_control_item"
+            entry["blocker"] = False
+            entry["target_path"] = "src"
+            entry["reason"] = "forged control-item authorization"
+    plan_path.write_text(json.dumps(plan, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    proc = run(base_cmd + ["--phase", "normalize"], REPO, check=False)
+    if proc.returncode == 0:
+        raise SystemExit(
+            "forged template_control_item classification must block normalize — "
+            f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+        )
+    combined = proc.stdout + proc.stderr
+    if (
+        "src" not in combined
+        or "template_control_item" not in combined
+        or "actual CONTROL_ITEMS" not in combined
+        or "src/checkpoints" not in combined
+    ):
+        raise SystemExit(
+            "forged-control blocker must name the forged category and current protected hit — "
+            f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+        )
+    for rel in (
+        "src/sample_existing.py",
+        "src/checkpoints/model.bin",
+        "pyproject.toml",
+        "tests/test_sample.py",
+    ):
+        if not (target / rel).exists():
+            raise SystemExit(f"normalize moved content before completing forged-control preflight: {rel}")
+    if (target / "lab" / "code" / "imported" / "forged-control").exists():
+        raise SystemExit("normalize created an import tree despite the forged-control blocker")
+    if sorted(p.relative_to(external).as_posix() for p in external.rglob("*")) != ["sentinel.txt"]:
+        raise SystemExit("normalize wrote outside the target repo in the forged-control case")
+    if (external / "sentinel.txt").read_text(encoding="utf-8") != "must stay unchanged\n":
+        raise SystemExit("normalize changed external bytes in the forged-control case")
+
+    log_path = target / "lab" / "docs" / "audits" / "template-adoption" / "state" / "phase-log.jsonl"
+    rows = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line]
+    normalize_rows = [row for row in rows if row.get("phase") == "normalize"]
+    if not normalize_rows or normalize_rows[-1].get("status") != "blocked":
+        raise SystemExit("forged-control blocker was not recorded as a blocked normalize phase")
+    if not any("src/checkpoints" in blocker for blocker in normalize_rows[-1]["details"]["blockers"]):
+        raise SystemExit("current protected hit was not readable in the forged-control phase log")
+    print("[adoption-smoke] test_forged_template_control_item_rejected OK")
 
 
 def test_excluded_dir_protected_content(root: Path) -> None:
@@ -1207,6 +1339,10 @@ def main() -> int:
         test_control_item_divergence(Path(tmp))
     with tempfile.TemporaryDirectory(prefix="adoption-smoke-stale-") as tmp:
         test_stale_plan_rejected(Path(tmp))
+    with tempfile.TemporaryDirectory(prefix="adoption-smoke-unplanned-") as tmp:
+        test_unplanned_root_entry_rejected(Path(tmp))
+    with tempfile.TemporaryDirectory(prefix="adoption-smoke-forged-control-") as tmp:
+        test_forged_template_control_item_rejected(Path(tmp))
     with tempfile.TemporaryDirectory(prefix="adoption-smoke-venv-") as tmp:
         test_excluded_dir_protected_content(Path(tmp))
     with tempfile.TemporaryDirectory(prefix="adoption-smoke-escape-") as tmp:

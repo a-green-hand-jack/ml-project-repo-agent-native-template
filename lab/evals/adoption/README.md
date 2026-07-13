@@ -3,7 +3,7 @@
 Synthetic smoke tests for `scripts/adopt-existing-repo.py` (`run-adoption-smoke.py`).
 
 All fixtures build temporary Git repositories and drive the adopter's phases. The
-authoritative, per-review-round list of the 19 test cases lives in
+authoritative, per-review-round list of the 21 test cases lives in
 `run-adoption-smoke.py`'s module docstring; the two anchor fixtures are:
 
 1. `test_conservative_migration` — a clean fixture, asserts:
@@ -23,8 +23,11 @@ authoritative, per-review-round list of the 19 test cases lives in
 
 The remaining cases are negative tests for review findings: nested/`.venv`-hidden
 protected content, divergent control items, stale/tampered plans (`..`, escaping or
-tampered `target_path`, forged category/blocker combinations), symlinks at protected /
-control-item / state-dir / state-leaf / conflict-archive positions. Canonical state
+tampered `target_path`, forged category/blocker combinations), root entries added after
+discover, and a non-control `src` entry forged to `template_control_item` after gaining
+nested protected content. Both current-tree drift cases assert that normalize's full
+preflight stops before any move or external write. Other cases cover symlinks at
+protected / control-item / state-dir / state-leaf / conflict-archive positions. Canonical state
 symlinks redirect to a deterministic `/tmp` location plus an explicit blocker;
 pre-positioned symlinks at the fallback root, an absolute-path intermediate, or any
 state leaf fail closed without touching their external targets. The suite also covers

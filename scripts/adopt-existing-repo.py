@@ -762,6 +762,10 @@ def discover(args: argparse.Namespace) -> dict[str, Any]:
         "template_conflicts": conflicts,
         "conservative_import_roots": conservative_import_roots,
         "template_control_item_roots": template_control_item_roots,
+        # Control-item roots scaffold may create after discover are declared
+        # up front so normalize can distinguish those expected additions from
+        # an arbitrary post-discover root that the classification omitted.
+        "scaffold_control_items": sorted(CONTROL_ITEMS),
         "import_root": f"lab/code/imported/{slug}",
         "normalize_blockers": [
             f"{e['category']}: {e['path']} — {e['reason']}" for e in classification if e["blocker"]
@@ -1056,10 +1060,13 @@ def normalize(args: argparse.Namespace) -> dict[str, Any]:
     stops here unless `--allow-blocked-normalize` is passed (unchanged
     conservative behavior).
 
-    Review MAJOR-3: the persisted plan is a *proposal*, not a trusted
-    authorization. Before moving anything, normalize re-verifies the
-    safety invariants against the tree as it exists now. A stale/tampered
-    plan entry is rejected with a blocker instead of executed:
+    Review MAJOR-3/fresh-review MAJOR: the persisted plan is a *proposal*,
+    not a trusted authorization. Normalize uses a two-pass preflight: it
+    first reclassifies the complete current root and validates every planned
+    entry, then performs moves only if the preflight has no blockers (unless
+    the explicit `--allow-blocked-normalize` reporting escape hatch is used).
+    A stale/tampered plan entry is rejected with a blocker instead of
+    executed:
 
     - the plan path must name a single, real root entry — no separators,
       no '.'/'..' (rejected explicitly: `Path("..").name == ".."`, so the
@@ -1071,8 +1078,14 @@ def normalize(args: argparse.Namespace) -> dict[str, Any]:
       invariant that `protected`/`conflict` are ALWAYS blockers (review
       round 2 MAJOR-D: `category="conflict", blocker=false` must not fall
       through into the move branch);
-    - the entry (and its descendants) must not have become protected
-      since discover;
+    - every current root entry must still be represented by the discover
+      classification or its explicit `scaffold_control_items` declaration;
+      declared scaffold additions are accepted only after they reclassify as
+      safe template control items;
+    - the entry's kind/category/blocker/target_path are recomputed from the
+      current tree and must match the persisted row; protection scanning is
+      therefore performed before *any* category-specific continue, including
+      `template_control_item`, which is valid only for actual CONTROL_ITEMS;
     - target_path must EXACTLY equal the import path re-derived from the
       entry name under the current rules, resolve to a location inside
       the target repo, and have no symlink anywhere on its path (review
@@ -1087,29 +1100,95 @@ def normalize(args: argparse.Namespace) -> dict[str, Any]:
     raw_slug = plan.get("project_slug")
     slug = project_slug(target, raw_slug if isinstance(raw_slug, str) else None)
     expected_import_root = f"lab/code/imported/{slug}"
-    classification = plan.get("classification")
-    if classification is None:
+    classification_value = plan.get("classification")
+    plan_shape_blockers: list[str] = []
+    if classification_value is None:
         # Backward compatibility: a plan.json written before B1 has no
         # per-entry classification — recompute it now with the same
         # conservative rules rather than silently doing nothing.
         classification = classify_root_entries(target, slug)
+    elif isinstance(classification_value, list):
+        classification = classification_value
+    else:
+        classification = []
+        plan_shape_blockers.append(
+            "plan-malformed: classification must be a list; refusing to normalize"
+        )
+    scaffold_control_value = plan.get("scaffold_control_items", CONTROL_ITEMS)
+    if isinstance(scaffold_control_value, list) and all(
+        isinstance(item, str) for item in scaffold_control_value
+    ):
+        scaffold_control_items = set(scaffold_control_value)
+        unknown_scaffold_items = scaffold_control_items - set(CONTROL_ITEMS)
+        if unknown_scaffold_items:
+            plan_shape_blockers.append(
+                "plan-malformed: scaffold_control_items contains non-control names "
+                f"{sorted(unknown_scaffold_items)!r}; refusing to trust them"
+            )
+    else:
+        scaffold_control_items = set()
+        plan_shape_blockers.append(
+            "plan-malformed: scaffold_control_items must be a list of strings; "
+            "refusing to normalize"
+        )
     known_categories = {"protected", "template_control_item", "conflict", "conservative_import"}
     always_blocker_categories = {"protected", "conflict"}
     # Review round 2/3 MAJOR-D: precise membership check against the REAL
     # current root-entry names, not a reconstructed existence probe
     # (`(target / "..").exists()` is true — it is the parent directory).
-    root_entry_names = {p.name for p in target.iterdir()}
+    current_entries = {p.name: p for p in target.iterdir() if p.name != ".git"}
+    root_entry_names = set(current_entries)
     moved: list[dict[str, str]] = []
-    blockers: list[str] = []
+    move_candidates: list[tuple[str, str, Path, Path]] = []
+    blockers: list[str] = list(plan_shape_blockers)
     state_blocker = state_redirect_blocker(target)
     if state_blocker:
         blockers.append(state_blocker)
+
+    planned_names: set[str] = set()
+    for entry in classification:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("path")
+        if (
+            isinstance(name, str)
+            and name
+            and name not in {".", "..", ".git"}
+            and Path(name).name == name
+        ):
+            planned_names.add(name)
+
+    # Fresh-review MAJOR: compare the proposal to the complete current root,
+    # not just the rows the proposal chose to mention. Discover itself creates
+    # `lab/` for state and scaffold can add other plan-declared CONTROL_ITEMS,
+    # so such an entry is accepted only when reclassification proves it is
+    # currently a safe, non-blocking template control item. Every other
+    # unplanned root entry is a blocker before any move is attempted.
+    for name in sorted(root_entry_names - planned_names):
+        path = current_entries[name]
+        kind = "dir" if path.is_dir() else "file" if path.is_file() else "other"
+        current = classify_entry(target, name, kind, expected_import_root)
+        if (
+            name in scaffold_control_items
+            and name in CONTROL_ITEMS
+            and current["category"] == "template_control_item"
+            and current["blocker"] is False
+        ):
+            continue
+        blockers.append(
+            f"plan-mismatch: {name} — current root entry was not recorded by discover; "
+            f"current classification={current['category']!r} blocker={current['blocker']}: "
+            f"{current['reason']} (re-run discover)"
+        )
+
+    seen_names: set[str] = set()
     for entry in sorted(classification, key=lambda e: str(e.get("path")) if isinstance(e, dict) else ""):
         if not isinstance(entry, dict):
             blockers.append(f"plan-malformed: non-object classification entry {entry!r}; rejected")
             continue
         name = entry.get("path")
         if name == ".git":
+            blockers.append("plan-mismatch: '.git' is reserved and must not appear in classification")
             continue
         # Review round 2/3 MAJOR-D: the plan path must be a single root
         # entry name. `Path(name).name != name` catches separators,
@@ -1121,6 +1200,13 @@ def normalize(args: argparse.Namespace) -> dict[str, Any]:
                 "name (separators/'.'/'..'/absolute paths are rejected); refusing to act on it"
             )
             continue
+        if name in seen_names:
+            blockers.append(
+                f"plan-mismatch: {name} — duplicate classification rows are not allowed; "
+                "refusing to act on this entry"
+            )
+            continue
+        seen_names.add(name)
         if name not in root_entry_names:
             # Review round 2 MAJOR-D: a plan entry that is not one of the
             # target's actual current root entries is stale/tampered —
@@ -1130,7 +1216,7 @@ def normalize(args: argparse.Namespace) -> dict[str, Any]:
                 "exist; stale/tampered plan rejected for this entry (re-run discover)"
             )
             continue
-        src = target / name
+        src = current_entries[name]
         category = entry.get("category")
         if category not in known_categories:
             blockers.append(
@@ -1153,35 +1239,56 @@ def normalize(args: argparse.Namespace) -> dict[str, Any]:
                 "but the plan says false; tampered/stale plan rejected for this entry"
             )
             continue
+
+        # Reclassify before any category-specific branch. In particular, a
+        # forged `template_control_item` row must not skip the protection scan
+        # and hide e.g. `src/checkpoints/model.bin`.
+        current_kind = "dir" if src.is_dir() else "file" if src.is_file() else "other"
+        current = classify_entry(target, name, current_kind, expected_import_root)
+        if category == "template_control_item" and name not in CONTROL_ITEMS:
+            blockers.append(
+                f"plan-mismatch: {name} — category 'template_control_item' is valid only "
+                f"for actual CONTROL_ITEMS; current classification={current['category']!r}: "
+                f"{current['reason']}"
+            )
+            continue
+        if entry.get("kind") != current_kind:
+            blockers.append(
+                f"plan-mismatch: {name} — persisted kind {entry.get('kind')!r} does not "
+                f"match current kind {current_kind!r}; current classification="
+                f"{current['category']!r}: {current['reason']}"
+            )
+            continue
+        if current["category"] != category or current["blocker"] is not blocker_flag:
+            blockers.append(
+                f"plan-mismatch: {name} — persisted classification category={category!r} "
+                f"blocker={blocker_flag} does not match current classification "
+                f"category={current['category']!r} blocker={current['blocker']}: "
+                f"{current['reason']}"
+            )
+            continue
+        target_path = entry.get("target_path")
+        current_target = current.get("target_path")
+        if target_path != current_target:
+            blockers.append(
+                f"plan-mismatch: {name} — plan target_path {target_path!r} does not "
+                f"equal the current derived target {current_target!r}; refusing to act"
+            )
+            continue
         if blocker_flag:
-            blockers.append(f"{category}: {name} — {entry.get('reason', '(no reason recorded)')}")
+            blockers.append(f"{category}: {name} — {current['reason']}")
             continue
         if category == "template_control_item":
-            continue  # stays in place by definition, never moved
-        # category == "conservative_import" and plan said non-blocker:
-        # re-check the current tree before trusting the persisted plan.
-        current_hits = protected_hits_within(target, name)
-        if current_hits:
-            blockers.append(
-                f"protected: {name} — protected content present at normalize time "
-                f"({', '.join(current_hits)}); stale plan rejected for this entry"
-            )
-            continue
-        if name in CONTROL_ITEMS:
-            blockers.append(
-                f"plan-mismatch: {name} — plan says {category!r} but the entry is a "
-                "template control item; stale/tampered plan rejected for this entry"
-            )
-            continue
-        # Review round 2 BLOCKER-B: target_path is only accepted when it
-        # EXACTLY equals the import path derived from the entry name under
-        # the current rules — containment is then double-checked below.
-        target_path = entry.get("target_path")
+            continue  # revalidated actual control item; stays in place
+
+        # category == "conservative_import" and the complete current-state
+        # classification matches the proposal. Containment/symlink checks are
+        # still applied to the derived destination before queuing the move.
         expected_target = f"{expected_import_root}/{name}"
         if target_path != expected_target:
             blockers.append(
-                f"plan-mismatch: {name} — plan target_path {target_path!r} does not "
-                f"equal the derived import path {expected_target!r}; refusing to move"
+                f"plan-mismatch: {name} — derived target {target_path!r} does not "
+                f"equal the required import path {expected_target!r}; refusing to move"
             )
             continue
         if protected_path(target_path):
@@ -1219,6 +1326,18 @@ def normalize(args: argparse.Namespace) -> dict[str, Any]:
                 f"{dst.relative_to(target).as_posix()}"
             )
             continue
+        move_candidates.append((name, target_path, src, dst))
+
+    # The default path is atomic with respect to validation findings: no safe
+    # entry is moved before a later stale/tampered row or unplanned root is
+    # discovered. The explicit reporting escape hatch retains its historical
+    # ability to move independently validated candidates alongside blockers.
+    if blockers and not args.allow_blocked_normalize:
+        append_log(target, "normalize", "blocked", {"moved": moved, "blockers": blockers}, args.dry_run)
+        print(f"[normalize] moved=0 blockers={len(blockers)}")
+        raise SystemExit("normalize blocked by protected/conflicting paths: " + ", ".join(blockers))
+
+    for name, target_path, src, dst in move_candidates:
         if args.dry_run:
             print(f"DRY-RUN move {src} -> {dst}")
         else:
@@ -1228,8 +1347,6 @@ def normalize(args: argparse.Namespace) -> dict[str, Any]:
     status = "blocked" if blockers else "ok"
     append_log(target, "normalize", status, {"moved": moved, "blockers": blockers}, args.dry_run)
     print(f"[normalize] moved={len(moved)} blockers={len(blockers)}")
-    if blockers and not args.allow_blocked_normalize:
-        raise SystemExit("normalize blocked by protected/conflicting paths: " + ", ".join(blockers))
     return {"moved": moved, "blockers": blockers}
 
 

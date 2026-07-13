@@ -37,7 +37,11 @@ MAJOR 跨越需 `--allow-major` 人工确认。
 `lab/docs/audits/template-adoption/` state/report，并按 conservative policy 保留原文件。
 `discover` phase 给每个 root entry 打内置保守四类标签（`template_control_item` /
 `conservative_import` / `protected` / `conflict`，v1 不做外部规则文件覆盖），`normalize`
-消费这份归类计划而非硬编码判断；`prove` 还会生成 Claude/Codex 双 agent surface 加载清单。
+消费这份归类计划而非硬编码判断。归类计划只视为提案：`normalize` 会先对当前全部 root entry
+重算 kind/category/blocker/target_path、检查 discover 后未在 classification 或
+`scaffold_control_items` 声明中登记的新增项，并在默认模式下完成整轮预检后
+才开始搬移；伪造 `template_control_item` 不能绕过 nested protected scan。`prove` 还会生成
+Claude/Codex 双 agent surface 加载清单。
 所有 repo 内写路径（state / report / 冲突归档 / 移动目的地）用 `safe_target_path` 逐段
 lstat；canonical state 的三个叶文件也参与检查，命中 symlink 时 state/report 改道到
 确定性的 `/tmp` fallback 并登记 blocker。fallback 在使用前从绝对路径根逐段检查到状态
