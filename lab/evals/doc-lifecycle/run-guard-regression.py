@@ -76,8 +76,21 @@ def run(tool: str, tool_input: dict, env_extra: dict | None = None) -> int:
     return proc.returncode
 
 
+def run_no_site(tool: str, tool_input: dict) -> int:
+    env = dict(os.environ)
+    env.pop("DOC_LIFECYCLE_SKIP", None)
+    proc = subprocess.run(
+        [sys.executable, "-S", str(HOOK)],
+        input=json.dumps({"tool_name": tool, "tool_input": tool_input}),
+        capture_output=True, text=True, timeout=30, env=env, cwd=str(REPO),
+    )
+    return proc.returncode
+
+
 def main() -> int:
-    registry_first_line = (REPO / REGISTRY).read_text(encoding="utf-8").split("\n")[0]
+    registry_text = (REPO / REGISTRY).read_text(encoding="utf-8")
+    registry_first_line = registry_text.split("\n")[0]
+    duplicate_docs_registry = f"{registry_text.rstrip()}\n\ndocs: []\n"
     flip_patch = (
         f"*** Begin Patch\n*** Update File: {TMP_PLAN_REL}\n@@\n"
         "-Status: verified · 2026-07-13 · synthetic\n"
@@ -413,6 +426,8 @@ def main() -> int:
         ("exact-head-review: docs 行内值后隐藏缩进条目拦", "Write",
          {"file_path": REGISTRY,
           "content": "docs: []\n  - id: hidden\n    path: plans/hidden.zh.md\n"}, 2, None),
+        ("exact-head-review: 重复顶层 docs 字段拦", "Write",
+         {"file_path": REGISTRY, "content": duplicate_docs_registry}, 2, None),
         ("fresh-review-5a: draft 状态锚点缺 date/ref 拦", "Write",
          {"file_path": TMP_ANCHOR_PLAN_REL, "content": status_only_draft}, 2, None),
         ("fresh-review-5b: 状态锚点非法日期拦", "Write",
@@ -533,6 +548,16 @@ def main() -> int:
             ok = got == want
             failures += 0 if ok else 1
             print(f"  {'PASS' if ok else 'FAIL'}  {name} (exit {got}, want {want})")
+        got = run_no_site(
+            "Write", {"file_path": REGISTRY, "content": duplicate_docs_registry}
+        )
+        ok = got == 2
+        failures += 0 if ok else 1
+        print(
+            "  "
+            f"{'PASS' if ok else 'FAIL'}  real python -S hook: 重复 docs fail-closed "
+            f"(exit {got}, want 2)"
+        )
     finally:
         TMP_PLAN.unlink(missing_ok=True)
         TMP_ANCHOR_PLAN.unlink(missing_ok=True)

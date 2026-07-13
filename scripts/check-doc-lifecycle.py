@@ -232,6 +232,7 @@ def _parse_restricted(text: str):
     cur_list: str | None = None
     in_docs = False
     docs_inline = False
+    docs_seen = False
     for lineno, raw in enumerate(text.splitlines(), 1):
         raw = _strip_yaml_inline_comment(raw)
         if not raw.strip() or raw.lstrip().startswith("#"):
@@ -241,10 +242,14 @@ def _parse_restricted(text: str):
         if indent == 0:
             key, sep, value = s.partition(":")
             if key.strip() == "docs":
-                if not sep:
+                if docs_seen:
+                    errors.append(f"注册表第 {lineno} 行：顶层 docs 字段重复")
+                    in_docs, docs_inline = False, False
+                elif not sep:
                     errors.append(f"注册表第 {lineno} 行：docs 顶层字段缺少冒号")
                     in_docs, docs_inline = False, False
                 elif value.strip():
+                    docs_seen = True
                     parsed = _scalar(value.strip())
                     if parsed not in (None, []):
                         errors.append(
@@ -252,6 +257,7 @@ def _parse_restricted(text: str):
                         )
                     in_docs, docs_inline = False, True
                 else:
+                    docs_seen = True
                     in_docs, docs_inline = True, False
             else:
                 in_docs, docs_inline = False, False
@@ -2371,6 +2377,23 @@ def self_test() -> int:
         pretooluse_reason(
             "Write",
             {"file_path": str(root / REGISTRY_REL), "content": malformed_docs_inline},
+            root,
+        ) is not None,
+    )
+    td.cleanup()
+
+    duplicate_docs = f"{_OK_REGISTRY}\ndocs: []\n"
+    restricted_entries, restricted_errors = _parse_restricted(duplicate_docs)
+    check(
+        "受限 parser 拒绝重复顶层 docs 字段",
+        bool(restricted_entries) and any("docs 字段重复" in e for e in restricted_errors),
+    )
+    td, root = fresh({"plans/demo.zh.md": _OK_PLAN, REGISTRY_REL: _OK_REGISTRY})
+    check(
+        "真实 fallback hook 拦追加重复 docs: []",
+        pretooluse_reason(
+            "Write",
+            {"file_path": str(root / REGISTRY_REL), "content": duplicate_docs},
             root,
         ) is not None,
     )
