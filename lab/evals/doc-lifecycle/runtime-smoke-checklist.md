@@ -5,8 +5,10 @@
 > clone 中完成；synthetic 探针仍是独立证据，不能替代本清单。详细断言、session id 与 raw log
 > 见 `evidence-20260713-runtime-probes.md`。
 
-**当前状态：8/8 PASS。** raw files 的 sha256 在 `raw/SHA256SUMS`；首次 C3 消息不足尝试保留在
-raw 中但不计 PASS，继续同一隔离顶层 session 后的第二次真实 compact 才是验收证据。
+**当前状态：8/8 PASS。** C1-C3/X1-X3 的 continuity/context 目标为 `68f1d43`；相关 hook
+代码未再变化。fresh review 后改变的 guard G1/G2 已在精确目标 `06c98f2` 的新 disposable
+clones 中重跑。raw files 的 sha256 在 `raw/SHA256SUMS`；首次 C3 消息不足尝试保留在 raw 中
+但不计 PASS，继续同一隔离顶层 session 后的第二次真实 compact 才是验收证据。
 
 ## 待跑清单
 
@@ -45,8 +47,8 @@ raw 中但不计 PASS，继续同一隔离顶层 session 后的第二次真实 c
 | X1 | 2026-07-13 | Codex 0.144.0 / gpt-5.6-sol | `68f1d43` | PASS | `raw/13-X1-*`; fresh startup 主动读到 plan/status | Codex integration owner |
 | X2 | 2026-07-13 | Codex 0.144.0 / gpt-5.6-sol | `68f1d43` | PASS | `raw/13-X2-X3-*`; clear hook completed + continuity | Codex integration owner |
 | X3 | 2026-07-13 | Codex 0.144.0 / gpt-5.6-sol | `68f1d43` | PASS | `raw/13-X2-X3-*`; Context compacted + hook completed，无 invalid JSON | Codex integration owner |
-| G1 | 2026-07-13 | Claude Code 2.1.207 / Opus 4.8 | `68f1d43` | PASS | `raw/13-G1-*`; 默认 deny，独立 SKIP session allow | Codex integration owner |
-| G2 | 2026-07-13 | Claude Code 2.1.207 / Opus 4.8 | `68f1d43` | PASS | `raw/13-G2-*`; Bash rm 被 deny，注册表仍存在 | Codex integration owner |
+| G1 | 2026-07-13 | Claude Code 2.1.207 / Opus 4.8 | `06c98f2` | PASS | `raw/13-G1-*-06c98f2.*`; 默认 deny，独立 SKIP session allow | Codex integration owner |
+| G2 | 2026-07-13 | Claude Code 2.1.207 / Opus 4.8 | `06c98f2` | PASS | `raw/13-G2-*-06c98f2.*`; `env -C memory rm ...` 被 deny，注册表仍存在 | Codex integration owner |
 
 结果已同步到 `evidence-20260713-runtime-probes.md`；feature 仍保持 `implementing`，直到 fresh
 exact-head review APPROVE、合入 main 与合并后验证完成，才可转 `verified`。

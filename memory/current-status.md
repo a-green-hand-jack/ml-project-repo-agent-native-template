@@ -7,9 +7,10 @@
 
 - 当前活跃 plan：`plans/20260712-plan-lifecycle-state.zh.md`（issue #13）· status: **implementing** ·
   branch `feat/13-plan-lifecycle-state`（worktree `.claude/worktrees/13-plan-lifecycle-state`）。
-- 目标代码 `68f1d43` 的真实 runtime 验收已 8/8 PASS（C1-C3/X1-X3/G1-G2）；raw 转录、
-  debug log 与 sha256 见 `lab/evals/doc-lifecycle/evidence-20260713-runtime-probes.md`。当前只剩
-  evidence-only HEAD 严格门禁与 fresh exact-head review，未 APPROVE 前不标 verified、不合入。
+- 真实 runtime 验收已 8/8 PASS：C1-C3/X1-X3 的 continuity/context 目标为 `68f1d43`；
+  fresh review 后变更的 guard G1/G2 已在精确代码 `06c98f2` 的新 disposable clones 中重跑。
+  raw 转录、debug log 与 sha256 见 `lab/evals/doc-lifecycle/evidence-20260713-runtime-probes.md`。
+  当前只剩 evidence-only HEAD 严格门禁与 fresh exact-head review；未 APPROVE 前不标 verified、不合入。
 - 权威状态注册表：`memory/doc-lifecycle.yaml`（brief/plan/review/decision 四类统一，语义见 `plans/ANATOMY.md`）。
 - 其余存量 plan 均已 `verified`，decisions 均 `approved`（详见注册表）。
 - 本节由 agent 在状态流转时更新；compact/clear 后 `context_continuity.py` 会把本文件回注新上下文。
