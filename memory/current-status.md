@@ -5,11 +5,37 @@
 
 ## 当前 objective
 
-按 fresh review 与依赖顺序完成本地 issue 集成。issue #16 已在 exact source HEAD
-`ecf0c80aa17bfa3aad6948f3d36ba49233c02cd6` 获得 fresh Codex `APPROVE`，已以 merge commit
-`cbf6ab6ca857b2295da4e362aa0e0defe44c79a4` 合入本地 `main` 并完成冲突后验证。当前正在合入
-已 APPROVE 的 issue #17 exact source `52f83aafe54b6891e5963c2d5c4e731717132ff2`。issue #13/#18
-不伪造缺失的 fresh-session/隔离环境证据，保留可复现 blocker。
+九个 human 指定 feature 的本地集成已完成七个：#12/#12b/#12c/#14/#15/#16/#17 均有 fresh
+`APPROVE`、已进入本地 `main`，对应 feature branch/worktree 已删除。#13/#18 未获最终 APPROVE，
+保留 clean branch/worktree 与可复现 blocker；禁止伪造 fresh-session/隔离环境证据。冻结快照见
+`memory/handoffs/20260713-local-issue-integration-codex.md`。
+
+## 最终 release gate（human 明确授权，尚未满足）
+
+- 只有上述九个 feature 全部实现、fresh APPROVE、合入本地 `main` 后，才运行逐 feature 回归、
+  跨 feature integration/smoke、全部相关 self-test、adapter sync、strict harness/anatomy/governance、
+  diff/clean 的发布级矩阵。
+- semver 判级由 human 覆盖：从 `v1.3.0` 起每个 feat 计一个 PATCH，最终目标 `v1.3.9`。
+- 仅在发布级矩阵全绿后更新 `VERSION/CHANGELOG`，并只对最终 release commit 创建一个本地
+  annotated tag `v1.3.9`；不建中间 tag，不 push main/tag，不建 release。
+- 当前 `VERSION` 仍为 `v1.3.0`，HEAD 无 tag；#13/#18 blocker 未清除前不得发版或打 tag。
+
+## #17 本地集成（2026-07-13）
+
+- exact source `52f83aafe54b6891e5963c2d5c4e731717132ff2` fresh `APPROVE`；合并时发现 #17
+  provenance 枚举漏掉 #16 合法的 `approved` run 状态。集成修复后，完整状态机可被解析，
+  但只有 `status=done` 且 `run_summary` 已填才贡献 provenance 或满足 `run-closed`。
+- staged integration candidate 再获 fresh `APPROVE`；merge commit
+  `405c5421d7721111e14a4f9e7a745c41ec83630f`。normal/`python -S` self-test 与 strict provenance、
+  experiment-state/outcome strict、adapter sync、strict harness/anatomy/governance 全绿。
+
+## 未合入 blocker
+
+- #13 `02626c3`：代码/合成测试已修复，但 C1-C3/X1-X3/G1-G2 真实双 runtime smoke 全未跑；
+  `lab/evals/doc-lifecycle/runtime-smoke-checklist.md` 明确标为 merge blocker。
+- #18 `2bfef30`：final `REQUEST_CHANGES`。C1-C7/X1-X6=`unknown`、X7=`unavailable`；strict fresh
+  evidence gate exit 1。另有代码 MAJOR：evidence validator 只看 status/非空 cell，尚不能拒绝
+  placeholder 或空 raw-output 的伪 PASS。修复并取得真实证据、fresh APPROVE 前不得合入。
 
 ## #16 fresh-review handoff（2026-07-13）
 
