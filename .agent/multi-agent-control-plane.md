@@ -47,7 +47,9 @@ read/state 权威副本）。消息块字段：`id`/`kind`/`from`/`to`/`time`/`r
 `kind`：`info` / `question` / `decision` / `handoff` / `ack`。
 
 - **回写规则**：`decision`/`handoff` 是关键消息，**必须**带 `ref` 指向真实存在的 repo 落盘文件
-  （handoff 文档、branch status、plan、decision），脚本强制、拒绝只留临时消息。
+  （handoff 文档、branch status、plan、decision），脚本强制、拒绝只留临时消息。`ref` 只接受
+  控制面 repo 内的相对路径：绝对路径、realpath 归一化后逃逸控制面根的路径（`..`/符号链接）
+  一律拒绝——repo 外文件不算落盘记录。
 - **与 Paseo 的分工**：mailbox 是可恢复的结构化真相层；`paseo send <id>` 只做低延迟送达提醒
   （发送时自动尝试，缺 Paseo/无 paseo_id 优雅降级、不 raise）。
 
@@ -60,6 +62,11 @@ read/state 权威副本）。消息块字段：`id`/`kind`/`from`/`to`/`time`/`r
 3. 接收方 `python scripts/agent-mailbox.py ack B --id <msgid>` → `pending→accepted`、
    `--paths` 从 A 的 owned_paths 转移进 B、B 的 task 更新、A 收到 `ack` 回执。
    未 ack 之前 ownership 不转移，冲突检测仍按原声明强制。
+4. **ack 前脚本验证**（保证转移后不留重叠 ownership）：发起方状态文件必须存在，且每条
+   `--paths` 必须与发起方 owned_paths 条目**精确匹配**（归一化后逐条对应）。发起方只拥有
+   父目录、想转移其子文件时**拒绝**——不做目录所有权分裂（否则目录与子文件立即重叠），
+   正确做法是发起方先 `agent-state.py register` 把目录拆成明细路径、再发 handoff。任何
+   一条不满足整个 ack 拒绝、消息保持 `pending`，修正声明后可重试。
 
 ## 只读 list/status
 

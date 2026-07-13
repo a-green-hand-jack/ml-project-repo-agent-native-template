@@ -11,10 +11,14 @@ schema 见 `.agent/multi-agent-control-plane.md`。落盘粒度（human 拍板 2
 
 回写规则（验收 #5）：`kind` 为 `decision` / `handoff` 的关键消息**必须**带 `--ref` 指向真实
 存在的 repo 落盘文件（handoff 文档 / branch status / plan / decision），拒绝只留临时消息。
+`--ref` 只认控制面 repo 内的相对路径：绝对路径、realpath 后逃逸控制面根（`..`/符号链接）
+一律拒绝——外部文件不算落盘记录。
 
 ownership handoff（验收 #1/#3 的一半）：`handoff` 发起（state: pending）→ 接收方 `ack`
 （state: accepted），ack 时把 `--paths` 声明的 owned paths 从发起方转移给接收方、回执入
-发起方 inbox——状态转移走 agent-state.py，冲突检测立即感知新 ownership。
+发起方 inbox——状态转移走 agent-state.py，冲突检测立即感知新 ownership。ack 前验证发起方
+状态文件存在且**精确拥有**每条待转移路径（只拥有父目录不算——不做目录所有权分裂，先
+register 拆细再 handoff）；任何一条不满足整个 ack 拒绝、消息保持 pending。
 
 用法：
   python scripts/agent-mailbox.py send --from A --to B --kind info|question|decision|handoff|ack \
@@ -112,6 +116,31 @@ def _rewrite_field(path: Path, msg_id: str, field: str, old: str, new: str) -> b
 
 # ---------------------------------------------------------------- 发送 / 通知
 
+def _norm_path(p: str) -> str:
+    """路径归一化（与 check-agent-conflicts._norm 同形）：去引号、去 ./ 前缀、去尾随 /。"""
+    p = str(p).strip().strip('"').strip("'")
+    if p.startswith("./"):
+        p = p[2:]
+    return p.rstrip("/")
+
+
+def _validate_ref(root: Path, ref: str) -> None:
+    """--ref 只认控制面 repo 内真实存在的相对路径：拒绝绝对路径，拒绝 realpath 归一化后
+    逃逸控制面根的路径（`..` / 符号链接）——防止外部文件（如 /etc/hosts）冒充落盘记录。"""
+    if Path(ref).is_absolute():
+        raise ValueError(f"--ref 拒绝绝对路径：{ref}（用控制面 repo 内的相对路径）")
+    root_r = Path(root).resolve()
+    try:
+        target = (root_r / ref).resolve()
+        target.relative_to(root_r)
+    except ValueError:
+        raise ValueError(f"--ref 逃逸控制面根（{root}）：{ref}") from None
+    except OSError as exc:
+        raise ValueError(f"--ref 无法解析：{ref}（{exc}）") from None
+    if not target.is_file():
+        raise ValueError(f"--ref 指向的文件不存在：{ref}（先落盘再发消息）")
+
+
 def _paseo_notify(root: Path, to: str, summary: str) -> str:
     """低延迟提醒：复用 spawn skill 的 `paseo send <id>`。全程降级、不 raise。"""
     state = AS.load_state(root, to) or {}
@@ -138,8 +167,7 @@ def send(root: Path, sender: str, to: str, kind: str, summary: str,
     if kind in REF_REQUIRED_KINDS:
         if not ref:
             raise ValueError(f"kind={kind} 是关键消息，必须 --ref 指向 repo 落盘记录（验收 #5）")
-        if not (Path(root) / ref).is_file() and not Path(ref).is_file():
-            raise ValueError(f"--ref 指向的文件不存在：{ref}（先落盘再发消息）")
+        _validate_ref(root, ref)
     ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now if now is not None else time.time()))
     msg = {
         "id": _msg_id(sender, to, summary, ts), "kind": kind, "from": sender, "to": to,
@@ -187,26 +215,66 @@ def initiate_handoff(root: Path, sender: str, to: str, task: str, ref: str,
                 ref=ref, task=task, paths=paths, state="pending", notify=notify)
 
 
+def _validate_transfer(initiator: str, ini_state: dict | None,
+                       paths: list[str], msg_id: str) -> list[str]:
+    """ack 前验证：每条待转移路径都能合法、完整地从发起方 owned_paths 移出。
+    发起方必须**精确拥有**该条目（归一化后逐条匹配）；发起方只拥有父目录时拒绝——
+    不做目录所有权分裂（否则转移后目录与子文件立即重叠），先让发起方 register 拆细
+    owned_paths 再 handoff（doctrine：`.agent/multi-agent-control-plane.md`）。
+    返回发起方的原始 owned_paths 列表（供移除用）。"""
+    if ini_state is None:
+        raise ValueError(
+            f"handoff {msg_id} 被拒：发起方「{initiator}」无状态文件（memory/agents/），"
+            f"无法验证 ownership。先让发起方 python scripts/agent-state.py register 再重试"
+        )
+    owned = [str(p) for p in (ini_state.get("owned_paths") or [])]
+    owned_norm = {_norm_path(p) for p in owned}
+    problems: list[str] = []
+    for p in paths:
+        np = _norm_path(p)
+        if np in owned_norm:
+            continue
+        parent = next((o for o in owned if np.startswith(_norm_path(o) + "/")), None)
+        if parent:
+            problems.append(f"{p}（发起方拥有的是目录 {parent}：不做目录所有权分裂，"
+                            f"先让发起方 register 拆细 owned_paths 再 handoff）")
+        else:
+            problems.append(f"{p}（不在发起方 owned_paths 内）")
+    if problems:
+        raise ValueError(
+            f"handoff {msg_id} 被拒：待转移路径无法从发起方「{initiator}」完整移出——"
+            + "；".join(problems)
+        )
+    return owned
+
+
 def ack_handoff(root: Path, name: str, msg_id: str, notify: bool = True) -> dict:
-    """接收方确认：pending→accepted + 标已读 + ownership 转移 + 回执给发起方。"""
+    """接收方确认：先验证 ownership 可合法转移，再 pending→accepted + 标已读 + 转移 + 回执。
+    验证不过整个 ack 拒绝、消息保持 pending（修正发起方声明后可重试），不留重叠 ownership。"""
     msgs = [m for m in read_inbox(root, name) if m["id"] == msg_id and m.get("kind") == "handoff"]
     if not msgs:
         raise ValueError(f"inbox 里找不到 handoff 消息 id={msg_id}（agent={name}）")
     msg = msgs[0]
     if msg.get("state") != "pending":
         raise ValueError(f"handoff {msg_id} 状态是 {msg.get('state')!r}，只有 pending 可 ack")
+
+    initiator = msg["from"]
+    task = msg.get("task") or msg.get("summary", "")
+    paths = [p.strip() for p in (msg.get("paths") or "").split(",") if p.strip()]
+    # 先验证再改状态：任何一条转移不合法就拒绝 ack（消息保持 pending）。
+    ini_owned: list[str] = []
+    if paths:
+        ini_owned = _validate_transfer(initiator, AS.load_state(root, initiator), paths, msg_id)
+
     inbox = AS.mailbox_dir(root, name) / "inbox.md"
     if not _rewrite_field(inbox, msg_id, "state", "pending", "accepted"):
         raise ValueError(f"改写 handoff {msg_id} 状态失败")
     _rewrite_field(inbox, msg_id, "read", "no", "yes")
 
-    initiator = msg["from"]
-    task = msg.get("task") or msg.get("summary", "")
-    paths = [p.strip() for p in (msg.get("paths") or "").split(",") if p.strip()]
     # ownership 转移：发起方 owned_paths 移除、接收方并入；任务归属写进接收方状态文件。
-    ini_state = AS.load_state(root, initiator)
-    if ini_state is not None and paths:
-        remaining = [p for p in (ini_state.get("owned_paths") or []) if p not in paths]
+    if paths:
+        moved = {_norm_path(p) for p in paths}
+        remaining = [p for p in ini_owned if _norm_path(p) not in moved]
         AS.register(root, initiator, owned=remaining)
     recv_state = AS.load_state(root, name) or {}
     merged = list(dict.fromkeys((recv_state.get("owned_paths") or []) + paths))
@@ -259,6 +327,29 @@ def _self_test() -> int:  # noqa: PLR0915
                       ref="memory/handoffs/20260712-demo.md", notify=False)
         check(bool(ok_msg["id"]), "decision 带真实 ref 可发送")
 
+        # [MAJOR-2 回归] ref 越界：绝对路径 / .. 逃逸控制面根一律拒绝（即使文件真实存在）
+        try:
+            send(root, a, b, "decision", "绝对路径 ref", ref=str(refdoc), notify=False)
+            check(False, "ref 绝对路径应拒绝（即使文件在控制面根内且存在）")
+        except ValueError as exc:
+            check("绝对路径" in str(exc), "ref 绝对路径应拒绝（即使文件在控制面根内且存在）")
+        try:
+            send(root, a, b, "decision", "外部文件 ref", ref="/etc/hosts", notify=False)
+            check(False, "ref 指向 repo 外绝对路径应拒绝")
+        except ValueError:
+            check(True, "ref 指向 repo 外绝对路径应拒绝")
+        try:
+            send(root, a, b, "decision", "逃逸 ref", ref="../outside.md", notify=False)
+            check(False, "ref 经 .. 逃逸控制面根应拒绝")
+        except ValueError as exc:
+            check("逃逸" in str(exc), "ref 经 .. 逃逸控制面根应拒绝")
+        try:
+            send(root, a, b, "decision", "藏在中间的逃逸",
+                 ref="memory/../../outside.md", notify=False)
+            check(False, "ref 中段 .. 逃逸同样拒绝")
+        except ValueError as exc:
+            check("逃逸" in str(exc), "ref 中段 .. 逃逸同样拒绝")
+
         # mark-read
         n = mark_read(root, b, ok_msg["id"])
         check(n == 1, "mark-read 单条")
@@ -286,6 +377,43 @@ def _self_test() -> int:  # noqa: PLR0915
             check(False, "重复 ack 应拒绝")
         except ValueError:
             check(True, "重复 ack 应拒绝")
+
+        # [MAJOR-1 回归] 转移发起方未拥有的路径 → 拒绝 ack、消息保持 pending、不并入接收方
+        h2 = initiate_handoff(root, a, b, task="转移未拥有的路径",
+                              ref="memory/handoffs/20260712-demo.md",
+                              paths=["not-owned.md"], notify=False)
+        try:
+            ack_handoff(root, b, h2["id"], notify=False)
+            check(False, "转移发起方未拥有的路径应拒绝")
+        except ValueError as exc:
+            check("owned_paths" in str(exc), "转移发起方未拥有的路径应拒绝")
+        still = [m for m in read_inbox(root, b) if m["id"] == h2["id"]][0]
+        check(still["state"] == "pending", "被拒的 handoff 保持 pending（可修正后重试）")
+        check("not-owned.md" not in ((AS.load_state(root, b) or {}).get("owned_paths") or []),
+              "被拒时接收方不并入任何路径")
+
+        # [MAJOR-1 回归] 发起方拥有目录、转移其子文件 → 拒绝（不做目录所有权分裂）
+        h3 = initiate_handoff(root, a, b, task="转移目录子文件",
+                              ref="memory/handoffs/20260712-demo.md",
+                              paths=["src/a/sub.md"], notify=False)
+        try:
+            ack_handoff(root, b, h3["id"], notify=False)
+            check(False, "拥有目录、转移子文件应拒绝（否则留下目录/子文件重叠）")
+        except ValueError as exc:
+            check("目录" in str(exc) and "src/a/" in str(exc),
+                  "拥有目录、转移子文件应拒绝（否则留下目录/子文件重叠）")
+        check("src/a/" in ((AS.load_state(root, a) or {}).get("owned_paths") or []),
+              "被拒时发起方目录 ownership 原样保留")
+
+        # [MAJOR-1 回归] 发起方无状态文件 → 拒绝（无法验证 ownership）
+        h4 = initiate_handoff(root, "幽灵·改·ghost", b, task="无状态发起方",
+                              ref="memory/handoffs/20260712-demo.md",
+                              paths=["ghost.md"], notify=False)
+        try:
+            ack_handoff(root, b, h4["id"], notify=False)
+            check(False, "发起方无状态文件应拒绝")
+        except ValueError as exc:
+            check("状态文件" in str(exc), "发起方无状态文件应拒绝")
 
         # 重启恢复（验收 #2）：fresh 视角只读文件即可复述归属 + 未读
         fresh_states = AS.load_states(root)
