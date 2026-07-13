@@ -23,7 +23,8 @@
   预期：无 continuity 注入（matcher 不含 startup 调 continuity 属预期）；agent 按 AGENTS.md
   入口纪律主动读到当前 plan 指针。
 - [ ] **X2 Codex /clear（SessionStart clear）**：预期同 C2。
-- [ ] **X3 Codex compact（PostCompact 事件）**：预期注入块以 `[continuity] compact 后回注` 开头。
+- [ ] **X3 Codex compact（SessionStart source=compact）**：预期注入块以
+  `[continuity] compact 后回注` 开头，且 runtime 日志中没有 invalid hook JSON。
 - [ ] **G1 拦截面实测（任一 runtime）**：真实 session 里尝试把某 plan 状态锚点改成
   `approved` 且缺必填段（可用临时草稿 plan），确认被 hook 拒绝且提示含
   `doc-lifecycle:`；再以 `DOC_LIFECYCLE_SKIP=1` 复跑确认显式放行。

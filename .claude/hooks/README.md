@@ -40,9 +40,13 @@ model id 推断 > 证据推断（观测上下文一旦超过 200k → snap 到 1
 
 **运行表面（Claude + Codex 已对等）**：
 - Claude：`.claude/settings.json` 注册 `UserPromptSubmit` + `SessionStart(compact|clear)`。
-- Codex：`.codex/config.toml` 注册 `UserPromptSubmit` + `SessionStart(clear)` + `PostCompact`。Codex 把压缩
-  拆成独立 `PostCompact` 事件（其 SessionStart matcher 只含 startup|resume|clear），故 continuity 两处挂载；
-  `context_continuity.py` 内也认 `hook_event_name=="PostCompact"`。`PreCompact` 落盘提醒本就两表面对等。
+- Codex：`.codex/config.toml` 注册 `UserPromptSubmit` + `SessionStart(compact|clear)`。Codex 0.144
+  的 `PostCompact` 输出协议不提供 `additionalContext`，所以不能承担模型上下文回注；continuity
+  必须走支持 `source=compact` 的 `SessionStart`。`PreCompact` 落盘提醒本就两表面对等。
+
+所有注入类 hook 的非空 stdout 都是单个 JSON 对象：`SessionStart` / `UserPromptSubmit` 文本放在
+`hookSpecificOutput.additionalContext`，不得打印裸文本。Claude Code 与 Codex 都接受此协议；静默路径
+保持 0 字节 stdout。
 
 ## 协议
 

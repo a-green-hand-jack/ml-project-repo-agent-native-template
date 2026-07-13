@@ -1,32 +1,38 @@
 # synthetic 探针证据 — 2026-07-13（issue #13 doc-lifecycle）
 
-> 初审（Codex gpt-5.6-sol high）MAJOR-4 的整改：此前 startup/clear/PostCompact 冒烟只在
+> 初审（Codex gpt-5.6-sol high）MAJOR-4 的整改：此前 startup/clear/compact 冒烟只在
 > commit message 声称，未落 diff。本文件是可复跑脚本的实跑记录；真实 fresh session 的
 > runtime 冒烟**不在本文件范围**，见 `runtime-smoke-checklist.md`（留给监控员）。
 
-## continuity 探针（startup / clear / PostCompact）
+## continuity + hook stdout 协议探针
 
-- 日期：2026-07-13 · 基线 commit：7ba9588（fix commit 前实跑；合并前监控员可复跑核对）
+- 日期：2026-07-13 · 基线 commit：02626c3 + working-tree JSON 协议修复
 - 命令：`python3 lab/evals/doc-lifecycle/run-continuity-probes.py --record`
-- 结果：3/3 PASS
+- 结果：8/8 PASS
 
 | 事件 | payload | exit | stdout | 断言 |
 | --- | --- | --- | --- | --- |
 | fresh startup | `{"hook_event_name": "SessionStart", "source": "startup"}` | 0 | 0 chars（空） | 不注入（决策 11b：startup 靠入口纪律，不靠 hook） |
-| clear 恢复 | `{"hook_event_name": "SessionStart", "source": "clear"}` | 0 | 4146 chars | 含 `[continuity] clear 后回注` 与「当前 plan 指针」节（指向 `plans/20260712-plan-lifecycle-state.zh.md` · implementing） |
-| compact 恢复（Codex 独立事件） | `{"hook_event_name": "PostCompact"}` | 0 | 4148 chars | 含 `[continuity] compact 后回注` 与同一「当前 plan 指针」节 |
+| clear 恢复 | `{"hook_event_name": "SessionStart", "source": "clear"}` | 0 | 4317 chars | stdout 是唯一 JSON 对象；`hookSpecificOutput.hookEventName=SessionStart`；`additionalContext` 含 `[continuity] clear 后回注` 与当前 plan 指针 |
+| compact 恢复 | `{"hook_event_name": "SessionStart", "source": "compact"}` | 0 | 4319 chars | 同上，`additionalContext` 含 `[continuity] compact 后回注` |
+| identity 首轮注入 | `UserPromptSubmit` + 无 identity | 0 | JSON | 事件名精确绑定 `UserPromptSubmit`，文本位于 `additionalContext` |
+| identity 边界重申 | `SessionStart(clear)` + `AGENT_NAME=test-persona` | 0 | JSON | 事件名精确绑定 `SessionStart`，包含 identity |
+| context threshold | `UserPromptSubmit` + synthetic 80% usage | 0 | JSON | 事件名精确绑定 `UserPromptSubmit`，包含 `[context]` |
+| 无 identity startup | `SessionStart(startup)` | 0 | 0 chars（空） | 静默路径保持空 stdout |
+| PostCompact 防回归 | `PostCompact(manual)` | 0 | 0 chars（空） | 不输出该事件不支持的 `hookSpecificOutput`，避免 invalid JSON/field |
 
 clear 探针 stdout 头部（截取）：
 
+```json
+{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"[continuity] clear 后回注 memory/current-status.md（可能滞后——请对照当前 git 状态）。以下为压缩/清空前的工作状态，据此接续，不要从零重建：\n\n# current-status.md\n…"}}
 ```
-[continuity] clear 后回注 memory/current-status.md（已 767 分钟未更新，可能滞后——请对照当前 git 状态）。以下为压缩/清空前的工作状态，据此接续，不要从零重建：
 
-# current-status.md
-…
-## 当前 plan 指针（doc-lifecycle，fresh session 先看这里）
+Codex 0.144 的官方源码 schema 还确认：`SessionStart` 输入 source 包含 `compact`，且只有
+`SessionStart` / `UserPromptSubmit` 支持 `hookSpecificOutput.additionalContext`；`PostCompact`
+只接受通用状态字段，不能用于模型上下文回注。因此 Codex 接线改为
+`SessionStart(compact|clear)`，而不是把裸文本打印给 `PostCompact`。
 
-- 当前活跃 plan：`plans/20260712-plan-lifecycle-state.zh.md`（issue #13）· status: **implementing** ·
-```
+> 证据边界：本节证明脚本输出协议和静态接线，不替代下方真实 runtime 冒烟。
 
 ## hook 拦截面探针（pre_tool_guard × doc-lifecycle）
 

@@ -47,9 +47,9 @@ timeout = 30
 statusMessage = "Indexing subagent report"
 
 # 上下文调配（对齐 Claude 表面 .claude/settings.json）：
-# Codex 确认支持 UserPromptSubmit（见 ~/.codex 全局 hooks），且把压缩拆成独立 PostCompact
-# 事件（其 SessionStart matcher 只含 startup|resume|clear，不含 compact）——故 continuity 同时
-# 挂 SessionStart(clear) 与 PostCompact，hook 内也认 hook_event_name=="PostCompact"。
+# Codex 0.144 的 SessionStart source 明确包含 compact；只有 SessionStart 的
+# hookSpecificOutput.additionalContext 能注入模型上下文，PostCompact 仅接受通用状态字段。
+# 因此 continuity 与 Claude 一样挂在 SessionStart(compact|clear)。
 [[hooks.UserPromptSubmit]]
 
 [[hooks.UserPromptSubmit.hooks]]
@@ -66,7 +66,7 @@ timeout = 30
 statusMessage = "Agent self-naming"
 
 [[hooks.SessionStart]]
-matcher = "clear"
+matcher = "compact|clear"
 
 [[hooks.SessionStart.hooks]]
 type = "command"
@@ -83,12 +83,3 @@ type = "command"
 command = 'python3 "$(git rev-parse --show-toplevel)/.claude/hooks/agent_identity_hook.py"'
 timeout = 30
 statusMessage = "Reasserting agent identity"
-
-[[hooks.PostCompact]]
-matcher = "^.*$"
-
-[[hooks.PostCompact.hooks]]
-type = "command"
-command = 'python3 "$(git rev-parse --show-toplevel)/.claude/hooks/context_continuity.py"'
-timeout = 30
-statusMessage = "Restoring status continuity"
