@@ -42,6 +42,14 @@ draft/in-review 天然通过，状态进阶才强制证据。PyYAML 可选：缺
   外无法安全静态求值的活动 shell 展开——目的路径不可核验。
 human 显式绕过：`DOC_LIFECYCLE_SKIP=1`（validator 仍会事后校验）。
 
+**架构边界（Bash 侧注册表删除拦截是「尽力而为的减速带」，不是完备安全边界）**：静态命令分析
+无法可靠拦截解释器（`python`/`perl`/`awk`/`ex` 等，目的路径运行时才构造）、`eval`/命令替换
+`$(...)`、`find -delete`/`-exec`/`xargs` 及无界的写工具尾巴（`install`/`ln -sf`/`rsync`/`sed -i`…）。
+本 hook 只在编辑动作阶段兜底**常见/可判定**的删除/移走/覆盖模式（见 plan「可判定的事实」边界）。
+注册表完整性的**权威保证是事后 validator**：`check-doc-lifecycle.py` 由 `validate-governance`
+在 CI/治理门禁强制，注册表缺失或无法解析即 error；且注册表纳入 git 追踪，任何删除都会在
+diff/clean/same-commit 门禁与 code review 中暴露。**不要**试图把本 hook 堆成完备 Bash 解析器。
+
 用法：
   python scripts/check-doc-lifecycle.py [--strict]   # 校验本 repo（validate-governance 拉起）
   python scripts/check-doc-lifecycle.py --self-test  # 跑内嵌 fixtures（无外部 fixture 目录）
