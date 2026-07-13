@@ -95,6 +95,7 @@ def build_recommendation(
     now: dt.datetime,
     max_age_minutes: int,
     min_samples: int,
+    ledger_error: str | None = None,
 ) -> dict[str, Any]:
     providers = quota.get("providers", {})
     preferences = quota.get("paseo_preferences") or {"status": "missing", "providers": {}}
@@ -109,9 +110,19 @@ def build_recommendation(
     degraded = False
     degraded_reason: str | None = None
 
+    # 0) ledger integrity gate: schema-invalid/corrupt ledgers never feed the
+    # stats (caller passes records=[] plus the error summary); conservative
+    # fallback to quota-only instead of routing on bad data.
+    if ledger_error:
+        degraded = True
+        degraded_reason = (
+            f"outcome ledger failed validation ({ledger_error}); outcome evidence "
+            "discarded; falling back to quota-only recommendation"
+        )
+
     # 1) freshness gate (reuses the freshness_warning idea from read_agent_quota).
     stale = staleness(providers, now, max_age_minutes)
-    if stale.get(base_provider, {}).get("stale"):
+    if not degraded and stale.get(base_provider, {}).get("stale"):
         degraded = True
         age = stale[base_provider]["age_minutes"]
         degraded_reason = (
@@ -120,15 +131,20 @@ def build_recommendation(
             "falling back to quota-only recommendation"
         )
 
-    # 2) outcome evidence gate.
-    stats = ol.provider_stats(records, role=role)
-    total_observed = sum(s["observed"] for s in stats.values())
-    if not degraded and total_observed < min_samples:
+    # 2) outcome evidence gate, isolated per task identity: samples are
+    # aggregated on the full role + task_class + routing_tier segment, and
+    # EVERY candidate needs >= min_samples observed outcomes in that segment
+    # (tier-3 or other-task data must not steer a tier-2 decision).
+    segment = f"role={role} task_class={task_class} tier={tier}"
+    stats = ol.provider_stats(records, role=role, task_class=task_class, routing_tier=tier)
+    thin = {name: (stats.get(name) or {}).get("observed", 0) for name in PROVIDER_ORDER
+            if (stats.get(name) or {}).get("observed", 0) < min_samples}
+    if not degraded and thin:
         degraded = True
         degraded_reason = (
-            f"insufficient outcome evidence for role={role}: "
-            f"{total_observed} observed outcome(s) < min_samples={min_samples}; "
-            "falling back to quota-only recommendation"
+            f"insufficient outcome evidence for segment {segment}: "
+            + ", ".join(f"{name} observed={n}" for name, n in sorted(thin.items()))
+            + f" < min_samples={min_samples}; falling back to quota-only recommendation"
         )
 
     chosen = base_provider
@@ -139,11 +155,11 @@ def build_recommendation(
             s = stats.get(name)
             if s:
                 signals.append(
-                    f"outcome evidence role={role}: {name} observed={s['observed']} "
+                    f"outcome evidence {segment}: {name} observed={s['observed']} "
                     f"success_rate={s['success_rate']} avg_rework={s['avg_rework']}"
                 )
             else:
-                signals.append(f"outcome evidence role={role}: {name} has no observed outcomes")
+                signals.append(f"outcome evidence {segment}: {name} has no observed outcomes")
         alt = next(p for p in PROVIDER_ORDER if p != base_provider)
         base_stats, alt_stats = stats.get(base_provider), stats.get(alt)
         if (
@@ -297,16 +313,27 @@ def main(argv: list[str] | None = None) -> int:
 
     catalog = ol.load_catalog(Path(args.catalog))
     records, parse_errs = ol.read_ledger(Path(args.ledger))
-    ledger_errs = ol.validate_records(records, catalog) if records else []
-    for err in parse_errs + ledger_errs:
-        print(f"WARN ledger: {err}", file=sys.stderr)
+    ledger_errs = parse_errs + (ol.validate_records(records, catalog) if records else [])
+    ledger_error: str | None = None
+    if ledger_errs:
+        for err in ledger_errs:
+            print(f"WARN ledger: {err}", file=sys.stderr)
+        # Invalid records never feed routing stats: drop ALL ledger evidence
+        # and force the degraded quota-only fallback (conservative by design).
+        ledger_error = f"{len(ledger_errs)} parse/schema error(s) in {args.ledger}"
+        records = []
 
     recommendation = build_recommendation(
         quota, records, catalog, args.role, args.tier, args.task_class,
-        now, args.max_age_minutes, args.min_samples,
+        now, args.max_age_minutes, args.min_samples, ledger_error=ledger_error,
     )
 
     if args.record:
+        try:
+            record_ledger = ol.resolve_write_path(args.record_ledger)
+        except ol.LedgerWriteError as exc:
+            print(f"ERROR record: {exc}", file=sys.stderr)
+            return 2
         decision = {
             "record_type": "decision",
             "schema_version": ol.SCHEMA_VERSION,
@@ -336,7 +363,7 @@ def main(argv: list[str] | None = None) -> int:
             for err in errs:
                 print(f"ERROR record: {err}", file=sys.stderr)
             return 1
-        ol.append_record(decision, Path(args.record_ledger))
+        ol.append_record(decision, record_ledger)
 
     output = {
         "generated_at": _iso(now),
@@ -350,7 +377,10 @@ def main(argv: list[str] | None = None) -> int:
             "max_age_minutes": args.max_age_minutes,
             "min_samples": args.min_samples,
         },
-        "quota_route_recommendation": raq.route_recommendation(
+        # Exact key preserved for backward compatibility (plan + SKILL.md):
+        # the quota-only baseline stays under `route_recommendation`, the
+        # outcome layer is ADDED next to it, never renaming the legacy key.
+        "route_recommendation": raq.route_recommendation(
             args.role, args.tier, quota.get("providers", {}),
             quota.get("paseo_preferences") or {"status": "missing", "providers": {}},
             quota.get("usage_velocity", {}),

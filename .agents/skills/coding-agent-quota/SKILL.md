@@ -95,9 +95,18 @@ Rules:
   frozen, versioned catalog `fixtures/outcome/model-catalog.v1.json`, not against `model_for()`.
   `effort` holds provider-native values only (Codex knob: `-c model_reasoning_effort=<v>` per
   launch); the abstract level lives in `routing_tier`.
-- Conservative fallback: stale quota snapshot or insufficient outcome evidence sets
-  `degraded: true` with a reason and falls back to the quota-only recommendation. Never dress
-  missing/expired data up as precise numbers.
+- Conservative fallback: stale quota snapshot, insufficient outcome evidence, or a
+  parse/schema-invalid ledger sets `degraded: true` with a reason and falls back to the
+  quota-only recommendation (invalid records are discarded, never fed into routing stats).
+  Never dress missing/expired data up as precise numbers.
+- Task-identity isolation: outcome evidence is aggregated per `role + task_class +
+  routing_tier` segment, and EVERY candidate provider needs >= `--min-samples` observed
+  outcomes in that exact segment; otherwise the layer degrades to quota-only (tier-3 or
+  other-task samples never steer a tier-2 decision).
+- Write boundary: ledger writes (`--ledger` on record commands, `--record-ledger`) are only
+  accepted inside the default `.outcome-ledger/` directory or the system temp dir (tests);
+  protected paths (`lab/data|runs|models`, `lab/infra/private`, `.env`) and any other
+  location are rejected with a non-zero exit. Reads are unrestricted (fixtures replay).
 - Cost is quota-only in this version: candidate routes are compared/sorted by `quota_cost`
   (subscription window burn, estimate). `metered_price_estimate` ($/token) is reserved and NOT
   implemented (plan decision Q6). Reports keep dimensions separate (outcome / quota_cost /

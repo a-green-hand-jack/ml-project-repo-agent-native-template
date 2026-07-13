@@ -12,9 +12,13 @@
    的 catalog；且 sample fixture 中至少一条 Codex 生态 decision 记录。
 4. 真实 ledger（`.outcome-ledger/ledger.jsonl`，若存在）同样通过 schema 校验。
 5. fallback 行为：对 stale quota fixture 跑 replay，必须 degraded=true 并回退
-   quota-only 推荐；对 frozen fixture 跑两次，输出必须逐字节一致（确定性）。
+   quota-only 推荐；对 frozen fixture 跑两次，输出必须逐字节一致（确定性）；
+   从未见过的 task_class（无该 segment 样本）必须 degraded=true 并回退。
 6. credential 防线：skill scripts 静态扫描，不得出现 credential 类路径字面量；
    `.gitignore` 必须覆盖 `.outcome-ledger` 明细。
+7. 负向 schema 校验：以 sample fixture 的合法 decision/outcome 为底，逐个删除
+   required key（含 quota_cost 子字段）、破坏 schema_version / decision_id 格式，
+   validator 必须逐条拒绝（缺字段绝不静默通过）。
 
 校验逻辑经 importlib 复用 skill 内 `outcome_ledger.py`（同
 `check-adoption-integrity.py` 复用 adopt 脚本的先例），避免两份 schema 漂移。
@@ -119,11 +123,14 @@ def check_real_ledger(ol, catalog) -> None:
         errors.append(f".outcome-ledger/ledger.jsonl: {err}")
 
 
-def _run_replay(quota_fixture: Path, ledger: Path) -> tuple[int, str]:
+def _run_replay(quota_fixture: Path, ledger: Path,
+                task_class: str = "bounded-implementation") -> tuple[int, str]:
+    # 默认 task_class 必须在 fixture 里有足量样本：outcome 证据按
+    # role+task_class+routing_tier segment 隔离，未见过的 segment 会保守 degraded。
     result = subprocess.run(
         [sys.executable, str(ROUTE_SCRIPT),
          "--quota-fixture", str(quota_fixture), "--ledger", str(ledger),
-         "--role", "impl", "--tier", "2", "--task-class", "validator-replay",
+         "--role", "impl", "--tier", "2", "--task-class", task_class,
          "--now", REPLAY_NOW],
         capture_output=True, text=True, cwd=REPO,
     )
@@ -162,6 +169,50 @@ def check_fallback_and_determinism() -> None:
         errors.append("fallback 未在过期数据场景下触发：stale fixture 应 degraded=true")
     elif rec.get("provider") != rec.get("baseline_provider"):
         errors.append("degraded 时未回退 quota-only 推荐（provider != baseline_provider）")
+    # 从未见过的 task_class：该 segment 无样本，必须 degraded 并回退 quota-only。
+    rc4, out4 = _run_replay(FROZEN_QUOTA, SAMPLE_LEDGER, task_class="validator-unseen-task-class")
+    if rc4 != 0:
+        errors.append(f"replay 在 unseen task_class 上退出码非 0（{rc4}）")
+        return
+    try:
+        rec = json.loads(out4)["outcome_route_recommendation"]
+    except (json.JSONDecodeError, KeyError) as exc:
+        errors.append(f"unseen task_class replay 输出不可解析：{exc}")
+        return
+    if rec.get("degraded") is not True:
+        errors.append("task 身份隔离失效：未见过的 task_class 应 degraded=true（不得借用他类样本）")
+    elif rec.get("provider") != rec.get("baseline_provider"):
+        errors.append("unseen task_class degraded 时未回退 quota-only 推荐")
+
+
+def check_negative_schema_rejection(ol, catalog) -> None:
+    """负向 fixtures：逐个删除 required key / 破坏格式，校验必须 FAIL。"""
+    records, _ = ol.read_ledger(SAMPLE_LEDGER)
+    decision = next((r for r in records if r.get("record_type") == "decision"), None)
+    outcome = next((r for r in records
+                    if r.get("record_type") == "outcome" and r.get("quota_cost")), None)
+    if decision is None or outcome is None:
+        errors.append("sample fixture 缺少可用于负向校验的 decision/outcome 记录")
+        return
+    for key in ol.DECISION_REQUIRED_KEYS:
+        mutated = {k: v for k, v in decision.items() if k != key}
+        if not ol.validate_decision(mutated, catalog):
+            errors.append(f"负向校验失效：decision 删除 {key} 未被拒绝")
+    for key in ol.OUTCOME_REQUIRED_KEYS:
+        mutated = {k: v for k, v in outcome.items() if k != key}
+        if not ol.validate_outcome(mutated, catalog):
+            errors.append(f"负向校验失效：outcome 删除 {key} 未被拒绝")
+    for key in ol.QUOTA_COST_REQUIRED_KEYS:
+        mutated = dict(outcome)
+        mutated["quota_cost"] = {k: v for k, v in outcome["quota_cost"].items() if k != key}
+        if not ol.validate_outcome(mutated, catalog):
+            errors.append(f"负向校验失效：quota_cost 删除 {key} 未被拒绝（残缺 quota_cost 应 FAIL）")
+    if not ol.validate_decision({**decision, "schema_version": 999}, catalog):
+        errors.append("负向校验失效：decision schema_version 漂移未被拒绝")
+    if not ol.validate_outcome({**outcome, "schema_version": 999}, catalog):
+        errors.append("负向校验失效：outcome schema_version 漂移未被拒绝")
+    if not ol.validate_decision({**decision, "decision_id": "not-a-valid-id"}, catalog):
+        errors.append("负向校验失效：decision_id 非 d-<id> 格式未被拒绝")
 
 
 def check_credentials_and_gitignore() -> None:
@@ -184,6 +235,7 @@ def main() -> int:
     if catalog is not None:
         check_fixture_ledgers(ol, catalog)
         check_real_ledger(ol, catalog)
+        check_negative_schema_rejection(ol, catalog)
     check_fallback_and_determinism()
     check_credentials_and_gitignore()
 

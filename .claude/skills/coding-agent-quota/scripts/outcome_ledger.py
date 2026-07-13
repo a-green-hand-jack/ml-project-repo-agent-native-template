@@ -36,16 +36,49 @@ import argparse
 import datetime as dt
 import hashlib
 import json
+import re
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
+REPO_ROOT = SKILL_DIR.parents[2]
 DEFAULT_LEDGER_FILE = SKILL_DIR / ".outcome-ledger" / "ledger.jsonl"
 DEFAULT_CATALOG = SKILL_DIR / "fixtures" / "outcome" / "model-catalog.v1.json"
 
+# Write boundary (BLOCKER fix): ledger writes are only allowed inside the
+# default gitignored ledger directory or the system temp dir (tests). Protected
+# paths (aligned with .claude/hooks/pre_tool_guard.py) and any other location
+# are rejected — `--ledger`/`--record-ledger` must not become an arbitrary
+# file-write primitive that bypasses the protected-path floor.
+PROTECTED_REPO_PREFIXES = (
+    "lab/data/", "lab/runs/", "lab/models/", "lab/infra/private/",
+)
+PROTECTED_REPO_FILES = (".env",)
+
 SCHEMA_VERSION = 1
 RECORD_TYPES = ("decision", "outcome")
+DECISION_ID_RE = re.compile(r"^d-[A-Za-z0-9][A-Za-z0-9_-]*$")
+# Required-key floors: every key must be PRESENT (some values may be null).
+# Deleting any of these from a record must be rejected by the validator.
+DECISION_REQUIRED_KEYS = (
+    "record_type", "schema_version", "decision_id", "decided_at", "task_class",
+    "role", "routing_tier", "provider", "model", "effort", "policy_version",
+    "launch_surface", "quota_snapshot_ref", "paseo_preference", "degraded",
+    "degraded_reason", "baseline_provider", "signals", "outcome_status",
+)
+OUTCOME_REQUIRED_KEYS = (
+    "record_type", "schema_version", "decision_id", "outcome_observed_at",
+    "outcome_status", "evidence_source", "outcome_quality", "rework_count",
+    "failure_reason", "tokens_in", "tokens_out", "latency_wall_clock_s",
+    "actual_provider", "actual_model", "actual_effort", "policy_version",
+)
+# quota_cost is optional on an outcome, but when present it must be complete.
+QUOTA_COST_REQUIRED_KEYS = (
+    "window", "before_used_percent", "after_used_percent", "delta_percent",
+    "sampled_before_at", "sampled_after_at", "attribution_confidence", "is_estimate",
+)
 ROLES = ("impl", "ui", "research", "planning", "audit")
 OUTCOME_STATUSES = ("pending", "observed", "unavailable")
 QUALITIES = ("pass", "partial", "fail")
@@ -143,8 +176,23 @@ def validate_decision(rec: dict[str, Any], catalog: dict[str, Any]) -> list[str]
     errs: list[str] = []
     did = rec.get("decision_id")
     prefix = f"decision {did or '<no id>'}"
+    missing = [k for k in DECISION_REQUIRED_KEYS if k not in rec]
+    if missing:
+        errs.append(f"{prefix}: missing required key(s): {missing}")
+    if rec.get("schema_version") != SCHEMA_VERSION:
+        errs.append(
+            f"{prefix}: schema_version must be {SCHEMA_VERSION}: {rec.get('schema_version')!r}"
+        )
     if not isinstance(did, str) or not did:
         errs.append(f"{prefix}: missing/empty decision_id")
+    elif not DECISION_ID_RE.match(did):
+        errs.append(f"{prefix}: decision_id does not match 'd-<id>' format: {did!r}")
+    baseline = rec.get("baseline_provider")
+    if not isinstance(baseline, str) or baseline not in catalog.get("providers", {}):
+        errs.append(f"{prefix}: baseline_provider not in catalog providers: {baseline!r}")
+    signals = rec.get("signals")
+    if not isinstance(signals, list) or not all(isinstance(s, str) for s in signals):
+        errs.append(f"{prefix}: signals must be a list of strings")
     if parse_iso(rec.get("decided_at")) is None:
         errs.append(f"{prefix}: decided_at is not a valid ISO-8601 time")
     if not isinstance(rec.get("task_class"), str) or not rec.get("task_class"):
@@ -196,8 +244,17 @@ def validate_outcome(
     errs: list[str] = []
     did = rec.get("decision_id")
     prefix = f"outcome for {did or '<no id>'}"
+    missing = [k for k in OUTCOME_REQUIRED_KEYS if k not in rec]
+    if missing:
+        errs.append(f"{prefix}: missing required key(s): {missing}")
+    if rec.get("schema_version") != SCHEMA_VERSION:
+        errs.append(
+            f"{prefix}: schema_version must be {SCHEMA_VERSION}: {rec.get('schema_version')!r}"
+        )
     if not isinstance(did, str) or not did:
         errs.append(f"{prefix}: missing/empty decision_id")
+    elif not DECISION_ID_RE.match(did):
+        errs.append(f"{prefix}: decision_id does not match 'd-<id>' format: {did!r}")
     elif decision_ids is not None and did not in decision_ids:
         errs.append(f"{prefix}: references unknown decision_id {did!r}")
     status = rec.get("outcome_status")
@@ -240,6 +297,15 @@ def validate_outcome(
         if not isinstance(cost, dict):
             errs.append(f"{prefix}: quota_cost must be an object")
         else:
+            missing_cost = [k for k in QUOTA_COST_REQUIRED_KEYS if k not in cost]
+            if missing_cost:
+                errs.append(f"{prefix}: quota_cost missing required key(s): {missing_cost}")
+            if not isinstance(cost.get("window"), str) or not cost.get("window"):
+                errs.append(f"{prefix}: quota_cost.window must be a non-empty string")
+            for key in ("before_used_percent", "after_used_percent"):
+                value = cost.get(key)
+                if not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0:
+                    errs.append(f"{prefix}: quota_cost.{key} must be a number >= 0")
             if cost.get("attribution_confidence") not in ATTRIBUTION_CONFIDENCE:
                 errs.append(
                     f"{prefix}: quota_cost.attribution_confidence must be one of "
@@ -247,8 +313,15 @@ def validate_outcome(
                 )
             if not isinstance(cost.get("is_estimate"), bool):
                 errs.append(f"{prefix}: quota_cost.is_estimate must be a bool")
-            if not isinstance(cost.get("delta_percent"), (int, float)):
+            if not isinstance(cost.get("delta_percent"), (int, float)) or isinstance(
+                cost.get("delta_percent"), bool
+            ):
                 errs.append(f"{prefix}: quota_cost.delta_percent must be a number")
+            if parse_iso(cost.get("sampled_after_at")) is None:
+                errs.append(f"{prefix}: quota_cost.sampled_after_at must be ISO-8601")
+            before = cost.get("sampled_before_at")
+            if before is not None and parse_iso(before) is None:
+                errs.append(f"{prefix}: quota_cost.sampled_before_at must be null or ISO-8601")
     if rec.get("metered_price_estimate") is not None:
         errs.append(
             f"{prefix}: metered_price_estimate is reserved and NOT implemented in this "
@@ -387,9 +460,17 @@ def summarize(records: list[dict[str, Any]], catalog: dict[str, Any]) -> dict[st
 
 
 def provider_stats(
-    records: list[dict[str, Any]], role: str | None = None, task_class: str | None = None
+    records: list[dict[str, Any]],
+    role: str | None = None,
+    task_class: str | None = None,
+    routing_tier: int | None = None,
 ) -> dict[str, dict[str, Any]]:
-    """Per-provider observed-outcome stats, optionally filtered by role/task_class."""
+    """Per-provider observed-outcome stats, filtered by role/task_class/routing_tier.
+
+    Task-identity isolation: callers routing a specific segment must filter on
+    the full ``role + task_class + routing_tier`` combination so that e.g.
+    tier-3 samples never pollute a tier-2 routing decision.
+    """
     decisions = {r["decision_id"]: r for r in records
                  if r.get("record_type") == "decision" and isinstance(r.get("decision_id"), str)}
     outcomes = latest_outcomes(records)
@@ -398,6 +479,8 @@ def provider_stats(
         if role is not None and dec.get("role") != role:
             continue
         if task_class is not None and dec.get("task_class") != task_class:
+            continue
+        if routing_tier is not None and dec.get("routing_tier") != routing_tier:
             continue
         out = outcomes.get(did)
         if out is None or out.get("outcome_status") != "observed":
@@ -434,8 +517,50 @@ def provider_stats(
     return result
 
 
+class LedgerWriteError(ValueError):
+    """Raised when a ledger write target violates the write boundary."""
+
+
+def resolve_write_path(path: Path | str) -> Path:
+    """Resolve (realpath) a ledger WRITE target and enforce the write boundary.
+
+    Allowed: the default `.outcome-ledger/` directory inside this skill, and
+    the system temp dir (`/tmp` / ``tempfile.gettempdir()``, for tests only).
+    Rejected with ``LedgerWriteError``: protected repo paths (lab/data|runs|
+    models, lab/infra/private, .env — aligned with pre_tool_guard) and any
+    other repo or non-temp location. Read paths are NOT restricted.
+    """
+    resolved = Path(path).expanduser().resolve()
+    repo_root = REPO_ROOT.resolve()
+    try:
+        rel = resolved.relative_to(repo_root).as_posix()
+    except ValueError:
+        rel = None
+    if rel is not None and (
+        rel in PROTECTED_REPO_FILES
+        or resolved.name in PROTECTED_REPO_FILES
+        or any(rel == p.rstrip("/") or rel.startswith(p) for p in PROTECTED_REPO_PREFIXES)
+    ):
+        raise LedgerWriteError(
+            f"refusing to write ledger to protected path: {path} "
+            "(protected-path floor, see .agent/action-boundary.md)"
+        )
+    allowed_dirs = {
+        DEFAULT_LEDGER_FILE.parent.resolve(),
+        Path("/tmp").resolve(),
+        Path(tempfile.gettempdir()).resolve(),
+    }
+    for root in allowed_dirs:
+        if root in resolved.parents:
+            return resolved
+    raise LedgerWriteError(
+        f"refusing to write ledger outside the allowed directories: {path} "
+        f"(allowed: {DEFAULT_LEDGER_FILE.parent} or the system temp dir)"
+    )
+
+
 def append_record(record: dict[str, Any], ledger_file: Path) -> None:
-    ledger_file = Path(ledger_file)
+    ledger_file = resolve_write_path(ledger_file)
     ledger_file.parent.mkdir(parents=True, exist_ok=True)
     with ledger_file.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
@@ -448,6 +573,11 @@ def _fail_on_errors(errs: list[str]) -> int:
 
 
 def cmd_record_decision(args: argparse.Namespace) -> int:
+    try:
+        ledger_path = resolve_write_path(args.ledger)
+    except LedgerWriteError as exc:
+        print(f"ERROR {exc}", file=sys.stderr)
+        return 2
     catalog = load_catalog(Path(args.catalog))
     decided_at = args.decided_at or iso_now()
     record: dict[str, Any] = {
@@ -481,13 +611,18 @@ def cmd_record_decision(args: argparse.Namespace) -> int:
     errs = validate_decision(record, catalog)
     if errs:
         return _fail_on_errors(errs)
-    append_record(record, Path(args.ledger))
+    append_record(record, ledger_path)
     print(json.dumps({"decision_id": record["decision_id"], "ledger": str(args.ledger)},
                      ensure_ascii=False))
     return 0
 
 
 def cmd_record_outcome(args: argparse.Namespace) -> int:
+    try:
+        ledger_path = resolve_write_path(args.ledger)
+    except LedgerWriteError as exc:
+        print(f"ERROR {exc}", file=sys.stderr)
+        return 2
     catalog = load_catalog(Path(args.catalog))
     record: dict[str, Any] = {
         "record_type": "outcome",
@@ -523,7 +658,7 @@ def cmd_record_outcome(args: argparse.Namespace) -> int:
     errs = parse_errs + validate_outcome(record, catalog, decision_ids)
     if errs:
         return _fail_on_errors(errs)
-    append_record(record, Path(args.ledger))
+    append_record(record, ledger_path)
     print(json.dumps({"decision_id": record["decision_id"], "status": record["outcome_status"]},
                      ensure_ascii=False))
     return 0

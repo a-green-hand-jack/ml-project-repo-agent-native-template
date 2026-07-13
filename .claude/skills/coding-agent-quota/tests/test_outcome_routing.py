@@ -23,6 +23,23 @@ sys.path.insert(0, str(SCRIPTS))
 import outcome_ledger as ol  # noqa: E402
 
 
+def _tmp_writable() -> bool:
+    """True when a writable temp dir exists (read-only sandboxes lack one)."""
+    try:
+        with tempfile.NamedTemporaryFile():
+            return True
+    except OSError:
+        return False
+
+
+TMP_WRITABLE = _tmp_writable()
+NEEDS_TMP = unittest.skipUnless(
+    TMP_WRITABLE,
+    "no writable temp dir in this environment (read-only sandbox); "
+    "skipping tests that must create files under tempfile.gettempdir()",
+)
+
+
 def run(args: list[str]) -> subprocess.CompletedProcess:
     return subprocess.run([sys.executable, *args], capture_output=True, text=True, cwd=REPO)
 
@@ -53,6 +70,19 @@ class BackwardCompat(unittest.TestCase):
             self.assertIn(key, rec)
         # The outcome layer must never leak into the legacy output.
         self.assertNotIn("outcome_route_recommendation", data)
+
+    def test_route_recommendation_key_preserved_in_outcome_output(self):
+        """outcome_route output keeps the exact legacy key `route_recommendation`
+        (quota-only baseline) NEXT TO `outcome_route_recommendation` — never a
+        renamed `quota_route_recommendation`."""
+        result = replay("quota-snapshot.frozen.json", "outcome-ledger.sample.jsonl")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        data = json.loads(result.stdout)
+        self.assertIn("route_recommendation", data)
+        self.assertIn("outcome_route_recommendation", data)
+        self.assertNotIn("quota_route_recommendation", data)
+        for key in ("recommended_provider", "recommended_model", "recommended_effort", "scores"):
+            self.assertIn(key, data["route_recommendation"])
 
 
 class Replay(unittest.TestCase):
@@ -117,6 +147,198 @@ class Replay(unittest.TestCase):
         self.assertEqual(costs, sorted(costs))
 
 
+class TaskIdentityIsolation(unittest.TestCase):
+    """Outcome samples are isolated per role + task_class + routing_tier segment."""
+
+    def test_task_classes_get_isolated_results(self):
+        """Same ledger, different task_class: bounded-implementation has enough
+        samples (not degraded); deep-debug at tier 2 has none (degraded)."""
+        seen = json.loads(replay("quota-snapshot.frozen.json",
+                                 "outcome-ledger.sample.jsonl").stdout)
+        other = json.loads(replay("quota-snapshot.frozen.json", "outcome-ledger.sample.jsonl",
+                                  extra=["--task-class", "deep-debug"]).stdout)
+        self.assertFalse(seen["outcome_route_recommendation"]["degraded"])
+        rec = other["outcome_route_recommendation"]
+        self.assertTrue(rec["degraded"])
+        self.assertIn("insufficient outcome evidence", rec["degraded_reason"])
+        self.assertIn("task_class=deep-debug", rec["degraded_reason"])
+        self.assertEqual(rec["provider"], rec["baseline_provider"])
+
+    def test_never_seen_task_class_degrades(self):
+        result = replay("quota-snapshot.frozen.json", "outcome-ledger.sample.jsonl",
+                        extra=["--task-class", "never-seen-task-class"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rec = json.loads(result.stdout)["outcome_route_recommendation"]
+        self.assertTrue(rec["degraded"])
+        self.assertIn("insufficient outcome evidence", rec["degraded_reason"])
+        self.assertEqual(rec["provider"], rec["baseline_provider"])
+        self.assertFalse(rec["switched_from_baseline"])
+
+    def test_tier_samples_do_not_leak_across_tiers(self):
+        """Tier-2 bounded-implementation evidence must not steer a tier-3 replay."""
+        result = replay("quota-snapshot.frozen.json", "outcome-ledger.sample.jsonl",
+                        extra=["--tier", "3"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rec = json.loads(result.stdout)["outcome_route_recommendation"]
+        self.assertTrue(rec["degraded"])
+        self.assertIn("tier=3", rec["degraded_reason"])
+        self.assertEqual(rec["provider"], rec["baseline_provider"])
+
+    def test_provider_stats_filters_on_tier(self):
+        records, _ = ol.read_ledger(FIXTURES / "outcome-ledger.sample.jsonl")
+        tier2 = ol.provider_stats(records, role="impl",
+                                  task_class="bounded-implementation", routing_tier=2)
+        tier3 = ol.provider_stats(records, role="impl",
+                                  task_class="bounded-implementation", routing_tier=3)
+        self.assertGreaterEqual(tier2.get("codex", {}).get("observed", 0), 3)
+        self.assertEqual(tier3, {})
+
+
+@NEEDS_TMP
+class InvalidLedgerFallback(unittest.TestCase):
+    """Schema-invalid/corrupt ledgers never feed routing: degraded quota-only."""
+
+    def _replay_with_ledger(self, ledger_path: str) -> subprocess.CompletedProcess:
+        return run([
+            str(SCRIPTS / "outcome_route.py"),
+            "--quota-fixture", str(FIXTURES / "quota-snapshot.frozen.json"),
+            "--ledger", ledger_path,
+            "--role", "impl", "--tier", "2",
+            "--task-class", "bounded-implementation", "--now", NOW,
+        ])
+
+    def test_catalog_invalid_ledger_degrades_and_never_switches(self):
+        text = (FIXTURES / "outcome-ledger.codex-degraded.jsonl").read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "ledger.jsonl"
+            # Model outside the frozen catalog => schema validation errors.
+            bad.write_text(text.replace("gpt-5.6-terra", "gpt-9000-nonexistent"),
+                           encoding="utf-8")
+            result = self._replay_with_ledger(str(bad))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rec = json.loads(result.stdout)["outcome_route_recommendation"]
+        self.assertTrue(rec["degraded"])
+        self.assertIn("ledger failed validation", rec["degraded_reason"])
+        # The codex-degraded ledger would normally force a switch; invalid
+        # records must be discarded, so we stay on the quota-only baseline.
+        self.assertEqual(rec["provider"], rec["baseline_provider"])
+        self.assertFalse(rec["switched_from_baseline"])
+        self.assertIn("WARN ledger:", result.stderr)
+
+    def test_json_corrupt_ledger_degrades(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "ledger.jsonl"
+            bad.write_text("{this is not json\n", encoding="utf-8")
+            result = self._replay_with_ledger(str(bad))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rec = json.loads(result.stdout)["outcome_route_recommendation"]
+        self.assertTrue(rec["degraded"])
+        self.assertIn("ledger failed validation", rec["degraded_reason"])
+        self.assertEqual(rec["provider"], rec["baseline_provider"])
+
+
+class WriteBoundary(unittest.TestCase):
+    """--ledger/--record-ledger must not write outside the allowed directories."""
+
+    def _record_decision(self, ledger: str) -> subprocess.CompletedProcess:
+        return run([str(SCRIPTS / "outcome_ledger.py"), "--ledger", ledger,
+                    "record-decision", "--role", "impl", "--routing-tier", "2",
+                    "--provider", "codex", "--model", "gpt-5.6-terra", "--effort", "medium",
+                    "--launch-surface", "codex_exec", "--task-class", "boundary-test",
+                    "--decided-at", NOW, "--quota-source", "test"])
+
+    def _assert_rejected(self, ledger: str) -> None:
+        target = (REPO / ledger) if not Path(ledger).is_absolute() else Path(ledger)
+        existed_before = target.exists()
+        result = self._record_decision(ledger)
+        self.assertNotEqual(result.returncode, 0,
+                            f"write to {ledger} must be rejected: {result.stdout}")
+        self.assertIn("refusing to write ledger", result.stderr)
+        if not existed_before:
+            self.assertFalse(target.exists(), f"{ledger} must not be created")
+
+    def test_protected_paths_rejected(self):
+        for ledger in ("lab/data/forbidden.jsonl", "lab/runs/forbidden.jsonl",
+                       "lab/models/forbidden.jsonl", "lab/infra/private/forbidden.jsonl",
+                       ".env"):
+            with self.subTest(ledger=ledger):
+                self._assert_rejected(ledger)
+
+    def test_arbitrary_repo_path_rejected(self):
+        self._assert_rejected("scripts/evil-ledger.jsonl")
+
+    def test_path_outside_repo_and_tmp_rejected(self):
+        self._assert_rejected(str(REPO.parent / "evil-ledger.jsonl"))
+
+    def test_record_ledger_flag_also_guarded(self):
+        result = run([
+            str(SCRIPTS / "outcome_route.py"),
+            "--quota-fixture", str(FIXTURES / "quota-snapshot.frozen.json"),
+            "--ledger", str(FIXTURES / "outcome-ledger.sample.jsonl"),
+            "--role", "impl", "--tier", "2",
+            "--task-class", "bounded-implementation", "--now", NOW,
+            "--record", "--record-ledger", "lab/data/forbidden.jsonl",
+        ])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("refusing to write ledger", result.stderr)
+        self.assertFalse((REPO / "lab" / "data" / "forbidden.jsonl").exists())
+
+    def test_resolve_write_path_allows_default_dir_and_tmp(self):
+        allowed = ol.resolve_write_path(ol.DEFAULT_LEDGER_FILE)
+        self.assertEqual(allowed, Path(ol.DEFAULT_LEDGER_FILE).resolve())
+        tmp_target = Path(tempfile.gettempdir()) / "outcome-ledger-boundary-test.jsonl"
+        self.assertEqual(ol.resolve_write_path(tmp_target), tmp_target.resolve())
+        with self.assertRaises(ol.LedgerWriteError):
+            ol.resolve_write_path(REPO / "lab" / "data" / "x.jsonl")
+        with self.assertRaises(ol.LedgerWriteError):
+            ol.resolve_write_path(REPO / "anywhere-else.jsonl")
+
+
+class RequiredKeyFloor(unittest.TestCase):
+    """Deleting any required key (or corrupting version/id/quota_cost) must fail."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.catalog = ol.load_catalog()
+        records, _ = ol.read_ledger(FIXTURES / "outcome-ledger.sample.jsonl")
+        cls.decision = next(r for r in records if r["record_type"] == "decision")
+        cls.outcome = next(r for r in records
+                           if r["record_type"] == "outcome" and r.get("quota_cost"))
+
+    def test_decision_missing_any_required_key_rejected(self):
+        for key in ol.DECISION_REQUIRED_KEYS:
+            with self.subTest(key=key):
+                mutated = {k: v for k, v in self.decision.items() if k != key}
+                self.assertTrue(ol.validate_decision(mutated, self.catalog),
+                                f"decision without {key} must be rejected")
+
+    def test_outcome_missing_any_required_key_rejected(self):
+        for key in ol.OUTCOME_REQUIRED_KEYS:
+            with self.subTest(key=key):
+                mutated = {k: v for k, v in self.outcome.items() if k != key}
+                self.assertTrue(ol.validate_outcome(mutated, self.catalog),
+                                f"outcome without {key} must be rejected")
+
+    def test_partial_quota_cost_rejected(self):
+        for key in ol.QUOTA_COST_REQUIRED_KEYS:
+            with self.subTest(key=key):
+                mutated = dict(self.outcome)
+                mutated["quota_cost"] = {k: v for k, v in self.outcome["quota_cost"].items()
+                                         if k != key}
+                self.assertTrue(ol.validate_outcome(mutated, self.catalog),
+                                f"quota_cost without {key} must be rejected")
+
+    def test_wrong_schema_version_rejected(self):
+        self.assertTrue(ol.validate_decision({**self.decision, "schema_version": 999},
+                                             self.catalog))
+        self.assertTrue(ol.validate_outcome({**self.outcome, "schema_version": 999},
+                                            self.catalog))
+
+    def test_bad_decision_id_format_rejected(self):
+        self.assertTrue(ol.validate_decision({**self.decision, "decision_id": "not-an-id"},
+                                             self.catalog))
+
+
 class LedgerLifecycle(unittest.TestCase):
     def setUp(self):
         self.catalog = ol.load_catalog()
@@ -160,6 +382,7 @@ class LedgerLifecycle(unittest.TestCase):
         self.assertTrue(any("NOT implemented" in e for e in errs))
 
 
+@NEEDS_TMP
 class LedgerCli(unittest.TestCase):
     def test_record_show_summary_roundtrip(self):
         with tempfile.TemporaryDirectory() as tmp:
