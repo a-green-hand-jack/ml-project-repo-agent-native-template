@@ -230,6 +230,19 @@ def protected_path(rel: str) -> bool:
     return any(parts[: len(prefix)] == prefix for prefix in PROTECTED_PREFIXES)
 
 
+def under_protected_prefix(rel: str) -> bool:
+    """True only for paths anchored under a full PROTECTED_PREFIXES path
+    from the repo root (`lab/data/**`, ...) — NOT for paths that merely
+    contain a protected directory *name* at some level. The template's
+    own placeholder files all live under these prefixes, so this is the
+    only region where the "byte-identical to the template" exemption in
+    `protected_hits_within` may apply (review round 2 BLOCKER-A: the
+    exemption must be anchored by full relative path, never by
+    any-level name matching)."""
+    parts = tuple(Path(rel).parts)
+    return any(parts[: len(prefix)] == prefix for prefix in PROTECTED_PREFIXES)
+
+
 def template_excluded(rel: str, path: Path) -> bool:
     if any(rel == prefix or rel.startswith(prefix + "/") for prefix in EXCLUDE_REL_PREFIXES):
         return True
@@ -275,35 +288,73 @@ def protected_hits_within(target: Path, name: str, limit: int = 5) -> list[str]:
     BLOCKER-1: name-only checks miss nested protected paths such as
     `src/checkpoints/model.bin` or a target repo's own `lab/data/**`).
 
+    This is a protection-boundary scan, not a performance walk (review
+    round 2 BLOCKER-A): it must cover EVERY descendant of the entry it is
+    clearing for a wholesale move, so the `EXCLUDE_DIR_NAMES` pruning used
+    by other walks is deliberately NOT applied here — a
+    `src/.venv/checkpoints/model.bin` must still block `src`. The scan
+    stays cheap because it only matches protected patterns per path and
+    hashes nothing except anchored template-placeholder candidates (see
+    below). A protected-pattern hit inside a virtualenv/cache (e.g. a
+    pip-installed `wandb/` package) is still reported as a hit: the
+    per-hit paths in the reason let the human judge and remove the
+    artifact, instead of the scan silently skipping whole subtrees.
+
+    Symlinks (review round 2 BLOCKER-C): a symlink sitting at a protected
+    position is ALWAYS a hit — it is never dereferenced, never followed,
+    and never exempted by the template comparison (the target's `lab/data`
+    being a symlink to an external directory must block, even though the
+    template has a real directory at that path). A root entry that is
+    itself a symlink is never walked through.
+
     Returns repo-root-relative posix paths under `name` that match a
-    protected pattern and are NOT byte-identical to the template's own
-    file at the same relative path. The template itself ships placeholder
-    docs under `lab/data/`, `lab/runs/`, `lab/models/`, `lab/infra/private/`
-    — scaffold legitimately copies those in, and an unmodified copy must
-    not turn every re-run into a blocker. Anything else that matches a
+    protected pattern (symlink hits are suffixed with " (symlink)") and
+    are NOT an anchored, byte-identical copy of the template's own file at
+    the same relative path. The template ships placeholder docs under the
+    `PROTECTED_PREFIXES` roots (`lab/data/`, `lab/runs/`, `lab/models/`,
+    `lab/infra/private/`) — scaffold legitimately copies those in, and an
+    unmodified copy must not turn every re-run into a blocker. This
+    exemption is anchored to full `PROTECTED_PREFIXES` relative paths only
+    (review round 2 BLOCKER-A), never applied to name-based matches
+    elsewhere, and never applied to symlinks. Anything else that matches a
     protected pattern makes the WHOLE entry a blocker: the conservative
     policy never does partial moves.
     """
     hits: list[str] = []
-    if protected_path(name):
-        hits.append(name)
     root = target / name
+    if protected_path(name):
+        hits.append(name + (" (symlink)" if root.is_symlink() else ""))
+    if root.is_symlink():
+        # Never walk through a symlink root entry: scanning would traverse
+        # a tree outside the entry itself. Nothing behind the link is ever
+        # written or moved either — scaffold lstat-checks before writes,
+        # and normalize moves the link inode, not its referent.
+        return hits[:limit]
     if not root.is_dir():
         return hits[:limit]
+    # followlinks=False (default): the walk itself never descends through
+    # symlinked directories; they are inspected as entries below instead.
     for walk_root, dirnames, filenames in os.walk(root):
         walk_path = Path(walk_root)
-        dirnames[:] = [d for d in dirnames if d not in EXCLUDE_DIR_NAMES]
         for child in dirnames:
-            rel = rel_posix(walk_path / child, target)
-            if protected_path(rel) and not (TEMPLATE_ROOT / rel).is_dir():
+            child_path = walk_path / child
+            rel = rel_posix(child_path, target)
+            if not protected_path(rel):
+                continue
+            if child_path.is_symlink():
+                hits.append(rel + " (symlink)")
+            elif not (under_protected_prefix(rel) and (TEMPLATE_ROOT / rel).is_dir()):
                 hits.append(rel)
         for filename in filenames:
             path = walk_path / filename
             rel = rel_posix(path, target)
             if not protected_path(rel):
                 continue
-            if hash_matches_template(path, TEMPLATE_ROOT / rel) is True:
-                continue  # unmodified template placeholder, not target data
+            if path.is_symlink():
+                hits.append(rel + " (symlink)")
+                continue
+            if under_protected_prefix(rel) and hash_matches_template(path, TEMPLATE_ROOT / rel) is True:
+                continue  # anchored, unmodified template placeholder — not target data
             hits.append(rel)
         if len(hits) >= limit:
             break
@@ -332,6 +383,12 @@ def classify_entry(target: Path, name: str, kind: str, import_root_rel: str) -> 
       different content — registered as a blocker, never overwritten.
     - conservative_import: everything else — moved wholesale into
       `lab/code/imported/<slug>/<name>`.
+
+    Review round 2 BLOCKER-C: a symlink at a control-item position is a
+    `conflict` blocker — scaffold merges file-by-file into control
+    directories, and writing through a symlink would leave the target repo
+    and touch whatever the link points at. Symlinks at protected positions
+    (the entry itself or nested) are reported by `protected_hits_within`.
     """
     protected_hits = protected_hits_within(target, name)
     if protected_hits:
@@ -342,7 +399,9 @@ def classify_entry(target: Path, name: str, kind: str, import_root_rel: str) -> 
             )
         else:
             detail = (
-                f"'{name}' contains protected content ({', '.join(protected_hits)})"
+                f"'{name}' contains protected content ({', '.join(protected_hits)}; "
+                "first hits shown — if any are non-data artifacts such as a virtualenv "
+                "or cache, remove them and re-run discover)"
             )
         return {
             "path": name,
@@ -356,6 +415,19 @@ def classify_entry(target: Path, name: str, kind: str, import_root_rel: str) -> 
             ),
         }
     if name in CONTROL_ITEMS:
+        if (target / name).is_symlink():
+            return {
+                "path": name,
+                "kind": kind,
+                "category": "conflict",
+                "target_path": name,
+                "blocker": True,
+                "reason": (
+                    f"control-item position '{name}' is a symlink (review round 2 "
+                    "BLOCKER-C): adoption never dereferences, writes through, moves, "
+                    "or replaces it; registered as a blocker for the human to reconcile"
+                ),
+            }
         template_item = TEMPLATE_ROOT / name
         if kind == "dir":
             return {
@@ -594,6 +666,12 @@ def preserve_existing(target: Path, rel: str, dry_run: bool) -> Path:
 
 
 def copy_file_preserving(src: Path, dst: Path, rel: str, target: Path, dry_run: bool) -> str:
+    if dst.is_symlink():
+        # Review round 2 BLOCKER-C: never write through, replace, or stash
+        # a symlink at the destination position (lstat semantics — checked
+        # before any exists()/hash logic, which would dereference). The
+        # caller registers this as a blocker.
+        return "symlink_skip"
     if dst.exists():
         if dst.is_file() and sha256_file(src) == sha256_file(dst):
             return "same"
@@ -613,14 +691,35 @@ def copy_file_preserving(src: Path, dst: Path, rel: str, target: Path, dry_run: 
     return "copy"
 
 
-def copy_template_tree(src_root: Path, dst_root: Path, target: Path, dry_run: bool) -> dict[str, int]:
-    counts = {"copy": 0, "same": 0, "skip": 0, "protected_skip": 0}
+def copy_template_tree(
+    src_root: Path, dst_root: Path, target: Path, dry_run: bool
+) -> tuple[dict[str, int], list[str]]:
+    """Merge one template control directory into the target, file by file.
+
+    Returns (counts, symlink_hits): `symlink_hits` are target-relative
+    paths where the destination position is a symlink (review round 2
+    BLOCKER-C) — those subtrees/files are never written through (lstat
+    check before any write, symlinked destination directories are pruned
+    from the walk) and the caller registers each as a blocker.
+    """
+    counts = {"copy": 0, "same": 0, "skip": 0, "protected_skip": 0, "symlink_skip": 0}
+    symlink_hits: list[str] = []
     for root, dirnames, filenames in os.walk(src_root):
         root_path = Path(root)
         rel_root = root_path.relative_to(TEMPLATE_ROOT).as_posix()
-        dirnames[:] = [
-            d for d in dirnames if not template_excluded(f"{rel_root}/{d}".strip("./"), root_path / d)
-        ]
+        kept: list[str] = []
+        for d in dirnames:
+            if template_excluded(f"{rel_root}/{d}".strip("./"), root_path / d):
+                continue
+            dst_rel = (root_path / d).relative_to(TEMPLATE_ROOT).as_posix()
+            if (target / dst_rel).is_symlink():
+                # BLOCKER-C: the target has a symlink where the template
+                # has a directory — never descend/write through it.
+                symlink_hits.append(dst_rel)
+                counts["symlink_skip"] += 1
+                continue
+            kept.append(d)
+        dirnames[:] = kept
         for filename in filenames:
             src = root_path / filename
             rel = src.relative_to(TEMPLATE_ROOT).as_posix()
@@ -629,8 +728,10 @@ def copy_template_tree(src_root: Path, dst_root: Path, target: Path, dry_run: bo
                 continue
             dst = target / rel
             status = copy_file_preserving(src, dst, rel, target, dry_run)
+            if status == "symlink_skip":
+                symlink_hits.append(rel)
             counts[status] += 1
-    return counts
+    return counts, symlink_hits
 
 
 def scaffold(args: argparse.Namespace) -> dict[str, Any]:
@@ -646,16 +747,33 @@ def scaffold(args: argparse.Namespace) -> dict[str, Any]:
     differs from the template is a conflict blocker — left untouched, not
     stashed under human/imported/adoption-conflicts/ with the template's
     version installed over it.
+
+    Review round 2 BLOCKER-C: any symlink at a destination position — the
+    control item itself or anything nested inside it — is a blocker;
+    scaffold never dereferences or writes through it (lstat checks before
+    every write).
     """
     target = args.target.resolve()
     require_git_repo(target)
     if not state_path(target, BASELINE_FILE).exists():
         baseline(args)
-    counts = {"copy": 0, "same": 0, "skip": 0, "protected_skip": 0}
+    counts = {"copy": 0, "same": 0, "skip": 0, "protected_skip": 0, "symlink_skip": 0}
     blockers: list[str] = []
     for item in CONTROL_ITEMS:
         src = TEMPLATE_ROOT / item
         if not src.exists():
+            continue
+        dst = target / item
+        if dst.is_symlink():
+            # Review round 2 BLOCKER-C: a symlink at a control-item
+            # position is never dereferenced, written through, or replaced
+            # (lstat check before protected_hits_within, which would
+            # otherwise treat a dir symlink like a plain entry).
+            blockers.append(
+                f"symlink: {item} — control-item position is a symlink; "
+                "scaffold refuses to write through or replace it"
+            )
+            counts["symlink_skip"] += 1
             continue
         protected_hits = protected_hits_within(target, item)
         if protected_hits:
@@ -664,7 +782,6 @@ def scaffold(args: argparse.Namespace) -> dict[str, Any]:
                 f"({', '.join(protected_hits)}); scaffold skipped this control item entirely"
             )
             continue
-        dst = target / item
         if src.is_file():
             if dst.exists():
                 if hash_matches_template(dst, src) is True:
@@ -678,13 +795,19 @@ def scaffold(args: argparse.Namespace) -> dict[str, Any]:
             status = copy_file_preserving(src, dst, item, target, args.dry_run)
             counts[status] += 1
         elif src.is_dir():
-            sub = copy_template_tree(src, dst, target, args.dry_run)
+            sub, symlink_hits = copy_template_tree(src, dst, target, args.dry_run)
             counts = {k: counts[k] + sub[k] for k in counts}
+            blockers.extend(
+                f"symlink: {hit} — destination position inside control item '{item}' "
+                "is a symlink; scaffold refuses to write through it"
+                for hit in symlink_hits
+            )
     status = "blocked" if blockers else "ok"
     append_log(target, "scaffold", status, {**counts, "blockers": blockers}, args.dry_run)
     print(
         f"[scaffold] copied={counts['copy']} same={counts['same']} skipped={counts['skip']} "
-        f"protected_skipped={counts['protected_skip']} blockers={len(blockers)}"
+        f"protected_skipped={counts['protected_skip']} symlink_skipped={counts['symlink_skip']} "
+        f"blockers={len(blockers)}"
     )
     for blocker in blockers:
         print(f"[scaffold] BLOCKER {blocker}")
@@ -707,31 +830,68 @@ def normalize(args: argparse.Namespace) -> dict[str, Any]:
 
     Review MAJOR-3: the persisted plan is a *proposal*, not a trusted
     authorization. Before moving anything, normalize re-verifies the
-    safety invariants against the tree as it exists now: the category must
-    be one of the known four, the entry (and its descendants) must not
-    have become protected since discover, and the recorded target_path
-    must be sane (present, non-protected). A stale/tampered plan entry is
-    rejected with a blocker instead of executed."""
+    safety invariants against the tree as it exists now. A stale/tampered
+    plan entry is rejected with a blocker instead of executed:
+
+    - the plan path must name a single, real root entry — no separators,
+      no '..', no absolute paths, and it must currently exist at the
+      target's root (review round 2 MAJOR-D);
+    - category must be one of the known four, `blocker` must be a real
+      boolean, and the category/blocker combination must satisfy the
+      invariant that `protected`/`conflict` are ALWAYS blockers (review
+      round 2 MAJOR-D: `category="conflict", blocker=false` must not fall
+      through into the move branch);
+    - the entry (and its descendants) must not have become protected
+      since discover;
+    - target_path must EXACTLY equal the import path re-derived from the
+      entry name under the current rules, resolve to a location inside
+      the target repo, and have no symlink anywhere on its path (review
+      round 2 BLOCKER-B: a stale/tampered `../escape` or absolute
+      target_path must never move an entry out of the repo)."""
     target = args.target.resolve()
     require_git_repo(target)
     plan = read_json(state_path(target, PLAN_FILE))
+    # Re-derive the import root from the recorded slug through the same
+    # sanitizer discover uses (review round 2 BLOCKER-B): a tampered slug
+    # cannot smuggle separators or '..' into the expected target path.
+    raw_slug = plan.get("project_slug")
+    slug = project_slug(target, raw_slug if isinstance(raw_slug, str) else None)
+    expected_import_root = f"lab/code/imported/{slug}"
     classification = plan.get("classification")
     if classification is None:
         # Backward compatibility: a plan.json written before B1 has no
         # per-entry classification — recompute it now with the same
         # conservative rules rather than silently doing nothing.
-        classification = classify_root_entries(target, plan["project_slug"])
+        classification = classify_root_entries(target, slug)
     known_categories = {"protected", "template_control_item", "conflict", "conservative_import"}
+    always_blocker_categories = {"protected", "conflict"}
     moved: list[dict[str, str]] = []
     blockers: list[str] = []
-    for entry in sorted(classification, key=lambda e: e["path"]):
-        name = entry["path"]
+    for entry in sorted(classification, key=lambda e: str(e.get("path")) if isinstance(e, dict) else ""):
+        if not isinstance(entry, dict):
+            blockers.append(f"plan-malformed: non-object classification entry {entry!r}; rejected")
+            continue
+        name = entry.get("path")
         if name == ".git":
             continue
+        # Review round 2 MAJOR-D: the plan path must be a single root
+        # entry name — Path(name).name != name catches separators,
+        # absolute paths, '.', '..', and trailing slashes.
+        if not isinstance(name, str) or not name or Path(name).name != name:
+            blockers.append(
+                f"plan-mismatch: {name!r} — plan path is not a single root entry "
+                "name (separators/'..'/absolute paths are rejected); refusing to act on it"
+            )
+            continue
         src = target / name
-        if not src.exists():
-            # Entry no longer present between discover and normalize
-            # (e.g. already moved by a prior partial run) — nothing to do.
+        if not (src.exists() or src.is_symlink()):
+            # Review round 2 MAJOR-D: a plan entry that does not exist at
+            # the target's root is stale/tampered — reject it instead of
+            # silently skipping (re-run discover to get a fresh plan).
+            blockers.append(
+                f"plan-mismatch: {name} — plan references a root entry that does not "
+                "exist; stale/tampered plan rejected for this entry (re-run discover)"
+            )
             continue
         category = entry.get("category")
         if category not in known_categories:
@@ -740,8 +900,23 @@ def normalize(args: argparse.Namespace) -> dict[str, Any]:
                 f"category {category!r}; refusing to act on it"
             )
             continue
-        if entry["blocker"]:
-            blockers.append(f"{category}: {name} — {entry['reason']}")
+        blocker_flag = entry.get("blocker")
+        if not isinstance(blocker_flag, bool):
+            blockers.append(
+                f"plan-malformed: {name} — blocker flag is missing or not a boolean "
+                f"({blocker_flag!r}); refusing to act on it"
+            )
+            continue
+        # Review round 2 MAJOR-D invariant: protected/conflict entries are
+        # blockers BY DEFINITION — a plan claiming otherwise is tampered.
+        if category in always_blocker_categories and not blocker_flag:
+            blockers.append(
+                f"plan-mismatch: {name} — category {category!r} requires blocker=true "
+                "but the plan says false; tampered/stale plan rejected for this entry"
+            )
+            continue
+        if blocker_flag:
+            blockers.append(f"{category}: {name} — {entry.get('reason', '(no reason recorded)')}")
             continue
         if category == "template_control_item":
             continue  # stays in place by definition, never moved
@@ -760,14 +935,50 @@ def normalize(args: argparse.Namespace) -> dict[str, Any]:
                 "template control item; stale/tampered plan rejected for this entry"
             )
             continue
+        # Review round 2 BLOCKER-B: target_path is only accepted when it
+        # EXACTLY equals the import path derived from the entry name under
+        # the current rules — containment is then double-checked below.
         target_path = entry.get("target_path")
-        if not target_path or protected_path(target_path):
+        expected_target = f"{expected_import_root}/{name}"
+        if target_path != expected_target:
             blockers.append(
-                f"plan-mismatch: {name} — plan target_path {target_path!r} is missing "
-                "or protected; refusing to move"
+                f"plan-mismatch: {name} — plan target_path {target_path!r} does not "
+                f"equal the derived import path {expected_target!r}; refusing to move"
+            )
+            continue
+        if protected_path(target_path):
+            blockers.append(
+                f"plan-mismatch: {name} — plan target_path {target_path!r} is "
+                "protected; refusing to move"
             )
             continue
         dst = target / target_path
+        # Belt and suspenders containment (review round 2 BLOCKER-B): the
+        # resolved destination must stay inside the resolved target root.
+        resolved_root = target.resolve()
+        try:
+            dst.resolve().relative_to(resolved_root)
+        except (OSError, ValueError):
+            blockers.append(
+                f"plan-mismatch: {name} — target_path {target_path!r} resolves "
+                "outside the target repo; refusing to move"
+            )
+            continue
+        # Review round 2 BLOCKER-C: refuse to move through a symlink at
+        # any position on the destination path (lstat semantics).
+        symlink_on_path = None
+        probe = target
+        for part in Path(target_path).parts:
+            probe = probe / part
+            if probe.is_symlink():
+                symlink_on_path = rel_posix(probe, target)
+                break
+        if symlink_on_path is not None:
+            blockers.append(
+                f"symlink: {name} — destination path component "
+                f"'{symlink_on_path}' is a symlink; refusing to move through it"
+            )
+            continue
         if dst.exists():
             blockers.append(
                 f"conflict: {name} — destination appeared after discover: "
@@ -779,7 +990,7 @@ def normalize(args: argparse.Namespace) -> dict[str, Any]:
         else:
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(src), str(dst))
-        moved.append({"from": name, "to": entry["target_path"]})
+        moved.append({"from": name, "to": target_path})
     status = "blocked" if blockers else "ok"
     append_log(target, "normalize", status, {"moved": moved, "blockers": blockers}, args.dry_run)
     print(f"[normalize] moved={len(moved)} blockers={len(blockers)}")
