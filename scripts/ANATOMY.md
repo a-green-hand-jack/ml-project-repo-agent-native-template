@@ -7,6 +7,7 @@ related_files:
   - adopt-existing-repo.py
   - check-adoption-integrity.py
   - bootstrap-project.py
+  - _agent_surface.py
   - sync-codex-adapters.py
   - bump-template-version.py
   - template-sync.py
@@ -37,9 +38,10 @@ Codex adapter 同步脚本把 `.claude/` canonical 能力生成到 `.codex/` 与
 | `check-anatomy-drift.py` | ANATOMY related_files 与 line citation 漂移 + 120 行硬上限 | `.agent/anatomy-protocol.md` |
 | `validate-governance.py` | 聚合上两者 + gitignore/YAML/tracked-bytes + 证据链一致性(overclaim 拦截) | `.agent/action-boundary.md` · `artifact-policy.md` · `principles.md` |
 | `check-same-commit.py` | same-commit rule：结构改动(A/D/R)未同变更集更新对应 ANATOMY → 拦。diff 驱动，不进 governance；由 `.githooks/pre-commit` + CI 调用 | `.agent/anatomy-protocol.md` |
-| `adopt-existing-repo.py` | 分 phase 迁移已有 Git repo：discover/baseline/scaffold/normalize/prove | `plans/20260709-adopt-existing-repo.zh.md` · `.claude/skills/adopt-existing-repo/SKILL.md` |
+| `adopt-existing-repo.py` | 分 phase 迁移已有 Git repo：discover（语义归类，B1-B3）/baseline/scaffold/normalize（消费归类计划，B4）/prove（含双 agent surface 报告，B6） | `plans/20260709-adopt-existing-repo.zh.md` · `plans/20260712-bootstrap-adoption-proof.zh.md` · `.claude/skills/adopt-existing-repo/SKILL.md` |
 | `check-adoption-integrity.py` | 读取 adoption baseline，按 hash 证明原 tracked bytes 仍存在 | `.claude/skills/adopt-existing-repo/SKILL.md` |
 | `bootstrap-project.py` | 把刚从模板派生的新 repo 落地：`.template.toml` 锚点、`core.hooksPath`、Codex adapters 同步、governance，幂等；需 human 信息的步骤只报告不代做 | `plans/20260712-bootstrap-adoption-proof.zh.md` · `.claude/skills/bootstrap-project/SKILL.md` |
+| `_agent_surface.py` | 非独立脚本（无 `__main__`）：`bootstrap-project.py`（A4）与 `adopt-existing-repo.py`（B6）共用的 Claude/Codex postflight 渲染函数，避免两套加载清单文案/判定漂移 | `plans/20260712-bootstrap-adoption-proof.zh.md`（D2c） |
 | `sync-codex-adapters.py` | 从 `.claude/agents` / `skills` / `commands` 生成并校验 Codex adapters | `.agent/tool-skill-interface.md` |
 | `bump-template-version.py` | 按 agent 判定的 level 递增 `VERSION`、更 `CHANGELOG.md`、打本地 git tag | `.agent/template-versioning-policy.md` |
 | `template-sync.py` | 下游按 `template-manifest.toml` 追平上游框架层：覆盖/保护/scaffold/merge + 重建适配 + 验收 | `.agent/template-versioning-policy.md` · `template-manifest.toml` |
@@ -54,7 +56,9 @@ Inbound:
 - `.github/workflows/` CI 调用 `validate-governance.py --strict` 与 `check-same-commit.py --against`。
 - `.githooks/pre-commit` 调用 `check-same-commit.py --staged`。
 - `.claude/settings.json` 与 `.codex/rules/default.rules` 把关键脚本列入 allow。
-- `.claude/commands/adopt-existing-repo.md` 调用 adoption 脚本。
+- `.claude/commands/adopt-existing-repo.md` 与 `.claude/skills/adopt-existing-repo/SKILL.md`
+  调用 adoption 脚本；`lab/evals/adoption/run-adoption-smoke.py` 是它的 27 场景 synthetic fixture，
+  同时覆盖 B 的语义归类/安全边界与 C 的结构化 smoke 合同。
 - `.claude/skills/bootstrap-project/SKILL.md` 调用 `bootstrap-project.py`；
   `lab/evals/bootstrap/run-bootstrap-smoke.py` 是它的 synthetic fixture。
 - `.codex/agents/*.toml` 与 `.agents/skills/*/SKILL.md` 由 `sync-codex-adapters.py` 生成。
@@ -67,6 +71,9 @@ Outbound:
   `agent-state.py` 的解析/staleness/root helpers（同一先例）；`.claude/hooks/pre_tool_guard.py`
   与 `agent_name_set.py` 反向以 `importlib` 薄接线加载本目录的 `check-agent-conflicts.py` /
   `agent-state.py`（冲突拦截与状态初始化）。
+- `bootstrap-project.py` 与 `adopt-existing-repo.py` 都通过 `importlib`（同 `_load_sibling()`
+  helper）加载 `_agent_surface.py` 的 `agent_surface_checklist()`，共用同一份 Claude/Codex
+  postflight 渲染逻辑（D2c）。
 
 ## Notes
 

@@ -45,6 +45,25 @@ smoke 结果（`pass`/`fail`/`skipped`/`unknown`）与该 exit code 解耦，非
 里显式的 `warnings`/`smoke_warnings` 字段呈现，不会被静默吞掉（见
 `plans/20260712-bootstrap-adoption-proof.zh.md` 开放问题 5）。
 
+`discover` phase 给每个 root entry 打内置保守四类标签（`template_control_item` /
+`conservative_import` / `protected` / `conflict`，v1 不做外部规则文件覆盖），`normalize`
+消费这份归类计划而非硬编码判断。归类计划只视为提案：`normalize` 会先对当前全部 root entry
+重算 kind/category/blocker/target_path、检查 discover 后未在 classification 或
+`scaffold_control_items` 声明中登记的新增项，并在默认模式下完成整轮预检后
+才开始搬移；伪造 `template_control_item` 不能绕过 nested protected scan。`prove` 还会生成
+Claude/Codex 双 agent surface 加载清单。
+所有 repo 内写路径（state / report / 冲突归档 / 移动目的地）用 `safe_target_path` 逐段
+lstat；canonical state 的三个叶文件也参与检查，命中 symlink 时 state/report 改道到
+确定性的 `/tmp` fallback 并登记 blocker。fallback 在使用前从绝对路径根逐段检查到状态
+叶文件；fallback 根、中间段或叶节点命中 symlink 时直接 fail-closed，不做二次改道。
+归档/移动路径命中 symlink 同样直接拒绝。**Residual risk（已接受）**：lstat/resolve 检查与随后的
+mkdir/copy/move 不是原子操作 —— 上述保护均以「运行期间目标 repo 无并发敌对修改」
+为前提（TOCTOU），不要对一个正被其他进程改写的 repo 跑 adoption。
+
+`_agent_surface.py` 不是独立脚本（没有 `__main__`），是 `bootstrap-project.py` 与
+`adopt-existing-repo.py` 共用的 Claude/Codex postflight 渲染 helper，通过 `importlib`
+按路径加载（同 `check-adoption-integrity.py` 加载 `adopt-existing-repo.py` 的模式）。
+
 多 agent 控制面四脚本（`agent-state` / `agent-status` / `agent-mailbox` / `check-agent-conflicts`）
 见 `.agent/multi-agent-control-plane.md`：状态/mailbox 内容是运行时（gitignored），各脚本自带
 `--self-test`（内嵌 fixtures，无外部 fixture 目录）；`check-agent-conflicts.py` 的
