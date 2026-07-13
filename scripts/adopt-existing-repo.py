@@ -5,7 +5,16 @@ The script is intentionally conservative:
 - no deletes;
 - no overwrites without first preserving the original file;
 - no protected data/model/checkpoint byte moves;
-- state is written into lab/docs/audits/template-adoption/state.
+- state is written into lab/docs/audits/template-adoption/state (or a
+  /tmp fallback plus a blocker when that path crosses a symlink — see
+  `state_root`, review round 3 BLOCKER-C).
+
+Residual risk (accepted, review round 3): the symlink/containment checks
+(lstat / resolve) and the writes that follow them (mkdir / copy2 / move)
+are not atomic. Every "never writes through / never moves" statement in
+this file therefore assumes the target repo is NOT being concurrently and
+adversarially modified while a phase runs; adoption is a single-operator
+migration tool, not a defense against a live attacker racing its checks.
 """
 from __future__ import annotations
 
@@ -18,6 +27,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from types import ModuleType
@@ -141,8 +151,81 @@ def rel_posix(path: Path, root: Path) -> str:
     return path.relative_to(root).as_posix()
 
 
+class SymlinkOnPath(RuntimeError):
+    """A segment on an intended write path (from the target root down to
+    the leaf, lstat semantics) is a symlink. `rel` names the first
+    offending segment, repo-root-relative."""
+
+    def __init__(self, rel: str) -> None:
+        super().__init__(rel)
+        self.rel = rel
+
+
+def safe_target_path(root: Path, *parts: str) -> Path:
+    """Join `parts` onto `root`, lstat-checking EVERY intermediate segment
+    and the leaf: the first symlink on the way raises `SymlinkOnPath`.
+
+    Review round 3 BLOCKER-C: this is the single shared gate for all write
+    paths into the target repo — state files (`state_root`), the report
+    (`write_report`), the conflict archive (`unique_preserve_path`) and
+    normalize's move destination. Checking only the leaf is not enough: a
+    symlinked `lab`, `lab/docs` or `human/imported` on the way would make
+    mkdir/copy/move write outside the repo. The check-then-write sequence
+    is not atomic — see the module docstring's residual-risk note.
+    """
+    probe = root
+    for part in parts:
+        for piece in Path(part).parts:
+            probe = probe / piece
+            if probe.is_symlink():
+                raise SymlinkOnPath(rel_posix(probe, root))
+    return probe
+
+
+def state_fallback_root(target: Path) -> Path:
+    """Deterministic per-target /tmp location used when the canonical
+    state dir path crosses a symlink: re-runs and later phases of the same
+    adoption find the same state, and nothing is ever written through the
+    symlink. Deliberately outside the target repo and never auto-deleted —
+    it is the audit trail for a blocked adoption."""
+    digest = hashlib.sha256(str(target.resolve()).encode("utf-8")).hexdigest()[:12]
+    return Path(tempfile.gettempdir()) / f"template-adoption-state-{digest}"
+
+
+def state_symlink_hit(target: Path) -> str | None:
+    """First symlink segment on the canonical state dir path (repo-root
+    relative), or None when the state dir is safe to write into."""
+    try:
+        safe_target_path(target, *STATE_DIR.parts)
+    except SymlinkOnPath as e:
+        return e.rel
+    return None
+
+
+def state_redirect_blocker(target: Path) -> str | None:
+    """Blocker line describing a state redirect, or None when state is
+    safe. Review round 3 BLOCKER-C: being unable to write state safely is
+    itself a blocker — it must fail the pipeline loudly, never be silently
+    swallowed just because the state file landed somewhere else."""
+    hit = state_symlink_hit(target)
+    if hit is None:
+        return None
+    return (
+        f"state-redirect: '{hit}' on the state dir path ({STATE_DIR.as_posix()}) is a "
+        f"symlink; adoption state was written to {state_fallback_root(target)} instead "
+        "of through the symlink — reconcile the symlink and re-run"
+    )
+
+
 def state_root(target: Path) -> Path:
-    return target / STATE_DIR
+    """Canonical state dir, unless any segment of its path is a symlink
+    (e.g. the target's `lab` or `lab/docs` points at an external tree —
+    review round 3 BLOCKER-C): then state reads/writes are redirected to
+    `state_fallback_root` and every phase registers/prints the
+    `state_redirect_blocker` describing the redirect."""
+    if state_symlink_hit(target) is None:
+        return target / STATE_DIR
+    return state_fallback_root(target)
 
 
 def state_path(target: Path, name: str) -> Path:
@@ -508,9 +591,28 @@ def classify_root_entries(target: Path, slug: str) -> list[dict[str, Any]]:
     return classified
 
 
+SLUG_MAX_LEN = 100
+
+
 def project_slug(target: Path, explicit: str | None) -> str:
+    """Sanitize the project name into a filesystem-safe slug.
+
+    Review round 3 MAJOR: the slug becomes a directory name under
+    `lab/code/imported/`, so it is capped at `SLUG_MAX_LEN` (100 chars,
+    comfortably under the common NAME_MAX=255) — an over-long slug would
+    only fail at normalize's mkdir (ENAMETOOLONG) AFTER scaffold already
+    modified the target, leaving a half-finished adoption. A truncated
+    slug gets an 8-hex sha256 suffix of the full sanitized name so two
+    long names that share a 91-char prefix still map to distinct import
+    roots. Truncation is idempotent (a ≤100-char slug passes through
+    unchanged), so normalize's re-derivation from the persisted slug
+    agrees with discover's.
+    """
     base = explicit or target.name
     slug = re.sub(r"[^A-Za-z0-9._-]+", "-", base.strip()).strip("-._")
+    if len(slug) > SLUG_MAX_LEN:
+        digest = hashlib.sha256(slug.encode("utf-8")).hexdigest()[:8]
+        slug = slug[: SLUG_MAX_LEN - 1 - len(digest)].rstrip("-._") + "-" + digest
     return slug or "imported-project"
 
 
@@ -589,6 +691,14 @@ def discover(args: argparse.Namespace) -> dict[str, Any]:
             f"{e['category']}: {e['path']} — {e['reason']}" for e in classification if e["blocker"]
         ],
     }
+    # Review round 3 BLOCKER-C: writing the plan/log must never go through
+    # a symlinked state path — state_path() already redirects to the /tmp
+    # fallback in that case, and the redirect itself is registered as a
+    # blocker in the plan (not silently swallowed).
+    state_blocker = state_redirect_blocker(target)
+    if state_blocker:
+        plan["normalize_blockers"].append(state_blocker)
+        print(f"[discover] BLOCKER {state_blocker}")
     write_json(state_path(target, PLAN_FILE), plan, args.dry_run)
     append_log(target, "discover", "ok", {"root_entries": len(root_entries)}, args.dry_run)
     print("[discover] classification plan (target position + reason + blocker per root entry):")
@@ -635,6 +745,9 @@ def baseline(args: argparse.Namespace) -> dict[str, Any]:
         "test_command": plan.get("test_command"),
         "test_result": test_result,
     }
+    state_blocker = state_redirect_blocker(target)
+    if state_blocker:
+        print(f"[baseline] BLOCKER {state_blocker}")
     write_json(state_path(target, BASELINE_FILE), data, args.dry_run)
     append_log(target, "baseline", "ok", {"tracked_files": len(tracked)}, args.dry_run)
     print(f"[baseline] tracked_files={len(tracked)}")
@@ -642,7 +755,13 @@ def baseline(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def unique_preserve_path(target: Path, rel: str) -> Path:
-    base = target / "human" / "imported" / "adoption-conflicts" / rel
+    # Review round 3 BLOCKER-C: lstat-check EVERY segment of the archive
+    # path (human, human/imported, adoption-conflicts, and each component
+    # of `rel`) — a symlinked `human/imported` would otherwise make the
+    # conflict archive move the original file OUT of the repo. Raises
+    # SymlinkOnPath; callers refuse the archive (and the overwrite that
+    # depends on it) and register a blocker.
+    base = safe_target_path(target, "human", "imported", "adoption-conflicts", rel)
     if not base.exists():
         return base
     stem = base.name
@@ -682,7 +801,14 @@ def copy_file_preserving(src: Path, dst: Path, rel: str, target: Path, dry_run: 
             # detect-before-scaffold check should prevent reaching here;
             # if it is reached anyway, skip rather than touch the bytes.
             return "protected_skip"
-        preserve_existing(target, rel, dry_run)
+        try:
+            preserve_existing(target, rel, dry_run)
+        except SymlinkOnPath:
+            # Review round 3 BLOCKER-C: the conflict-archive path itself
+            # crosses a symlink (e.g. human/imported -> external dir).
+            # Refuse the archive — and therefore also the overwrite that
+            # would have followed it. The caller registers a blocker.
+            return "archive_symlink_skip"
     if dry_run:
         print(f"DRY-RUN copy {src} -> {dst}")
         return "copy"
@@ -693,17 +819,22 @@ def copy_file_preserving(src: Path, dst: Path, rel: str, target: Path, dry_run: 
 
 def copy_template_tree(
     src_root: Path, dst_root: Path, target: Path, dry_run: bool
-) -> tuple[dict[str, int], list[str]]:
+) -> tuple[dict[str, int], list[str], list[str]]:
     """Merge one template control directory into the target, file by file.
 
-    Returns (counts, symlink_hits): `symlink_hits` are target-relative
-    paths where the destination position is a symlink (review round 2
-    BLOCKER-C) — those subtrees/files are never written through (lstat
-    check before any write, symlinked destination directories are pruned
-    from the walk) and the caller registers each as a blocker.
+    Returns (counts, symlink_hits, archive_hits): `symlink_hits` are
+    target-relative paths where the destination position is a symlink
+    (review round 2 BLOCKER-C) — those subtrees/files are never written
+    through (lstat check before any write, symlinked destination
+    directories are pruned from the walk); `archive_hits` (review round 3
+    BLOCKER-C) are destination files whose pre-existing content could not
+    be stashed because the conflict-archive path itself crosses a symlink
+    — those files are left untouched (no archive, no overwrite). The
+    caller registers each hit of either kind as a blocker.
     """
-    counts = {"copy": 0, "same": 0, "skip": 0, "protected_skip": 0, "symlink_skip": 0}
+    counts = {"copy": 0, "same": 0, "skip": 0, "protected_skip": 0, "symlink_skip": 0, "archive_symlink_skip": 0}
     symlink_hits: list[str] = []
+    archive_hits: list[str] = []
     for root, dirnames, filenames in os.walk(src_root):
         root_path = Path(root)
         rel_root = root_path.relative_to(TEMPLATE_ROOT).as_posix()
@@ -730,8 +861,10 @@ def copy_template_tree(
             status = copy_file_preserving(src, dst, rel, target, dry_run)
             if status == "symlink_skip":
                 symlink_hits.append(rel)
+            elif status == "archive_symlink_skip":
+                archive_hits.append(rel)
             counts[status] += 1
-    return counts, symlink_hits
+    return counts, symlink_hits, archive_hits
 
 
 def scaffold(args: argparse.Namespace) -> dict[str, Any]:
@@ -750,14 +883,20 @@ def scaffold(args: argparse.Namespace) -> dict[str, Any]:
 
     Review round 2 BLOCKER-C: any symlink at a destination position — the
     control item itself or anything nested inside it — is a blocker;
-    scaffold never dereferences or writes through it (lstat checks before
+    scaffold does not dereference or write through it (lstat checks before
     every write).
+
+    Review round 3: scaffold now fails closed on its own blockers (same
+    `--allow-blocked-normalize` escape hatch as normalize). Some scaffold
+    blockers — a symlinked conflict-archive path, a state-dir redirect —
+    have NO classification counterpart, so relying on normalize's gate
+    alone would let `--phase all` finish with exit 0 despite them.
     """
     target = args.target.resolve()
     require_git_repo(target)
     if not state_path(target, BASELINE_FILE).exists():
         baseline(args)
-    counts = {"copy": 0, "same": 0, "skip": 0, "protected_skip": 0, "symlink_skip": 0}
+    counts = {"copy": 0, "same": 0, "skip": 0, "protected_skip": 0, "symlink_skip": 0, "archive_symlink_skip": 0}
     blockers: list[str] = []
     for item in CONTROL_ITEMS:
         src = TEMPLATE_ROOT / item
@@ -795,22 +934,35 @@ def scaffold(args: argparse.Namespace) -> dict[str, Any]:
             status = copy_file_preserving(src, dst, item, target, args.dry_run)
             counts[status] += 1
         elif src.is_dir():
-            sub, symlink_hits = copy_template_tree(src, dst, target, args.dry_run)
+            sub, symlink_hits, archive_hits = copy_template_tree(src, dst, target, args.dry_run)
             counts = {k: counts[k] + sub[k] for k in counts}
             blockers.extend(
                 f"symlink: {hit} — destination position inside control item '{item}' "
                 "is a symlink; scaffold refuses to write through it"
                 for hit in symlink_hits
             )
+            blockers.extend(
+                f"archive-symlink: {hit} — the conflict-archive path "
+                "(human/imported/adoption-conflicts) crosses a symlink; scaffold refuses "
+                "to stash the existing file out of the repo and left it untouched "
+                "(no overwrite either)"
+                for hit in archive_hits
+            )
+    state_blocker = state_redirect_blocker(target)
+    if state_blocker:
+        blockers.append(state_blocker)
     status = "blocked" if blockers else "ok"
     append_log(target, "scaffold", status, {**counts, "blockers": blockers}, args.dry_run)
     print(
         f"[scaffold] copied={counts['copy']} same={counts['same']} skipped={counts['skip']} "
         f"protected_skipped={counts['protected_skip']} symlink_skipped={counts['symlink_skip']} "
+        f"archive_symlink_skipped={counts['archive_symlink_skip']} "
         f"blockers={len(blockers)}"
     )
     for blocker in blockers:
         print(f"[scaffold] BLOCKER {blocker}")
+    if blockers and not args.allow_blocked_normalize:
+        raise SystemExit("scaffold blocked: " + ", ".join(blockers))
     return {**counts, "blockers": blockers}
 
 
@@ -834,8 +986,10 @@ def normalize(args: argparse.Namespace) -> dict[str, Any]:
     plan entry is rejected with a blocker instead of executed:
 
     - the plan path must name a single, real root entry — no separators,
-      no '..', no absolute paths, and it must currently exist at the
-      target's root (review round 2 MAJOR-D);
+      no '.'/'..' (rejected explicitly: `Path("..").name == ".."`, so the
+      single-segment check alone would let '..' through — review round 3
+      MAJOR-D), no absolute paths, and it must be a member of the actual
+      `target.iterdir()` entry-name set right now (review round 2 MAJOR-D);
     - category must be one of the known four, `blocker` must be a real
       boolean, and the category/blocker combination must satisfy the
       invariant that `protected`/`conflict` are ALWAYS blockers (review
@@ -865,8 +1019,15 @@ def normalize(args: argparse.Namespace) -> dict[str, Any]:
         classification = classify_root_entries(target, slug)
     known_categories = {"protected", "template_control_item", "conflict", "conservative_import"}
     always_blocker_categories = {"protected", "conflict"}
+    # Review round 2/3 MAJOR-D: precise membership check against the REAL
+    # current root-entry names, not a reconstructed existence probe
+    # (`(target / "..").exists()` is true — it is the parent directory).
+    root_entry_names = {p.name for p in target.iterdir()}
     moved: list[dict[str, str]] = []
     blockers: list[str] = []
+    state_blocker = state_redirect_blocker(target)
+    if state_blocker:
+        blockers.append(state_blocker)
     for entry in sorted(classification, key=lambda e: str(e.get("path")) if isinstance(e, dict) else ""):
         if not isinstance(entry, dict):
             blockers.append(f"plan-malformed: non-object classification entry {entry!r}; rejected")
@@ -874,25 +1035,26 @@ def normalize(args: argparse.Namespace) -> dict[str, Any]:
         name = entry.get("path")
         if name == ".git":
             continue
-        # Review round 2 MAJOR-D: the plan path must be a single root
-        # entry name — Path(name).name != name catches separators,
-        # absolute paths, '.', '..', and trailing slashes.
-        if not isinstance(name, str) or not name or Path(name).name != name:
+        # Review round 2/3 MAJOR-D: the plan path must be a single root
+        # entry name. `Path(name).name != name` catches separators,
+        # absolute paths, '.' and trailing slashes — but NOT '..'
+        # (Path("..").name == ".."), so '.'/'..' are rejected explicitly.
+        if not isinstance(name, str) or not name or name in {".", ".."} or Path(name).name != name:
             blockers.append(
                 f"plan-mismatch: {name!r} — plan path is not a single root entry "
-                "name (separators/'..'/absolute paths are rejected); refusing to act on it"
+                "name (separators/'.'/'..'/absolute paths are rejected); refusing to act on it"
             )
             continue
-        src = target / name
-        if not (src.exists() or src.is_symlink()):
-            # Review round 2 MAJOR-D: a plan entry that does not exist at
-            # the target's root is stale/tampered — reject it instead of
-            # silently skipping (re-run discover to get a fresh plan).
+        if name not in root_entry_names:
+            # Review round 2 MAJOR-D: a plan entry that is not one of the
+            # target's actual current root entries is stale/tampered —
+            # reject it instead of silently skipping (re-run discover).
             blockers.append(
                 f"plan-mismatch: {name} — plan references a root entry that does not "
                 "exist; stale/tampered plan rejected for this entry (re-run discover)"
             )
             continue
+        src = target / name
         category = entry.get("category")
         if category not in known_categories:
             blockers.append(
@@ -964,19 +1126,15 @@ def normalize(args: argparse.Namespace) -> dict[str, Any]:
                 "outside the target repo; refusing to move"
             )
             continue
-        # Review round 2 BLOCKER-C: refuse to move through a symlink at
-        # any position on the destination path (lstat semantics).
-        symlink_on_path = None
-        probe = target
-        for part in Path(target_path).parts:
-            probe = probe / part
-            if probe.is_symlink():
-                symlink_on_path = rel_posix(probe, target)
-                break
-        if symlink_on_path is not None:
+        # Review round 2/3 BLOCKER-C: refuse to move through a symlink at
+        # any position on the destination path (lstat semantics, shared
+        # `safe_target_path` gate).
+        try:
+            safe_target_path(target, target_path)
+        except SymlinkOnPath as e:
             blockers.append(
                 f"symlink: {name} — destination path component "
-                f"'{symlink_on_path}' is a symlink; refusing to move through it"
+                f"'{e.rel}' is a symlink; refusing to move through it"
             )
             continue
         if dst.exists():
@@ -1000,14 +1158,26 @@ def normalize(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def current_hash_index(target: Path) -> dict[str, list[str]]:
+    """Hash every file currently in the target; only `.git` internals are
+    skipped.
+
+    Review round 3 MAJOR: this walk must honour the same contract as the
+    baseline — `git ls-files` collects ALL tracked files, including ones
+    under `.venv`/cache dirs, so pruning `EXCLUDE_DIR_NAMES` here would
+    misreport intact tracked files as missing and fail a legitimate
+    adoption. "tracked ⇒ covered by the integrity proof" is the contract
+    (option a); the extra hashing cost on virtualenvs is accepted as the
+    honest price. Non-regular entries (broken symlinks, fifos) are skipped
+    — they carry no hashable bytes.
+    """
     index: dict[str, list[str]] = {}
     for root, dirnames, filenames in os.walk(target):
         root_path = Path(root)
-        dirnames[:] = [d for d in dirnames if d not in EXCLUDE_DIR_NAMES]
-        if ".git" in root_path.parts:
-            continue
+        dirnames[:] = [d for d in dirnames if d != ".git"]
         for filename in filenames:
             path = root_path / filename
+            if not path.is_file():
+                continue
             if path.stat().st_size > LARGE_HASH_LIMIT:
                 continue
             digest = sha256_file(path)
@@ -1136,6 +1306,9 @@ def prove(args: argparse.Namespace) -> dict[str, Any]:
             cwd = target
         original_test = run(plan["test_command"], cwd, shell=True, timeout=args.test_timeout)
     agent_surface = agent_surface_report(target)
+    state_blocker = state_redirect_blocker(target)
+    if state_blocker:
+        print(f"[prove] BLOCKER {state_blocker}")
     report = {
         "schema": "template-adoption-proof-v1",
         "created_at": now_iso(),
@@ -1223,7 +1396,17 @@ def write_report(target: Path, plan: dict[str, Any], proof: dict[str, Any]) -> N
         for item in surface["human_out_of_band"]:
             lines.append(f"- `{item['id']}` status=`{item['status']}` — {item['note']}")
         lines.append("")
-    path = target / REPORT_PATH
+    # Review round 3 BLOCKER-C: the report path shares `lab/docs/...` with
+    # the state dir — never write it through a symlinked segment either;
+    # redirect to the /tmp state fallback and say so loudly.
+    try:
+        path = safe_target_path(target, *REPORT_PATH.parts)
+    except SymlinkOnPath as e:
+        path = state_fallback_root(target) / REPORT_PATH.name
+        print(
+            f"[prove] BLOCKER report-redirect: '{e.rel}' on the report path is a "
+            f"symlink; report written to {path} instead"
+        )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines), encoding="utf-8")
 
@@ -1256,7 +1439,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--allow-blocked-normalize",
         action="store_true",
-        help="record normalize blockers but continue; useful for partial reports",
+        help="record scaffold/normalize blockers but continue; useful for partial reports",
     )
     return parser.parse_args(argv)
 

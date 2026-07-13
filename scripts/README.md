@@ -38,6 +38,11 @@ MAJOR 跨越需 `--allow-major` 人工确认。
 `discover` phase 给每个 root entry 打内置保守四类标签（`template_control_item` /
 `conservative_import` / `protected` / `conflict`，v1 不做外部规则文件覆盖），`normalize`
 消费这份归类计划而非硬编码判断；`prove` 还会生成 Claude/Codex 双 agent surface 加载清单。
+所有写路径（state / report / 冲突归档 / 移动目的地）共用 `safe_target_path` 逐段 lstat
+检查：途中有 symlink 时 state/report 改道到确定性的 `/tmp` fallback 并登记 blocker，
+归档/移动直接拒绝。**Residual risk（已接受）**：lstat/resolve 检查与随后的
+mkdir/copy/move 不是原子操作 —— 上述保护均以「运行期间目标 repo 无并发敌对修改」
+为前提（TOCTOU），不要对一个正被其他进程改写的 repo 跑 adoption。
 
 `_agent_surface.py` 不是独立脚本（没有 `__main__`），是 `bootstrap-project.py` 与
 `adopt-existing-repo.py` 共用的 Claude/Codex postflight 渲染 helper，通过 `importlib`

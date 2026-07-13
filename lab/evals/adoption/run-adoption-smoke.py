@@ -37,16 +37,40 @@ Fixtures (plan B5, plans/20260712-bootstrap-adoption-proof.zh.md):
 9. `test_tampered_category_blocker_rejected` (review round 2 MAJOR-D):
    `protected`/`conflict` entries whose blocker flag was tampered to
    false are rejected by the category/blocker invariant, not moved.
-10. `test_non_root_entry_path_rejected` (review round 2 MAJOR-D): plan
-    paths with separators (nested files) or naming nonexistent root
-    entries are rejected; no partial moves.
+10. `test_non_root_entry_path_rejected` (review rounds 2+3 MAJOR-D): plan
+    paths with separators (nested files), naming nonexistent root
+    entries, or '..' (which passes `Path(name).name == name`!) are
+    rejected; no partial moves, nothing outside the repo is touched.
+11. `test_state_dir_symlink_redirected` (review round 3 BLOCKER-C): the
+    target's `lab` is a symlink to an external tree — discover/baseline
+    must not write plan/log/baseline through it; state goes to the /tmp
+    fallback and the redirect is itself a blocker (non-zero exit).
+12. `test_state_docs_symlink_redirected` (review round 3 BLOCKER-C): same
+    as 11 but with a real `lab` and a symlinked `lab/docs` — an
+    intermediate segment on the state path must be caught too.
+13. `test_archive_path_symlink_refused` (review round 3 BLOCKER-C): the
+    target's `human/imported` is a symlink to an external tree — the
+    conflict archive must refuse to stash through it (blocker), the
+    existing divergent file is neither stashed nor overwritten, and the
+    external tree stays untouched.
+14. `test_long_slug_truncated` (review round 3 MAJOR): a 300-char
+    `--project-name` must not ENAMETOOLONG at normalize's mkdir —
+    `project_slug` caps the slug (hash-suffixed) and `--phase all`
+    completes cleanly.
+15. `test_tracked_file_in_excluded_dir_integrity` (review round 3 MAJOR):
+    a *tracked* file under a `.venv`-named dir is in the baseline
+    (`git ls-files` collects everything), so the integrity proof's hash
+    index must find it after the move — no false "missing" from pruned
+    walk dirs.
 
 If no writable temp directory is available (sandboxes without /tmp), the
 whole smoke prints an explicit SKIP and exits 0 instead of crashing.
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -82,6 +106,14 @@ def git_init(target: Path) -> None:
 def read_plan(target: Path) -> dict:
     path = target / "lab" / "docs" / "audits" / "template-adoption" / "state" / "adoption-plan.json"
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def state_fallback(target: Path) -> Path:
+    """Mirror of the adopter's `state_fallback_root` formula (review round
+    3 BLOCKER-C): deterministic /tmp location state is redirected to when
+    the canonical state dir path crosses a symlink."""
+    digest = hashlib.sha256(str(target.resolve()).encode("utf-8")).hexdigest()[:12]
+    return Path(tempfile.gettempdir()) / f"template-adoption-state-{digest}"
 
 
 def classification_by_path(plan: dict) -> dict[str, dict]:
@@ -615,10 +647,12 @@ def test_tampered_category_blocker_rejected(root: Path) -> None:
 
 
 def test_non_root_entry_path_rejected(root: Path) -> None:
-    """Review round 2 MAJOR-D negative test: a plan path must name a
+    """Review rounds 2+3 MAJOR-D negative test: a plan path must name a
     single, real root entry — paths with separators (a nested file, which
-    would be a partial move) and paths naming nonexistent entries are
-    rejected."""
+    would be a partial move), paths naming nonexistent entries, and '..'
+    (round 3: `Path("..").name == ".."`, so the single-segment check alone
+    lets it through, and `(target / "..").exists()` is trivially true) are
+    all rejected."""
     target = make_conservative_fixture(root)
     base_cmd = [
         sys.executable,
@@ -655,6 +689,16 @@ def test_non_root_entry_path_rejected(root: Path) -> None:
             "reason": "tampered nonexistent entry",
         }
     )
+    plan["classification"].append(
+        {
+            "path": "..",
+            "kind": "dir",
+            "category": "conservative_import",
+            "target_path": "lab/code/imported/bad-paths/..",
+            "blocker": False,
+            "reason": "tampered parent-directory path",
+        }
+    )
     plan_path.write_text(json.dumps(plan, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     proc = run(base_cmd + ["--phase", "normalize"], REPO, check=False)
@@ -674,11 +718,251 @@ def test_non_root_entry_path_rejected(root: Path) -> None:
             "nonexistent plan entry was not rejected — "
             f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
         )
+    if "plan-mismatch: '..'" not in combined:
+        raise SystemExit(
+            "'..' plan path was not rejected by name validation — "
+            f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+        )
     if not (target / "src" / "sample_existing.py").exists():
         raise SystemExit("nested tampered path must not be moved (partial move)")
     if (target / "lab" / "code" / "imported" / "bad-paths" / "src").exists():
         raise SystemExit("nothing under 'src' may appear at the import destination")
+    if not target.exists() or not (target / ".git").exists():
+        raise SystemExit("the target repo itself must not move despite the '..' plan path")
     print("[adoption-smoke] test_non_root_entry_path_rejected OK")
+
+
+def external_tree_names(root: Path) -> list[str]:
+    return sorted(p.name for p in root.rglob("*"))
+
+
+def test_state_dir_symlink_redirected(root: Path) -> None:
+    """Review round 3 BLOCKER-C negative test (state writes): the target's
+    `lab` is a symlink to an external tree. discover runs BEFORE any
+    protection verdict is acted on, so its plan/log writes must not go
+    through the symlink — state is redirected to the /tmp fallback, the
+    redirect is registered as a blocker (not silently swallowed), and the
+    pipeline exits non-zero."""
+    external_lab = root / "external-lab"
+    write(external_lab / "keep.md", "external bytes\n")
+    target = root / "symlinked-lab"
+    git_init(target)
+    write(target / "README.md", (REPO / "README.md").read_text(encoding="utf-8"))
+    (target / "lab").symlink_to(external_lab, target_is_directory=True)
+    run(["git", "add", "."], target)
+    run(["git", "commit", "-m", "initial"], target)
+    fallback = state_fallback(target)
+    try:
+        cmd = [
+            sys.executable,
+            str(ADOPTER),
+            str(target),
+            "--phase",
+            "all",
+            "--test-command",
+            "none",
+            "--project-name",
+            "symlinked-lab",
+        ]
+        proc = run(cmd, REPO, check=False)
+        if proc.returncode == 0:
+            raise SystemExit(
+                "a symlinked state path must block the pipeline (non-zero exit) — "
+                f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+            )
+        combined = proc.stdout + proc.stderr
+        if "state-redirect" not in combined:
+            raise SystemExit(
+                "state redirect was not reported as a blocker — "
+                f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+            )
+        # Nothing may have been written through the symlink.
+        if external_tree_names(external_lab) != ["keep.md"]:
+            raise SystemExit(f"external lab tree was modified: {external_tree_names(external_lab)}")
+        # The plan landed at the /tmp fallback and records both the
+        # control-item-symlink conflict and the state redirect.
+        plan_path = fallback / "adoption-plan.json"
+        if not plan_path.exists():
+            raise SystemExit(f"plan was not written to the state fallback: {plan_path}")
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        entry = classification_by_path(plan).get("lab", {})
+        if entry.get("category") != "conflict" or not entry.get("blocker"):
+            raise SystemExit(f"symlinked 'lab' should classify as a conflict blocker, got: {entry}")
+        if not any("state-redirect" in b for b in plan.get("normalize_blockers", [])):
+            raise SystemExit(f"plan must record the state redirect blocker, got: {plan.get('normalize_blockers')}")
+        if not (target / "lab").is_symlink():
+            raise SystemExit("the symlinked 'lab' must stay in place as a symlink")
+    finally:
+        shutil.rmtree(fallback, ignore_errors=True)
+    print("[adoption-smoke] test_state_dir_symlink_redirected OK")
+
+
+def test_state_docs_symlink_redirected(root: Path) -> None:
+    """Review round 3 BLOCKER-C negative test (state writes, intermediate
+    segment): `lab` is a real directory but `lab/docs` is a symlink to an
+    external tree — the state path check must lstat EVERY segment, not
+    just the state dir leaf or the root entry."""
+    external_docs = root / "external-docs"
+    write(external_docs / "index.md", "external docs\n")
+    target = root / "symlinked-docs"
+    git_init(target)
+    write(target / "README.md", (REPO / "README.md").read_text(encoding="utf-8"))
+    write(target / "lab" / "notes.md", "# lab notes owned by the target repo\n")
+    (target / "lab" / "docs").symlink_to(external_docs, target_is_directory=True)
+    run(["git", "add", "."], target)
+    run(["git", "commit", "-m", "initial"], target)
+    fallback = state_fallback(target)
+    try:
+        cmd = [
+            sys.executable,
+            str(ADOPTER),
+            str(target),
+            "--phase",
+            "all",
+            "--test-command",
+            "none",
+            "--project-name",
+            "symlinked-docs",
+        ]
+        proc = run(cmd, REPO, check=False)
+        if proc.returncode == 0:
+            raise SystemExit(
+                "a symlinked lab/docs on the state path must block (non-zero exit) — "
+                f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+            )
+        combined = proc.stdout + proc.stderr
+        if "state-redirect" not in combined:
+            raise SystemExit(
+                "state redirect was not reported as a blocker — "
+                f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+            )
+        # Nothing may have been written through the symlink (no audits/
+        # subtree, no template docs merged into the external tree).
+        if external_tree_names(external_docs) != ["index.md"]:
+            raise SystemExit(f"external docs tree was modified: {external_tree_names(external_docs)}")
+        if not (fallback / "adoption-plan.json").exists():
+            raise SystemExit("plan was not written to the state fallback")
+        if not (target / "lab" / "docs").is_symlink():
+            raise SystemExit("the symlinked 'lab/docs' must stay in place as a symlink")
+    finally:
+        shutil.rmtree(fallback, ignore_errors=True)
+    print("[adoption-smoke] test_state_docs_symlink_redirected OK")
+
+
+def test_archive_path_symlink_refused(root: Path) -> None:
+    """Review round 3 BLOCKER-C negative test (conflict archive): the
+    target's `human/imported` is a symlink to an external tree. When
+    scaffold wants to stash a divergent control-dir file into
+    human/imported/adoption-conflicts/, it must refuse (blocker) instead
+    of moving the original file OUT of the repo — and must not overwrite
+    the file it could not stash."""
+    external_stash = root / "external-stash"
+    write(external_stash / "keep.md", "external bytes\n")
+    target = root / "symlinked-archive"
+    git_init(target)
+    write(target / "README.md", (REPO / "README.md").read_text(encoding="utf-8"))
+    divergent = "# target's own status file, not the template's\n"
+    write(target / "memory" / "current-status.md", divergent)
+    (target / "human").mkdir()
+    (target / "human" / "imported").symlink_to(external_stash, target_is_directory=True)
+    run(["git", "add", "."], target)
+    run(["git", "commit", "-m", "initial"], target)
+    cmd = [
+        sys.executable,
+        str(ADOPTER),
+        str(target),
+        "--phase",
+        "all",
+        "--test-command",
+        "none",
+        "--project-name",
+        "symlinked-archive",
+    ]
+    proc = run(cmd, REPO, check=False)
+    if proc.returncode == 0:
+        raise SystemExit(
+            "a symlinked conflict-archive path must block the pipeline (non-zero exit) — "
+            f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+        )
+    combined = proc.stdout + proc.stderr
+    if "archive-symlink" not in combined:
+        raise SystemExit(
+            "archive-path symlink was not reported as a blocker — "
+            f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+        )
+    # The divergent file was neither stashed out of the repo nor
+    # overwritten with the template's version.
+    current = (target / "memory" / "current-status.md").read_text(encoding="utf-8")
+    if current != divergent:
+        raise SystemExit("the file that could not be archived must not be overwritten")
+    if external_tree_names(external_stash) != ["keep.md"]:
+        raise SystemExit(f"external stash tree was modified: {external_tree_names(external_stash)}")
+    if not (target / "human" / "imported").is_symlink():
+        raise SystemExit("the symlinked 'human/imported' must stay in place as a symlink")
+    print("[adoption-smoke] test_archive_path_symlink_refused OK")
+
+
+def test_long_slug_truncated(root: Path) -> None:
+    """Review round 3 MAJOR positive test: a 300-char --project-name must
+    not ENAMETOOLONG mid-pipeline — project_slug caps the slug at 100
+    chars (hash-suffixed for uniqueness) and `--phase all` completes."""
+    target = make_conservative_fixture(root)
+    long_name = "x" * 300
+    cmd = [
+        sys.executable,
+        str(ADOPTER),
+        str(target),
+        "--phase",
+        "all",
+        "--test-command",
+        "none",
+        "--project-name",
+        long_name,
+    ]
+    run(cmd, REPO)
+    run([sys.executable, str(INTEGRITY), str(target)], REPO)
+    plan = read_plan(target)
+    slug = plan["project_slug"]
+    if len(slug) > 100:
+        raise SystemExit(f"slug was not truncated to a safe length: len={len(slug)}")
+    if not slug.startswith("xxx") or "-" not in slug:
+        raise SystemExit(f"truncated slug should keep a readable prefix plus a hash suffix, got: {slug!r}")
+    imported = target / "lab" / "code" / "imported" / slug
+    if not (imported / "src" / "sample_existing.py").exists():
+        raise SystemExit(f"import root with truncated slug missing: {imported}")
+    print("[adoption-smoke] test_long_slug_truncated OK")
+
+
+def test_tracked_file_in_excluded_dir_integrity(root: Path) -> None:
+    """Review round 3 MAJOR positive test: the baseline collects ALL
+    tracked files (`git ls-files`), including ones under a `.venv`-named
+    dir — the integrity proof's current-hash index must honour the same
+    contract and find them at the moved location instead of misreporting
+    intact files as missing (which would fail a legitimate adoption)."""
+    target = root / "venv-tracked"
+    git_init(target)
+    write(target / "README.md", (REPO / "README.md").read_text(encoding="utf-8"))
+    write(target / "tools" / "main.py", "print('hi')\n")
+    write(target / "tools" / ".venv" / "pinned.txt", "pinned==1.0\n")
+    run(["git", "add", "."], target)
+    run(["git", "commit", "-m", "initial"], target)
+    cmd = [
+        sys.executable,
+        str(ADOPTER),
+        str(target),
+        "--phase",
+        "all",
+        "--test-command",
+        "none",
+        "--project-name",
+        "venv-tracked",
+    ]
+    run(cmd, REPO)
+    run([sys.executable, str(INTEGRITY), str(target)], REPO)
+    moved = target / "lab" / "code" / "imported" / "venv-tracked" / "tools" / ".venv" / "pinned.txt"
+    if not moved.exists():
+        raise SystemExit(f"tracked file under .venv should have moved with its entry: {moved}")
+    print("[adoption-smoke] test_tracked_file_in_excluded_dir_integrity OK")
 
 
 def main() -> int:
@@ -713,6 +997,16 @@ def main() -> int:
         test_tampered_category_blocker_rejected(Path(tmp))
     with tempfile.TemporaryDirectory(prefix="adoption-smoke-badpath-") as tmp:
         test_non_root_entry_path_rejected(Path(tmp))
+    with tempfile.TemporaryDirectory(prefix="adoption-smoke-statelink-") as tmp:
+        test_state_dir_symlink_redirected(Path(tmp))
+    with tempfile.TemporaryDirectory(prefix="adoption-smoke-docslink-") as tmp:
+        test_state_docs_symlink_redirected(Path(tmp))
+    with tempfile.TemporaryDirectory(prefix="adoption-smoke-archivelink-") as tmp:
+        test_archive_path_symlink_refused(Path(tmp))
+    with tempfile.TemporaryDirectory(prefix="adoption-smoke-longslug-") as tmp:
+        test_long_slug_truncated(Path(tmp))
+    with tempfile.TemporaryDirectory(prefix="adoption-smoke-venvtracked-") as tmp:
+        test_tracked_file_in_excluded_dir_integrity(Path(tmp))
     print("[adoption-smoke] OK")
     return 0
 
