@@ -10,12 +10,21 @@
 Claude Code 当前窗口与周额度，并把 `subagent-routing` / `subagent-router-agent` 升级为
 配额感知的 provider/model 路由；验证已通过。
 
-本分支（feat/14-multi-agent-control-plane）：多 agent 控制面第一版已实现——
+本地 `main` 已集成 issue #14 多 agent 控制面第一版——
 `.agent/multi-agent-control-plane.md` doctrine、`scripts/agent-{state,status,mailbox}.py` +
 `check-agent-conflicts.py` 四脚本（自带 --self-test）、`pre_tool_guard.py` 冲突/写错-worktree
 薄接线、spawn skill 并入 list/status 查询、`agent_name_set.py` 挂接控制面状态。
 详见 `memory/branches/14-multi-agent-control-plane.md`（含遗留：真实 Paseo-tab / Codex
 smoke 留给监控员在非沙箱环境跑）。
+
+本次本地 merge 集成 issue #12 part A（来源 `feat/12-bootstrap-adoption-proof`）：
+实现新项目 bootstrap 命令，把 README「派生后的落地步骤」里能自动化的部分（`.template.toml` 版本
+锚点、`core.hooksPath`、Codex adapters 同步、governance）收敛成一条幂等命令
+`scripts/bootstrap-project.py`，经 `.claude/skills/bootstrap-project/SKILL.md` 引导调用；需要
+human 信息的步骤（CODEOWNERS owner、`PROJECT.md`、删无用目录、Codex trust）只报告不代做。见
+`plans/20260712-bootstrap-adoption-proof.zh.md`（任务树 A + D 里归属 A 的子项）。issue #12 的
+part B（existing-repo 语义归类）与 part C（smoke 合同）已按 human 拍板拆到各自独立分支/PR，
+不在本分支实现。
 
 ## Constraints
 
@@ -25,6 +34,18 @@ smoke 留给监控员在非沙箱环境跑）。
 - 不启动/kill/restart 长训练或远端作业。
 - 不 push main、不开 PR、不 release。
 - 两个 replay case worktree/branch 继续作为证据保留，不合入 main。
+
+## Files inspected（issue #12 part A）
+
+- `plans/20260712-bootstrap-adoption-proof.zh.md`（全文，含全部批注/决策历史）
+- `scripts/adopt-existing-repo.py`、`scripts/template-sync.py`、`scripts/check-agent-harness.py`、
+  `scripts/sync-codex-adapters.py`、`scripts/validate-governance.py`、`scripts/check-anatomy-drift.py`、
+  `scripts/check-adoption-integrity.py`
+- `.agent/template-versioning-policy.md`、`.github/CODEOWNERS`、`PROJECT.md`、`VERSION`
+- `.claude/skills/adopt-existing-repo/SKILL.md`、`.claude/commands/adopt-existing-repo.md`
+- `lab/evals/adoption/run-adoption-smoke.py`、`lab/ANATOMY.md`
+- `README.md`、`DESIGN.md` §10、`scripts/ANATOMY.md`、`.claude/ANATOMY.md`、`scripts/README.md`、
+  `scripts/CLAUDE.md`、`scripts/AGENTS.md`
 
 ## Files inspected
 
@@ -48,6 +69,29 @@ smoke 留给监控员在非沙箱环境跑）。
 - `.agent/model-routing-policy.md`
 - `scripts/check-agent-harness.py`
 - OpenAI/Codex docs：AGENTS.md、skills、subagents、hooks、config、rules
+
+## Files modified（issue #12 part A，本轮新增）
+
+- `scripts/bootstrap-project.py`：新增。把刚从模板派生的新 repo 落地成自洽状态：
+  `.template.toml`（origin+version 锚点，`--origin` 显式传入不推断，origin 冲突默认报错、
+  `--force` 才覆盖）、`git config core.hooksPath .githooks`、`sync-codex-adapters.py`、
+  `validate-governance.py`；需 human 信息的步骤只报告（`human_todo_items`）不代做；写
+  `lab/docs/audits/template-bootstrap/state/*.json` 与 `template-bootstrap-report.md`。
+- `.claude/skills/bootstrap-project/SKILL.md`：新增 skill（非 slash command，见开放问题 1 已决策）。
+- `.agents/skills/bootstrap-project/SKILL.md`：由 `sync-codex-adapters.py` 生成的 Codex adapter；
+  未生成对应 `command-bootstrap-project`（按决策，bootstrap 本身就是 skill 形态）。
+- `lab/evals/bootstrap/run-bootstrap-smoke.py`、`lab/evals/bootstrap/README.md`：新增 synthetic
+  fixture，覆盖幂等/origin 冲突/`--force`/三个 validator 全绿。
+- `lab/ANATOMY.md`：leaf 层清单加入 `evals/bootstrap/`。
+- `scripts/ANATOMY.md`：加入 `bootstrap-project.py` 的 Components/Connections 行。
+- `scripts/README.md`、`scripts/CLAUDE.md`：加入 bootstrap 用法；`CLAUDE.md` 把「三个脚本只读、
+  无副作用」改写为「只读校验脚本 vs 有副作用的 mutating 脚本」两类描述（D5，措辞已与现实脱节）。
+- `.claude/ANATOMY.md`：Connections 加入 `skills/bootstrap-project/` 调用关系。
+- `README.md`：「派生后的落地步骤」改写为调用 `bootstrap-project.py`，人工兜底步骤（含
+  Codex trust 前提）保留在命令输出的 human todo 里；快速门禁加入 bootstrap smoke 命令。
+- `DESIGN.md` §10：Skills 12→13、Codex adapters skills 20→21、Validators/tools 9→10，补
+  `bootstrap-project` 相关条目。
+- `memory/current-status.md`、`memory/session-tree.md`：记录本 feature 落地状态（本节）。
 
 ## Files modified
 
@@ -74,6 +118,24 @@ smoke 留给监控员在非沙箱环境跑）。
 - `.claude/ANATOMY.md`、`DESIGN.md`：登记新增 skill 与能力数量。
 - `scripts/check-agent-harness.py`：将本地 `.omx/` runtime state 视作工具状态忽略，避免 strict gate 因本机 runtime 目录失败。
 
+## Decisions（issue #12 part A，本轮新增）
+
+- 严格按 `plans/20260712-bootstrap-adoption-proof.zh.md` human 已拍板的 6 条决策落地，未重新讨论：
+  bootstrap 做成 skill（非 command）、`--origin` 显式传参不推断、origin 冲突默认报错 `--force`
+  才覆盖、语义归类 v1 不做（不在本分支范围内）、真实 replay 用新 repo（不在本分支范围内）、B/C
+  拆独立 PR（本分支只做 A）。
+- `.template.toml` 只写 `origin`/`version` 两个字段（不额外塞 `bootstrapped_at` 等元数据），
+  保持与 `scripts/template-sync.py` 的 `read_template_toml()` 解析预期一致、避免不必要的 schema 面。
+- origin 冲突检测在 `bootstrap-project.py` 里发生在**任何**写操作之前（先读后判断），确保「报错并
+  停止」是真的不碰任何文件，不是「跑到一半才报错」。
+- `human_todo_items()` 对 CODEOWNERS/PROJECT.md 做轻量 placeholder 检测（复用仓库既有的 `<...>`
+  占位符约定，以及本模板固定的默认 owner `@a-green-hand-jack` 字符串），只作为 report 里的
+  `detected_state` 展示，不作为判定依据、不代替 human 填写——遵守「不猜测」底线。
+- `agent_surface_checklist()` 的说明文字明确标注 Claude/Codex 文件计数只是辅助展示，机器事实源是
+  `check-agent-harness.py --strict` 与 `sync-codex-adapters.py --check` 的返回码（plan A4 要求）。
+- D2c（bootstrap 与 adoption 共用同一份 agent-surface postflight 数据结构/渲染函数）**不在本分支
+  范围内**——上层任务指令明确排除 D2c，留给未来 B（B6）落地时决定是否重构复用。
+
 ## Decisions
 
 - `.claude/` 继续作为 canonical capability source；Codex adapters 由 `scripts/sync-codex-adapters.py`
@@ -86,6 +148,22 @@ smoke 留给监控员在非沙箱环境跑）。
   脚本不读取 credential 文件。
 - `~/.paseo/orchestration-preferences.json` 当前未发现；quota 脚本会显式标注 `missing/defaulted`，
   并使用内置保守默认，不会假装已经读到本地偏好。
+
+## Commands + results（issue #12 part A，本轮新增）
+
+| command | 结论 |
+| --- | --- |
+| `python scripts/bootstrap-project.py <tmp> --origin a-green-hand-jack/ml-project-repo-agent-native-template`（手工冒烟，四个 tmp repo 场景：首次创建/幂等确认/冲突拒绝/`--force` 覆盖） | 全部符合预期：`created`→`confirmed`→冲突 `exit 1` 且未改文件→`--force` 后 `overwritten`。 |
+| 在上面 tmp repo 内跑 `validate-governance.py --strict` / `check-agent-harness.py --strict` / `sync-codex-adapters.py --check` | 全部 `OK`，`.template.toml` 可被 `template-sync.py` 的 `read_template_toml()` 正确解析。 |
+| `python lab/evals/bootstrap/run-bootstrap-smoke.py` | `[bootstrap-smoke] OK`：覆盖幂等/冲突拒绝/`--force`/三个 validator 全绿。 |
+| `python lab/evals/adoption/run-adoption-smoke.py`（回归，确认未破坏既有 adoption 路径） | `[adoption-smoke] OK`。 |
+| `python scripts/validate-governance.py --strict` | `OK — 0 error(s), 0 warning(s)`。 |
+| `python scripts/check-agent-harness.py --strict` | `OK — 0 error(s), 0 warning(s)`（含 DESIGN §10 清单数量校验）。 |
+| `python scripts/check-anatomy-drift.py` | `OK — 扫描 15 个 ANATOMY.md，0 处漂移`。 |
+| `python scripts/sync-codex-adapters.py --check` | `OK — 0 issue(s)`（`bootstrap-project` skill adapter 已生成，未生成对应 command-* skill）。 |
+| `python scripts/check-same-commit.py --staged` | `OK —— 5 处结构改动，对应 anatomy 已同变更集更新`。 |
+| `git diff --check` | 通过，无空白错误。 |
+| `python -m py_compile scripts/bootstrap-project.py lab/evals/bootstrap/run-bootstrap-smoke.py` | 通过。 |
 
 ## Commands + results
 
@@ -125,6 +203,19 @@ smoke 留给监控员在非沙箱环境跑）。
 
 本轮未派生 subagent。
 
+## Open issues / blockers（issue #12 part A，本轮新增）
+
+- **A5 的 fresh-Codex-session runtime smoke 已补齐（2026-07-12，监控员编排真实 Codex gpt-5.6-sol）**：
+  用 `git archive main` 铺出真实模板内容到临时 repo、跑 `bootstrap-project.py`，再从该 bootstrapped
+  repo 启动一次真实 Codex fresh session 观察：guidance（`AGENTS.md`）与 `.agents/skills/`（21 个）均
+  确认可见/可发现；project hook（`format_changed_python.py`/`zh_review_advisory.py`）在 trusted 状态下
+  仍未观察到可归因的触发痕迹，如实记录为 unknown（非已确认失效，也非已确认生效）。详见 plan doc A5
+  条目与 Plan revision log 最新条目。
+- 本分支未 push、未开 PR、未 merge——按边界要求，落地实现后交回上层/human 决定后续 gate。
+- issue #12 的 part B（existing-repo 语义归类）与 part C（smoke 合同）按 human 拍板（开放问题 7）
+  各自另开分支/worktree/PR，未在本分支涉及；D2c（bootstrap 与 adoption 共用 postflight 渲染函数）
+  同样留给 B 落地时决定。
+
 ## Open issues / blockers
 
 - main 仍未 push；如需共享当前 main，需 human 明确批准 push main。
@@ -132,6 +223,14 @@ smoke 留给监控员在非沙箱环境跑）。
   仍是本地 worktree checkout；它们在 main 视角显示为 untracked 是嵌套 worktree 的正常表现。
 - Codex project hooks 需要用户信任本 repo 的 `.codex/` layer 后才会加载；新增/修改 hook 后 Codex 也需要按其 hook trust flow 审核。
 - `coding-agent-quota` 的 Claude 数据来自本地 usage DB/cache；若 Claude Code 将来改变 `/usage` 存储 schema，脚本会降级为 unavailable/stale，需要按新 schema 更新。
+
+## Exact next steps（issue #12 part A，本轮新增）
+
+1. Human review 本分支改动；决定是否 commit 已 push/开 PR（本 worker 已按边界不做这两步）。
+2. ~~找机会从一个真正 bootstrapped 的 repo 里跑一次 fresh Codex session，补齐 A5 缺的 runtime smoke
+   证据~~ **已完成（2026-07-12）**，见上方 Open issues 条目。
+3. 启动 issue #12 part B（语义归类，`feat/12b-semantic-classification` 建议命名）与 part C（smoke
+   合同，`feat/12c-smoke-contract` 建议命名），各自新开分支/worktree，C 先于 B（改动面更小）。
 
 ## Exact next steps
 
