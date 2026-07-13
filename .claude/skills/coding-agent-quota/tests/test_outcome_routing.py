@@ -7,11 +7,13 @@ Stdlib only (unittest). Run from repo root:
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 SKILL = Path(__file__).resolve().parent.parent
 REPO = SKILL.parent.parent.parent
@@ -24,7 +26,12 @@ import outcome_ledger as ol  # noqa: E402
 
 
 def _tmp_writable() -> bool:
-    """True when a writable temp dir exists (read-only sandboxes lack one)."""
+    """True when a writable temp dir exists (read-only sandboxes lack one).
+
+    Must catch everything NamedTemporaryFile can raise when no usable temp dir
+    exists (FileNotFoundError from gettempdir(), PermissionError, generic
+    OSError) so environments without a writable temp SKIP cleanly, never fail.
+    """
     try:
         with tempfile.NamedTemporaryFile():
             return True
@@ -36,12 +43,13 @@ TMP_WRITABLE = _tmp_writable()
 NEEDS_TMP = unittest.skipUnless(
     TMP_WRITABLE,
     "no writable temp dir in this environment (read-only sandbox); "
-    "skipping tests that must create files under tempfile.gettempdir()",
+    "skipping tests that must create temp files",
 )
 
 
-def run(args: list[str]) -> subprocess.CompletedProcess:
-    return subprocess.run([sys.executable, *args], capture_output=True, text=True, cwd=REPO)
+def run(args: list[str], env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+    return subprocess.run([sys.executable, *args], capture_output=True, text=True,
+                          cwd=REPO, env=env)
 
 
 def replay(quota: str, ledger: str, extra: list[str] | None = None) -> subprocess.CompletedProcess:
@@ -236,6 +244,49 @@ class InvalidLedgerFallback(unittest.TestCase):
         self.assertIn("ledger failed validation", rec["degraded_reason"])
         self.assertEqual(rec["provider"], rec["baseline_provider"])
 
+    def test_non_utf8_ledger_degrades_instead_of_crashing(self):
+        """Corrupt bytes must take the same degraded path as JSON/schema errors,
+        never an uncaught UnicodeDecodeError traceback."""
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "ledger.jsonl"
+            bad.write_bytes(b"\xff\xfe\x00broken bytes\x80\n")
+            result = self._replay_with_ledger(str(bad))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+        rec = json.loads(result.stdout)["outcome_route_recommendation"]
+        self.assertTrue(rec["degraded"])
+        self.assertIn("ledger failed validation", rec["degraded_reason"])
+        self.assertEqual(rec["provider"], rec["baseline_provider"])
+        self.assertFalse(rec["switched_from_baseline"])
+
+
+class UnreadableLedger(unittest.TestCase):
+    """read_ledger degrades (records=[], error reported) instead of raising.
+
+    PermissionError cannot be simulated reliably on CI (root ignores modes),
+    so the OSError branch is exercised via mock, per review guidance.
+    """
+
+    def test_permission_denied_reported_as_parse_error(self):
+        with mock.patch.object(Path, "read_text",
+                               side_effect=PermissionError(13, "Permission denied")):
+            records, errs = ol.read_ledger(FIXTURES / "outcome-ledger.sample.jsonl")
+        self.assertEqual(records, [])
+        self.assertEqual(len(errs), 1)
+        self.assertIn("unreadable ledger", errs[0])
+        self.assertIn("PermissionError", errs[0])
+
+    def test_undecodable_bytes_reported_as_parse_error(self):
+        with mock.patch.object(
+            Path, "read_text",
+            side_effect=UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte"),
+        ):
+            records, errs = ol.read_ledger(FIXTURES / "outcome-ledger.sample.jsonl")
+        self.assertEqual(records, [])
+        self.assertEqual(len(errs), 1)
+        self.assertIn("unreadable ledger", errs[0])
+        self.assertIn("UnicodeDecodeError", errs[0])
+
 
 class WriteBoundary(unittest.TestCase):
     """--ledger/--record-ledger must not write outside the allowed directories."""
@@ -260,7 +311,8 @@ class WriteBoundary(unittest.TestCase):
     def test_protected_paths_rejected(self):
         for ledger in ("lab/data/forbidden.jsonl", "lab/runs/forbidden.jsonl",
                        "lab/models/forbidden.jsonl", "lab/infra/private/forbidden.jsonl",
-                       ".env"):
+                       "checkpoints/forbidden.jsonl", "wandb/forbidden.jsonl",
+                       "mlruns/forbidden.jsonl", ".env"):
             with self.subTest(ledger=ledger):
                 self._assert_rejected(ledger)
 
@@ -283,15 +335,51 @@ class WriteBoundary(unittest.TestCase):
         self.assertIn("refusing to write ledger", result.stderr)
         self.assertFalse((REPO / "lab" / "data" / "forbidden.jsonl").exists())
 
-    def test_resolve_write_path_allows_default_dir_and_tmp(self):
+    def test_resolve_write_path_allows_default_dir_and_literal_tmp(self):
         allowed = ol.resolve_write_path(ol.DEFAULT_LEDGER_FILE)
         self.assertEqual(allowed, Path(ol.DEFAULT_LEDGER_FILE).resolve())
-        tmp_target = Path(tempfile.gettempdir()) / "outcome-ledger-boundary-test.jsonl"
+        # Literal POSIX /tmp — pure path check, no file is created here.
+        tmp_target = Path("/tmp") / "outcome-ledger-boundary-test.jsonl"
         self.assertEqual(ol.resolve_write_path(tmp_target), tmp_target.resolve())
         with self.assertRaises(ol.LedgerWriteError):
             ol.resolve_write_path(REPO / "lab" / "data" / "x.jsonl")
         with self.assertRaises(ol.LedgerWriteError):
             ol.resolve_write_path(REPO / "anywhere-else.jsonl")
+
+    def test_tmpdir_env_cannot_widen_boundary(self):
+        """TMPDIR must never influence the write allowlist (BLOCKER regression:
+        TMPDIR=.agent used to let record-decision write inside .agent/)."""
+        evil = REPO / ".agent" / "evil-ledger.jsonl"
+        for tmpdir in (str(REPO / ".agent"), ".agent"):
+            with self.subTest(TMPDIR=tmpdir):
+                env = {**os.environ, "TMPDIR": tmpdir}
+                result = run([str(SCRIPTS / "outcome_ledger.py"),
+                              "--ledger", str(evil),
+                              "record-decision", "--role", "impl", "--routing-tier", "2",
+                              "--provider", "codex", "--model", "gpt-5.6-terra",
+                              "--effort", "medium", "--launch-surface", "codex_exec",
+                              "--task-class", "boundary-test", "--decided-at", NOW,
+                              "--quota-source", "test"], env=env)
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertIn("refusing to write ledger", result.stderr)
+                self.assertFalse(evil.exists(), ".agent/evil-ledger.jsonl must not be created")
+
+    def test_allow_test_dir_is_explicit_and_keeps_protected_floor(self):
+        """--allow-test-dir grants exactly the named dir; the protected-path
+        floor still wins even when allow_test_dir points inside it."""
+        target = REPO / "some-test-dir" / "ledger.jsonl"
+        self.assertEqual(
+            ol.resolve_write_path(target, allow_test_dir=REPO / "some-test-dir"),
+            target.resolve(),
+        )
+        # Explicit flag never overrides the protected floor.
+        with self.assertRaises(ol.LedgerWriteError):
+            ol.resolve_write_path(REPO / "lab" / "data" / "x.jsonl",
+                                  allow_test_dir=REPO / "lab" / "data")
+        # And it grants only that dir, nothing else.
+        with self.assertRaises(ol.LedgerWriteError):
+            ol.resolve_write_path(REPO / "elsewhere" / "x.jsonl",
+                                  allow_test_dir=REPO / "some-test-dir")
 
 
 class RequiredKeyFloor(unittest.TestCase):
@@ -333,6 +421,20 @@ class RequiredKeyFloor(unittest.TestCase):
                                              self.catalog))
         self.assertTrue(ol.validate_outcome({**self.outcome, "schema_version": 999},
                                             self.catalog))
+
+    def test_schema_version_type_confusion_rejected(self):
+        """True == 1 and 1.0 == 1 in Python; bool/float/str lookalikes of the
+        schema version must be rejected (only the exact int passes)."""
+        for bad in (True, False, 1.0, "1"):
+            with self.subTest(value=bad):
+                self.assertTrue(
+                    ol.validate_decision({**self.decision, "schema_version": bad},
+                                         self.catalog),
+                    f"decision schema_version={bad!r} must be rejected")
+                self.assertTrue(
+                    ol.validate_outcome({**self.outcome, "schema_version": bad},
+                                        self.catalog),
+                    f"outcome schema_version={bad!r} must be rejected")
 
     def test_bad_decision_id_format_rejected(self):
         self.assertTrue(ol.validate_decision({**self.decision, "decision_id": "not-an-id"},
@@ -387,7 +489,10 @@ class LedgerCli(unittest.TestCase):
     def test_record_show_summary_roundtrip(self):
         with tempfile.TemporaryDirectory() as tmp:
             ledger = str(Path(tmp) / "ledger.jsonl")
-            base = [str(SCRIPTS / "outcome_ledger.py"), "--ledger", ledger]
+            # Explicit --allow-test-dir: the temp dir may not be literal /tmp
+            # (TMPDIR), and the allowlist never reads the environment.
+            base = [str(SCRIPTS / "outcome_ledger.py"), "--ledger", ledger,
+                    "--allow-test-dir", tmp]
             rec = run([*base, "record-decision", "--role", "impl", "--routing-tier", "2",
                        "--provider", "codex", "--model", "gpt-5.6-terra", "--effort", "medium",
                        "--launch-surface", "codex_exec", "--task-class", "roundtrip-test",
@@ -414,6 +519,7 @@ class LedgerCli(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             ledger = str(Path(tmp) / "ledger.jsonl")
             result = run([str(SCRIPTS / "outcome_ledger.py"), "--ledger", ledger,
+                          "--allow-test-dir", tmp,
                           "record-outcome", "--decision-id", "d-nope",
                           "--status", "observed", "--quality", "pass",
                           "--evidence-source", "x",

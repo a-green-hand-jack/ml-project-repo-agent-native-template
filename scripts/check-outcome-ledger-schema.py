@@ -211,6 +211,12 @@ def check_negative_schema_rejection(ol, catalog) -> None:
         errors.append("负向校验失效：decision schema_version 漂移未被拒绝")
     if not ol.validate_outcome({**outcome, "schema_version": 999}, catalog):
         errors.append("负向校验失效：outcome schema_version 漂移未被拒绝")
+    # 类型混淆：Python 里 True == 1 == 1.0，schema_version 只认精确 int。
+    for bad in (True, 1.0, "1"):
+        if not ol.validate_decision({**decision, "schema_version": bad}, catalog):
+            errors.append(f"负向校验失效：decision schema_version={bad!r}（类型混淆）未被拒绝")
+        if not ol.validate_outcome({**outcome, "schema_version": bad}, catalog):
+            errors.append(f"负向校验失效：outcome schema_version={bad!r}（类型混淆）未被拒绝")
     if not ol.validate_decision({**decision, "decision_id": "not-a-valid-id"}, catalog):
         errors.append("负向校验失效：decision_id 非 d-<id> 格式未被拒绝")
 

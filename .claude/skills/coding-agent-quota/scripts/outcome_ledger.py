@@ -38,7 +38,6 @@ import hashlib
 import json
 import re
 import sys
-import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -48,14 +47,18 @@ DEFAULT_LEDGER_FILE = SKILL_DIR / ".outcome-ledger" / "ledger.jsonl"
 DEFAULT_CATALOG = SKILL_DIR / "fixtures" / "outcome" / "model-catalog.v1.json"
 
 # Write boundary (BLOCKER fix): ledger writes are only allowed inside the
-# default gitignored ledger directory or the system temp dir (tests). Protected
-# paths (aligned with .claude/hooks/pre_tool_guard.py) and any other location
-# are rejected — `--ledger`/`--record-ledger` must not become an arbitrary
-# file-write primitive that bypasses the protected-path floor.
+# default gitignored ledger directory or literal `/tmp` (POSIX standard temp
+# location — deliberately NOT tempfile.gettempdir(), which is environment
+# controlled: `TMPDIR=.agent` must never widen the allowlist). Protected paths
+# (aligned with .claude/hooks/pre_tool_guard.py PROTECTED_PREFIXES) and any
+# other location are rejected — `--ledger`/`--record-ledger` must not become
+# an arbitrary file-write primitive that bypasses the protected-path floor.
 PROTECTED_REPO_PREFIXES = (
     "lab/data/", "lab/runs/", "lab/models/", "lab/infra/private/",
+    "checkpoints/", "wandb/", "mlruns/",
 )
 PROTECTED_REPO_FILES = (".env",)
+LITERAL_TMP = Path("/tmp")
 
 SCHEMA_VERSION = 1
 RECORD_TYPES = ("decision", "outcome")
@@ -138,7 +141,13 @@ def read_ledger(path: Path) -> tuple[list[dict[str, Any]], list[str]]:
         return [], []
     records: list[dict[str, Any]] = []
     errors: list[str] = []
-    for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (UnicodeDecodeError, OSError) as exc:
+        # Corrupt bytes / unreadable file degrade exactly like JSON/schema
+        # errors: no records, error surfaced, callers fall back to quota-only.
+        return [], [f"{path.name}: unreadable ledger ({type(exc).__name__}: {exc})"]
+    for lineno, line in enumerate(text.splitlines(), 1):
         if not line.strip():
             continue
         try:
@@ -179,9 +188,12 @@ def validate_decision(rec: dict[str, Any], catalog: dict[str, Any]) -> list[str]
     missing = [k for k in DECISION_REQUIRED_KEYS if k not in rec]
     if missing:
         errs.append(f"{prefix}: missing required key(s): {missing}")
-    if rec.get("schema_version") != SCHEMA_VERSION:
+    version = rec.get("schema_version")
+    # type() check on purpose: bool is an int subclass and True == 1 == 1.0 in
+    # Python, so `!= SCHEMA_VERSION` alone would accept true/1.0 lookalikes.
+    if type(version) is not int or version != SCHEMA_VERSION:
         errs.append(
-            f"{prefix}: schema_version must be {SCHEMA_VERSION}: {rec.get('schema_version')!r}"
+            f"{prefix}: schema_version must be the int {SCHEMA_VERSION}: {version!r}"
         )
     if not isinstance(did, str) or not did:
         errs.append(f"{prefix}: missing/empty decision_id")
@@ -247,9 +259,11 @@ def validate_outcome(
     missing = [k for k in OUTCOME_REQUIRED_KEYS if k not in rec]
     if missing:
         errs.append(f"{prefix}: missing required key(s): {missing}")
-    if rec.get("schema_version") != SCHEMA_VERSION:
+    version = rec.get("schema_version")
+    # type() check on purpose: bool is an int subclass and True == 1 == 1.0.
+    if type(version) is not int or version != SCHEMA_VERSION:
         errs.append(
-            f"{prefix}: schema_version must be {SCHEMA_VERSION}: {rec.get('schema_version')!r}"
+            f"{prefix}: schema_version must be the int {SCHEMA_VERSION}: {version!r}"
         )
     if not isinstance(did, str) or not did:
         errs.append(f"{prefix}: missing/empty decision_id")
@@ -521,14 +535,24 @@ class LedgerWriteError(ValueError):
     """Raised when a ledger write target violates the write boundary."""
 
 
-def resolve_write_path(path: Path | str) -> Path:
+def resolve_write_path(path: Path | str, allow_test_dir: Path | str | None = None) -> Path:
     """Resolve (realpath) a ledger WRITE target and enforce the write boundary.
 
     Allowed: the default `.outcome-ledger/` directory inside this skill, and
-    the system temp dir (`/tmp` / ``tempfile.gettempdir()``, for tests only).
+    the literal POSIX ``/tmp`` prefix (tests only). ``tempfile.gettempdir()``
+    is deliberately NOT consulted: it is environment controlled (``TMPDIR``)
+    and must never widen the allowlist. Test scripts that need a different
+    temp location must pass it explicitly via ``allow_test_dir``
+    (CLI: ``--allow-test-dir``) — never derived from the environment.
     Rejected with ``LedgerWriteError``: protected repo paths (lab/data|runs|
-    models, lab/infra/private, .env — aligned with pre_tool_guard) and any
-    other repo or non-temp location. Read paths are NOT restricted.
+    models, lab/infra/private, checkpoints, wandb, mlruns, .env — aligned with
+    pre_tool_guard) and any other repo or non-temp location; the protected
+    floor also wins over ``allow_test_dir``. Read paths are NOT restricted.
+
+    Known limitation (TOCTOU): the boundary is checked at resolve time and the
+    filesystem can change between this check and the subsequent open. Like
+    ``.claude/hooks/pre_tool_guard.py`` this is an anti-footgun guard, not an
+    adversarial sandbox; data safety ultimately relies on gitignore + backups.
     """
     resolved = Path(path).expanduser().resolve()
     repo_root = REPO_ROOT.resolve()
@@ -545,22 +569,24 @@ def resolve_write_path(path: Path | str) -> Path:
             f"refusing to write ledger to protected path: {path} "
             "(protected-path floor, see .agent/action-boundary.md)"
         )
-    allowed_dirs = {
-        DEFAULT_LEDGER_FILE.parent.resolve(),
-        Path("/tmp").resolve(),
-        Path(tempfile.gettempdir()).resolve(),
-    }
+    # Literal /tmp only — never tempfile.gettempdir() (TMPDIR-controlled).
+    allowed_dirs = {DEFAULT_LEDGER_FILE.parent.resolve(), LITERAL_TMP}
+    if allow_test_dir is not None:
+        allowed_dirs.add(Path(allow_test_dir).expanduser().resolve())
     for root in allowed_dirs:
         if root in resolved.parents:
             return resolved
     raise LedgerWriteError(
         f"refusing to write ledger outside the allowed directories: {path} "
-        f"(allowed: {DEFAULT_LEDGER_FILE.parent} or the system temp dir)"
+        f"(allowed: {DEFAULT_LEDGER_FILE.parent}, literal /tmp, or an explicit "
+        "--allow-test-dir)"
     )
 
 
-def append_record(record: dict[str, Any], ledger_file: Path) -> None:
-    ledger_file = resolve_write_path(ledger_file)
+def append_record(
+    record: dict[str, Any], ledger_file: Path, allow_test_dir: Path | str | None = None
+) -> None:
+    ledger_file = resolve_write_path(ledger_file, allow_test_dir=allow_test_dir)
     ledger_file.parent.mkdir(parents=True, exist_ok=True)
     with ledger_file.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
@@ -574,7 +600,7 @@ def _fail_on_errors(errs: list[str]) -> int:
 
 def cmd_record_decision(args: argparse.Namespace) -> int:
     try:
-        ledger_path = resolve_write_path(args.ledger)
+        ledger_path = resolve_write_path(args.ledger, allow_test_dir=args.allow_test_dir)
     except LedgerWriteError as exc:
         print(f"ERROR {exc}", file=sys.stderr)
         return 2
@@ -611,7 +637,7 @@ def cmd_record_decision(args: argparse.Namespace) -> int:
     errs = validate_decision(record, catalog)
     if errs:
         return _fail_on_errors(errs)
-    append_record(record, ledger_path)
+    append_record(record, ledger_path, allow_test_dir=args.allow_test_dir)
     print(json.dumps({"decision_id": record["decision_id"], "ledger": str(args.ledger)},
                      ensure_ascii=False))
     return 0
@@ -619,7 +645,7 @@ def cmd_record_decision(args: argparse.Namespace) -> int:
 
 def cmd_record_outcome(args: argparse.Namespace) -> int:
     try:
-        ledger_path = resolve_write_path(args.ledger)
+        ledger_path = resolve_write_path(args.ledger, allow_test_dir=args.allow_test_dir)
     except LedgerWriteError as exc:
         print(f"ERROR {exc}", file=sys.stderr)
         return 2
@@ -658,7 +684,7 @@ def cmd_record_outcome(args: argparse.Namespace) -> int:
     errs = parse_errs + validate_outcome(record, catalog, decision_ids)
     if errs:
         return _fail_on_errors(errs)
-    append_record(record, ledger_path)
+    append_record(record, ledger_path, allow_test_dir=args.allow_test_dir)
     print(json.dumps({"decision_id": record["decision_id"], "status": record["outcome_status"]},
                      ensure_ascii=False))
     return 0
@@ -701,6 +727,11 @@ def build_parser() -> argparse.ArgumentParser:
                         help="JSONL ledger file (default: repo-local gitignored ledger)")
     parser.add_argument("--catalog", default=str(DEFAULT_CATALOG),
                         help="frozen model catalog JSON")
+    parser.add_argument("--allow-test-dir", default=None,
+                        help="TEST-ONLY: extra directory allowed for ledger writes "
+                             "(for test scripts whose temp dir is not literal /tmp); "
+                             "explicit by design — never derived from TMPDIR/env, and "
+                             "protected paths stay rejected regardless")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("record-decision", help="append a route decision (outcome pending)")

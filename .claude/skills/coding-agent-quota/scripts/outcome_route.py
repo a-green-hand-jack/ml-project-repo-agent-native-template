@@ -297,6 +297,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--record", action="store_true",
                         help="append the decision to --record-ledger (default real ledger)")
     parser.add_argument("--record-ledger", default=str(ol.DEFAULT_LEDGER_FILE))
+    parser.add_argument("--allow-test-dir", default=None,
+                        help="TEST-ONLY: extra directory allowed for ledger writes "
+                             "(explicit by design — never derived from TMPDIR/env; "
+                             "protected paths stay rejected regardless)")
     args = parser.parse_args(argv)
 
     now = ol.parse_iso(args.now) if args.now else dt.datetime.now(dt.timezone.utc)
@@ -330,7 +334,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.record:
         try:
-            record_ledger = ol.resolve_write_path(args.record_ledger)
+            record_ledger = ol.resolve_write_path(
+                args.record_ledger, allow_test_dir=args.allow_test_dir
+            )
         except ol.LedgerWriteError as exc:
             print(f"ERROR record: {exc}", file=sys.stderr)
             return 2
@@ -363,7 +369,7 @@ def main(argv: list[str] | None = None) -> int:
             for err in errs:
                 print(f"ERROR record: {err}", file=sys.stderr)
             return 1
-        ol.append_record(decision, record_ledger)
+        ol.append_record(decision, record_ledger, allow_test_dir=args.allow_test_dir)
 
     output = {
         "generated_at": _iso(now),

@@ -104,9 +104,15 @@ Rules:
   outcomes in that exact segment; otherwise the layer degrades to quota-only (tier-3 or
   other-task samples never steer a tier-2 decision).
 - Write boundary: ledger writes (`--ledger` on record commands, `--record-ledger`) are only
-  accepted inside the default `.outcome-ledger/` directory or the system temp dir (tests);
-  protected paths (`lab/data|runs|models`, `lab/infra/private`, `.env`) and any other
-  location are rejected with a non-zero exit. Reads are unrestricted (fixtures replay).
+  accepted inside the default `.outcome-ledger/` directory or under literal `/tmp` (POSIX
+  standard location; `tempfile.gettempdir()` is deliberately ignored — `TMPDIR` is
+  environment-controlled and must never widen the allowlist). Test scripts whose temp dir is
+  not under `/tmp` pass an explicit `--allow-test-dir <path>` (test-only, never derived from
+  env; the protected floor still wins). Protected paths (`lab/data|runs|models`,
+  `lab/infra/private`, `checkpoints`, `wandb`, `mlruns`, `.env`) and any other location are
+  rejected with a non-zero exit. Reads are unrestricted (fixtures replay). Known limitation
+  (recorded honestly): a TOCTOU window exists between resolve and open — this is an
+  anti-footgun guard (same stance as `pre_tool_guard.py`), not an adversarial sandbox.
 - Cost is quota-only in this version: candidate routes are compared/sorted by `quota_cost`
   (subscription window burn, estimate). `metered_price_estimate` ($/token) is reserved and NOT
   implemented (plan decision Q6). Reports keep dimensions separate (outcome / quota_cost /
