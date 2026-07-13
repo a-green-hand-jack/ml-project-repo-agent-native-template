@@ -19,6 +19,15 @@ human 信息的步骤（CODEOWNERS owner、`PROJECT.md`、删无用目录、Code
 part B（existing-repo 语义归类）与 part C（smoke 合同）已按 human 拍板拆到各自独立分支/PR，
 不在本分支实现。
 
+**当前分支 `feat/12b-semantic-classification`（issue #12 part B，`.claude/worktrees/12b-semantic-classification`，
+base = `feat/12-bootstrap-adoption-proof`）**：给 `adopt-existing-repo.py` 的 `discover`/`normalize`
+phase 加内置保守四类语义归类（`template_control_item` / `conservative_import` / `protected` /
+`conflict`，v1 不做外部规则文件/参数覆盖，见开放问题 4 已决策），`normalize` 消费该归类计划而非
+硬编码二元判断（B1-B4）；`prove` phase 新增 Claude/Codex 双 agent surface 报告，复用抽取出的
+`scripts/_agent_surface.py` 共享渲染函数（与 `bootstrap-project.py` 共用，即 D2c，B6）。见
+`plans/20260712-bootstrap-adoption-proof.zh.md`（任务树 B + D 里归属 B 的子项：D1/D2/D2c/D3/D4/D6）。
+part C（smoke 合同）在独立分支 `feat/12c-smoke-contract` 落地，不在本分支涉及。
+
 ## Constraints
 
 - 遵守 `AGENTS.md` / `.agent/AGENTS.md` / `.agent/action-boundary.md`。

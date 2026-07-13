@@ -94,10 +94,13 @@ python scripts/adopt-existing-repo.py /path/to/existing-repo \
 python scripts/check-adoption-integrity.py /path/to/existing-repo
 ```
 
-迁移是分 phase 的：`discover → baseline → scaffold → normalize → prove`。默认策略不删除、
+迁移是分 phase 的：`discover → baseline → scaffold → normalize → prove`。`discover` 会给每个
+root entry 打内置保守四类标签（`template_control_item` / `conservative_import` / `protected` /
+`conflict`，v1 不做外部规则文件覆盖，`--dry-run` 只打印/写归类计划、不落盘）；`normalize` 消费
+这份归类计划——`protected`/`conflict` 命中即登记 blocker 并停下，不静默继续。默认策略不删除、
 不覆盖、不移动受保护 bytes；冲突文件会保存在 `human/imported/adoption-conflicts/`，原 repo
-root 会收敛到 `lab/code/imported/<slug>/`，proof 写入目标 repo 的
-`lab/docs/audits/template-adoption-report.md`。
+root 会收敛到 `lab/code/imported/<slug>/`，proof（含 Claude/Codex 双 agent surface 加载清单）
+写入目标 repo 的 `lab/docs/audits/template-adoption-report.md`。
 
 ## 快速门禁
 

@@ -36,6 +36,7 @@ non-zero = origin conflict without `--force`, or a substep failed/missing.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import re
 import subprocess
@@ -43,9 +44,27 @@ import sys
 import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 TEMPLATE_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _load_sibling(name: str) -> ModuleType:
+    """Load a sibling script/module by file path (scripts/ has no
+    __init__.py and most filenames are hyphenated, so a plain `import`
+    across scripts doesn't work — same pattern as
+    `check-adoption-integrity.py`'s `load_adopter()`)."""
+    script = Path(__file__).resolve().with_name(f"{name}.py")
+    spec = importlib.util.spec_from_file_location(name, script)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"could not load {script}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+AGENT_SURFACE = _load_sibling("_agent_surface")
 
 STATE_DIR = Path("lab/docs/audits/template-bootstrap/state")
 REPORT_PATH = Path("lab/docs/audits/template-bootstrap-report.md")
@@ -260,78 +279,24 @@ def human_todo_items(target: Path) -> list[dict[str, Any]]:
     ]
 
 
-def _count(target: Path, pattern: str) -> int:
-    return len(list(target.glob(pattern)))
-
-
 def agent_surface_checklist(
     target: Path, hooks_result: dict[str, Any], harness_result: dict[str, Any] | None,
     sync_codex_result: dict[str, Any],
 ) -> dict[str, Any]:
-    """Machine-derived Claude/Codex loading checklist (plan A4).
-
-    File presence/counts here are informational display only; the
-    authoritative pass/fail ground truth is `check-agent-harness.py --strict`
-    (harness_result, run separately by the caller/verification step — this
-    script itself only runs `validate-governance.py`, which subsumes it) and
-    `sync-codex-adapters.py --check` (sync_codex_result), so the checklist
-    text stays derived from the same validators instead of hand-duplicated
-    judgment that can drift.
+    """Bootstrap-specific wrapper around the shared postflight checklist
+    (`scripts/_agent_surface.py`, plan A4/D2c): builds the `core-hooks-path`
+    entry from bootstrap's own `ensure_hooks_path()` result (bootstrap
+    actively sets `core.hooksPath`), then delegates the shared
+    claude/codex/ground_truth rendering to `_agent_surface`. See
+    `adopt-existing-repo.py`'s `agent_surface_report()` for the adoption-side
+    counterpart, which inspects rather than sets `core.hooksPath` (plan B6).
     """
-    claude = {
-        "settings_json": (target / ".claude" / "settings.json").exists(),
-        "agents_md_count": _count(target, ".claude/agents/*.md"),
-        "skills_count": _count(target, ".claude/skills/*/SKILL.md"),
-        "commands_md_count": _count(target, ".claude/commands/*.md"),
-        "statusline_sh": (target / ".claude" / "statusline.sh").exists(),
+    hooks_item = {
+        "id": "core-hooks-path",
+        "status": "auto-configured" if hooks_result.get("status") == "ok" else hooks_result.get("status"),
+        "note": "git config core.hooksPath .githooks 已由 bootstrap 自动设置（per-clone，不随 git clone 复制，换机器需重跑）。",
     }
-    codex = {
-        "config_toml": (target / ".codex" / "config.toml").exists(),
-        "agents_toml_count": _count(target, ".codex/agents/*.toml"),
-        "skills_count": _count(target, ".agents/skills/*/SKILL.md"),
-    }
-    ground_truth = {
-        "check_agent_harness_strict": (harness_result or {}).get("status", "not-run-by-bootstrap"),
-        "sync_codex_adapters_check": sync_codex_result.get("status"),
-        "note": (
-            "文件就位/静态一致性的机器事实源是 check-agent-harness.py --strict 与 "
-            "sync-codex-adapters.py --check；上面 claude/codex 两段计数只是辅助展示，"
-            "不是独立判据（见 plan A4）。这两个 validator 只能证明静态自洽，"
-            "不能证明当前 Codex session 已加载 project config/hooks。"
-        ),
-    }
-    human_out_of_band = [
-        {
-            "id": "codex-trust",
-            "status": "needs-human",
-            "note": (
-                "Codex 的 `.codex/config.toml` hooks 需 human 先 trust 本 repo 才加载；"
-                "bootstrap 无法代做，也没有稳定可脚本读取的 trust/provenance API 可用于自动判定，"
-                "因此保守标注 unknown，不猜测已生效。"
-            ),
-        },
-        {
-            "id": "core-hooks-path",
-            "status": "auto-configured" if hooks_result.get("status") == "ok" else hooks_result.get("status"),
-            "note": "git config core.hooksPath .githooks 已由 bootstrap 自动设置（per-clone，不随 git clone 复制，换机器需重跑）。",
-        },
-        {
-            "id": "codex-agent-boundary",
-            "status": "informational",
-            "note": (
-                "Codex custom-agent TOML 不强制 Claude 的 tools allowlist、不 pin model、"
-                "sandbox_mode 只有 read-only/workspace-write 粗粒度（见 "
-                "scripts/sync-codex-adapters.py 的 _sandbox_for_tools/_agent_adapter）；"
-                "这是「行为边界靠自觉」而非硬隔离。"
-            ),
-        },
-    ]
-    return {
-        "claude": claude,
-        "codex": codex,
-        "ground_truth": ground_truth,
-        "human_out_of_band": human_out_of_band,
-    }
+    return AGENT_SURFACE.agent_surface_checklist(target, hooks_item, sync_codex_result, harness_result)
 
 
 def state_root(target: Path) -> Path:

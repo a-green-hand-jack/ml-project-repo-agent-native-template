@@ -35,6 +35,13 @@ MAJOR 跨越需 `--allow-major` 人工确认。
 
 `adopt-existing-repo.py` 是迁移工具，不是 validator：它会在目标 repo 内写入
 `lab/docs/audits/template-adoption/` state/report，并按 conservative policy 保留原文件。
+`discover` phase 给每个 root entry 打内置保守四类标签（`template_control_item` /
+`conservative_import` / `protected` / `conflict`，v1 不做外部规则文件覆盖），`normalize`
+消费这份归类计划而非硬编码判断；`prove` 还会生成 Claude/Codex 双 agent surface 加载清单。
+
+`_agent_surface.py` 不是独立脚本（没有 `__main__`），是 `bootstrap-project.py` 与
+`adopt-existing-repo.py` 共用的 Claude/Codex postflight 渲染 helper，通过 `importlib`
+按路径加载（同 `check-adoption-integrity.py` 加载 `adopt-existing-repo.py` 的模式）。
 
 `bootstrap-project.py` 是新项目落地工具，也不是 validator：它在目标 repo 内写
 `.template.toml`（origin+version 锚点，`--origin` 必须显式传，不推断）、跑

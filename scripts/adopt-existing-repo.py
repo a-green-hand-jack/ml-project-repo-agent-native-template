@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -19,9 +20,27 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 TEMPLATE_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _load_sibling(name: str) -> ModuleType:
+    """Load a sibling script/module by file path (scripts/ has no
+    __init__.py and most filenames are hyphenated, so a plain `import`
+    across scripts doesn't work — same pattern as
+    `check-adoption-integrity.py`'s `load_adopter()`)."""
+    script = Path(__file__).resolve().with_name(f"{name}.py")
+    spec = importlib.util.spec_from_file_location(name, script)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"could not load {script}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+AGENT_SURFACE = _load_sibling("_agent_surface")
 
 STATE_DIR = Path("lab/docs/audits/template-adoption/state")
 REPORT_PATH = Path("lab/docs/audits/template-adoption-report.md")
@@ -43,6 +62,12 @@ CONTROL_ITEMS = [
     ".reference-docs",
     ".agent",
     ".claude",
+    # Codex adapters (generated from .claude/** by sync-codex-adapters.py):
+    # required top-level entries per check-agent-harness.py's REQUIRED_TOP —
+    # must be scaffolded alongside .claude for the double-agent-surface
+    # postflight (B6/D2c) to have anything to report other than "missing".
+    ".codex",
+    ".agents",
     "human",
     "lab",
     "memory",
@@ -64,6 +89,8 @@ ROOT_WHITELIST = {
     ".githooks",
     ".agent",
     ".claude",
+    ".codex",
+    ".agents",
     "human",
     "lab",
     "memory",
@@ -228,6 +255,121 @@ def list_root_entries(target: Path) -> list[dict[str, Any]]:
     return entries
 
 
+def hash_matches_template(src: Path, template_item: Path) -> bool | None:
+    """Compare a root file's content against the template's own copy of the
+    same-named file. Returns None when either side isn't a plain,
+    hashable file (directory, missing, or oversized — see
+    LARGE_HASH_LIMIT); callers must treat None as "not comparable", not as
+    a mismatch."""
+    if not src.is_file() or not template_item.is_file():
+        return None
+    src_hash = path_hash(src)
+    template_hash = path_hash(template_item)
+    if src_hash is None or template_hash is None:
+        return None
+    return src_hash == template_hash
+
+
+def classify_entry(target: Path, name: str, kind: str, import_root_rel: str) -> dict[str, Any]:
+    """Classify a single root entry into one of the four built-in
+    conservative buckets (plan B1, human-decided 2026-07-12 — no external
+    rule file/CLI override, see 开放问题 4):
+
+    - protected: hits a forbidden/protected path — never moved, registered
+      as a blocker.
+    - template_control_item: hits `CONTROL_ITEMS` — always left in place
+      (structural directories are merged file-by-file by `scaffold`;
+      single files that diverge from the template are reconciled by
+      `scaffold` itself, which stashes the original under
+      `human/imported/adoption-conflicts/` and installs the template's
+      version here — normalize never moves a control item wholesale).
+    - conflict: not a control item, not protected, but its intended import
+      destination (`lab/code/imported/<slug>/<name>`) already holds
+      different content — registered as a blocker, not overwritten.
+    - conservative_import: everything else — moved wholesale into
+      `lab/code/imported/<slug>/<name>`.
+    """
+    if protected_path(name):
+        return {
+            "path": name,
+            "kind": kind,
+            "category": "protected",
+            "target_path": None,
+            "blocker": True,
+            "reason": (
+                f"matches a forbidden/protected path (lab/data, lab/runs, lab/models, "
+                f"lab/infra/private, checkpoints, wandb, .env, ...): '{name}' is never moved "
+                "or edited by adoption; registered as a blocker"
+            ),
+        }
+    if name in CONTROL_ITEMS:
+        template_item = TEMPLATE_ROOT / name
+        if kind == "dir":
+            reason = (
+                "template-managed directory: scaffold merges/copies its contents in place "
+                "file-by-file; the directory itself is never moved as a whole"
+            )
+            hash_note = "not-applicable (directory)"
+        else:
+            same = hash_matches_template(target / name, template_item)
+            if same is True:
+                hash_note = "matches template"
+                reason = "matches the template's canonical content for this control item; nothing to reconcile"
+            elif same is False:
+                hash_note = "differs from template"
+                reason = (
+                    "differs from the template's canonical content for this control item; "
+                    "scaffold preserves the original under human/imported/adoption-conflicts/ "
+                    "and installs the template's version at this path — left in place, "
+                    "never moved into lab/code/imported"
+                )
+            else:
+                hash_note = "not comparable"
+                reason = "template control item; left in place by policy (no comparable template file)"
+        return {
+            "path": name,
+            "kind": kind,
+            "category": "template_control_item",
+            "target_path": name,
+            "blocker": False,
+            "reason": reason,
+            "hash_note": hash_note,
+        }
+    dst_rel = f"{import_root_rel}/{name}"
+    dst = target / dst_rel
+    if dst.exists():
+        return {
+            "path": name,
+            "kind": kind,
+            "category": "conflict",
+            "target_path": dst_rel,
+            "blocker": True,
+            "reason": (
+                f"intended import destination already holds content: '{dst_rel}'; "
+                "registered as a blocker, not overwritten"
+            ),
+        }
+    return {
+        "path": name,
+        "kind": kind,
+        "category": "conservative_import",
+        "target_path": dst_rel,
+        "blocker": False,
+        "reason": "not a template control item and not protected; conservatively imported wholesale",
+    }
+
+
+def classify_root_entries(target: Path, slug: str) -> list[dict[str, Any]]:
+    import_root_rel = f"lab/code/imported/{slug}"
+    classified: list[dict[str, Any]] = []
+    for entry in sorted(target.iterdir(), key=lambda p: p.name):
+        if entry.name == ".git":
+            continue
+        kind = "dir" if entry.is_dir() else "file" if entry.is_file() else "other"
+        classified.append(classify_entry(target, entry.name, kind, import_root_rel))
+    return classified
+
+
 def project_slug(target: Path, explicit: str | None) -> str:
     base = explicit or target.name
     slug = re.sub(r"[^A-Za-z0-9._-]+", "-", base.strip()).strip("-._")
@@ -261,22 +403,32 @@ def git_ls_files(target: Path) -> list[str]:
     return [p.decode("utf-8", errors="replace") for p in proc.stdout.split(b"\0") if p]
 
 
+def format_classification_line(entry: dict[str, Any]) -> str:
+    target_disp = entry["target_path"] or "-"
+    blocker_disp = "BLOCKER" if entry["blocker"] else "-"
+    return (
+        f"  - {entry['path']} ({entry['kind']}) -> category={entry['category']} "
+        f"target={target_disp} blocker={blocker_disp} reason={entry['reason']}"
+    )
+
+
 def discover(args: argparse.Namespace) -> dict[str, Any]:
     target = args.target.resolve()
     require_git_repo(target)
     slug = project_slug(target, args.project_name)
     root_entries = list_root_entries(target)
-    protected_roots = [e["path"] for e in root_entries if e["protected"]]
-    root_pollution = [
-        e["path"]
-        for e in root_entries
-        if not e["allowed_root"] and not e["protected"] and not e["template_control_item"]
-    ]
-    conflicts = [
-        e["path"]
-        for e in root_entries
-        if e["template_control_item"] and (TEMPLATE_ROOT / e["path"]).exists()
-    ]
+    # B1: per-entry semantic classification (built-in conservative four
+    # buckets — template_control_item / conservative_import / protected /
+    # conflict; no external rule file/CLI override, see 开放问题 4).
+    classification = classify_root_entries(target, slug)
+    protected_roots = [e["path"] for e in classification if e["category"] == "protected"]
+    conservative_import_roots = [e["path"] for e in classification if e["category"] == "conservative_import"]
+    template_control_item_roots = [e["path"] for e in classification if e["category"] == "template_control_item"]
+    conflicts = [e["path"] for e in classification if e["category"] == "conflict"]
+    # Legacy/backwards-compatible summary field: everything that is a
+    # candidate to leave the root (conservative_import + conflict), kept
+    # under its historical name for any external reader of this field.
+    root_pollution = conservative_import_roots + conflicts
     plan = {
         "schema": "template-adoption-plan-v1",
         "created_at": now_iso(),
@@ -288,18 +440,28 @@ def discover(args: argparse.Namespace) -> dict[str, Any]:
         "report_path": REPORT_PATH.as_posix(),
         "test_command": detect_test_command(target, args.test_command),
         "root_entries": root_entries,
+        "classification": classification,
         "protected_roots": protected_roots,
         "root_pollution": root_pollution,
         "template_conflicts": conflicts,
+        "conservative_import_roots": conservative_import_roots,
+        "template_control_item_roots": template_control_item_roots,
         "import_root": f"lab/code/imported/{slug}",
         "normalize_blockers": [
-            f"protected root path requires manual policy or future protected-move support: {p}"
-            for p in protected_roots
+            f"{e['category']}: {e['path']} — {e['reason']}" for e in classification if e["blocker"]
         ],
     }
     write_json(state_path(target, PLAN_FILE), plan, args.dry_run)
     append_log(target, "discover", "ok", {"root_entries": len(root_entries)}, args.dry_run)
-    print(f"[discover] root_entries={len(root_entries)} conflicts={len(conflicts)}")
+    print("[discover] classification plan (target position + reason + blocker per root entry):")
+    for entry in classification:
+        print(format_classification_line(entry))
+    print(
+        f"[discover] root_entries={len(root_entries)} "
+        f"template_control_item={len(template_control_item_roots)} "
+        f"conservative_import={len(conservative_import_roots)} "
+        f"protected={len(protected_roots)} conflict={len(conflicts)}"
+    )
     return plan
 
 
@@ -424,43 +586,52 @@ def path_hash(path: Path) -> str | None:
 
 
 def normalize(args: argparse.Namespace) -> dict[str, Any]:
+    """B4: normalize consumes the discover-time classification plan
+    (`plan["classification"]`, plan B1) instead of a hardcoded binary
+    judgment. `template_control_item` entries are never moved (scaffold
+    already reconciles them in place); `conservative_import` entries are
+    moved wholesale into `plan["import_root"]`; `protected`/`conflict`
+    entries stay put and are registered as blockers — the pipeline still
+    stops here unless `--allow-blocked-normalize` is passed (unchanged
+    conservative behavior)."""
     target = args.target.resolve()
     require_git_repo(target)
     plan = read_json(state_path(target, PLAN_FILE))
-    baseline_data = read_json(state_path(target, BASELINE_FILE))
-    baseline_root = {e["path"]: e for e in baseline_data["root_entries"]}
-    file_hashes = {
-        row["path"]: row.get("sha256")
-        for row in baseline_data["tracked_files"]
-        if row.get("sha256")
-    }
-    import_root = target / plan["import_root"]
+    classification = plan.get("classification")
+    if classification is None:
+        # Backward compatibility: a plan.json written before B1 has no
+        # per-entry classification — recompute it now with the same
+        # conservative rules rather than silently doing nothing.
+        classification = classify_root_entries(target, plan["project_slug"])
     moved: list[dict[str, str]] = []
     blockers: list[str] = []
-    for name, entry in sorted(baseline_root.items()):
+    for entry in sorted(classification, key=lambda e: e["path"]):
+        name = entry["path"]
         if name == ".git":
             continue
         src = target / name
         if not src.exists():
+            # Entry no longer present between discover and normalize
+            # (e.g. already moved by a prior partial run) — nothing to do.
             continue
-        if entry.get("protected") or protected_path(name):
-            blockers.append(name)
+        if entry["blocker"]:
+            blockers.append(f"{entry['category']}: {name} — {entry['reason']}")
             continue
-        if name in CONTROL_ITEMS:
-            current_hash = path_hash(src)
-            original_hash = file_hashes.get(name)
-            if original_hash is None or current_hash != original_hash:
-                continue
-        dst = import_root / name
+        if entry["category"] == "template_control_item":
+            continue  # stays in place by definition, never moved
+        dst = target / entry["target_path"]
         if dst.exists():
-            blockers.append(f"destination exists: {dst.relative_to(target).as_posix()}")
+            blockers.append(
+                f"conflict: {name} — destination appeared after discover: "
+                f"{dst.relative_to(target).as_posix()}"
+            )
             continue
         if args.dry_run:
             print(f"DRY-RUN move {src} -> {dst}")
         else:
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(src), str(dst))
-        moved.append({"from": name, "to": dst.relative_to(target).as_posix()})
+        moved.append({"from": name, "to": entry["target_path"]})
     status = "blocked" if blockers else "ok"
     append_log(target, "normalize", status, {"moved": moved, "blockers": blockers}, args.dry_run)
     print(f"[normalize] moved={len(moved)} blockers={len(blockers)}")
@@ -516,6 +687,63 @@ def integrity_result(target: Path) -> dict[str, Any]:
     }
 
 
+def inspect_hooks_path(target: Path) -> dict[str, Any]:
+    """B6: adoption only *inspects* the target repo's current
+    `core.hooksPath` — it never sets it on the human's behalf (setting it
+    is bootstrap's job for freshly-derived repos; an adopted repo may
+    already have its own pre-existing hooksPath convention that adoption
+    must not silently override)."""
+    result = run(["git", "config", "--get", "core.hooksPath"], target)
+    value = result["stdout"].strip()
+    if result["returncode"] != 0 or not value:
+        status = "unset"
+    elif value == ".githooks":
+        status = "set"
+    else:
+        status = "different"
+    return {"status": status, "value": value or None}
+
+
+def run_sync_codex_check(target: Path) -> dict[str, Any]:
+    """Read-only diagnostic: `sync-codex-adapters.py --check` inside the
+    target repo (adoption never writes/regenerates adapters on the
+    target's behalf; it only reports whether they're currently in sync)."""
+    script = target / "scripts" / "sync-codex-adapters.py"
+    if not script.exists():
+        return {"status": "missing", "path": "scripts/sync-codex-adapters.py"}
+    result = run([sys.executable, str(script), "--check"], target, timeout=60)
+    return {
+        "status": "ok" if result["returncode"] == 0 else "failed",
+        "returncode": result["returncode"],
+        "stdout_tail": result["stdout"][-2000:],
+    }
+
+
+def agent_surface_report(target: Path, governance: dict[str, Any] | None) -> dict[str, Any]:
+    """B6/D2c: adoption's Claude/Codex postflight checklist, built on the
+    same shared `_agent_surface.agent_surface_checklist()` bootstrap uses
+    (plan A4) so the two entry points do not drift. `governance` is
+    `prove()`'s own `validate-governance.py --strict` run inside the
+    target, which already subsumes `check-agent-harness.py --strict`
+    (harness check #5/#6) — reused here as the ground-truth signal instead
+    of re-running it a second time."""
+    hooks_state = inspect_hooks_path(target)
+    hooks_item = {
+        "id": "core-hooks-path",
+        "status": hooks_state["status"],
+        "note": (
+            "git config core.hooksPath .githooks 是 Claude/Codex 两侧共用的 pre-commit 前提；"
+            "adoption 只读取目标 repo 当前状态、不代为设置（是否覆盖已有 hooksPath 配置由 human 决定）；"
+            f"当前检测值: {hooks_state['value']!r}。"
+        ),
+    }
+    sync_codex_result = run_sync_codex_check(target)
+    harness_result = {
+        "status": "not-run" if governance is None else ("ok" if governance["returncode"] == 0 else "failed"),
+    }
+    return AGENT_SURFACE.agent_surface_checklist(target, hooks_item, sync_codex_result, harness_result)
+
+
 def prove(args: argparse.Namespace) -> dict[str, Any]:
     target = args.target.resolve()
     require_git_repo(target)
@@ -530,6 +758,7 @@ def prove(args: argparse.Namespace) -> dict[str, Any]:
         if not cwd.exists():
             cwd = target
         original_test = run(plan["test_command"], cwd, shell=True, timeout=args.test_timeout)
+    agent_surface = agent_surface_report(target, governance)
     report = {
         "schema": "template-adoption-proof-v1",
         "created_at": now_iso(),
@@ -537,6 +766,7 @@ def prove(args: argparse.Namespace) -> dict[str, Any]:
         "integrity": integrity,
         "governance": governance,
         "original_test": original_test,
+        "agent_surface": agent_surface,
     }
     if not args.dry_run:
         write_report(target, plan, report)
@@ -604,6 +834,18 @@ def write_report(target: Path, plan: dict[str, Any], proof: dict[str, Any]) -> N
         lines.append("")
     else:
         lines.extend(["Remaining root pollution: `0`", ""])
+    surface = proof.get("agent_surface")
+    if surface:
+        lines.extend(["## Claude/Codex loading checklist", ""])
+        lines.append(f"- Claude: `{json.dumps(surface['claude'], sort_keys=True)}`")
+        lines.append(f"- Codex: `{json.dumps(surface['codex'], sort_keys=True)}`")
+        lines.append(f"- ground_truth: `{json.dumps(surface['ground_truth'], sort_keys=True, ensure_ascii=False)}`")
+        lines.append("")
+        lines.append("Human out-of-band prerequisites (not auto-verifiable/auto-completable):")
+        lines.append("")
+        for item in surface["human_out_of_band"]:
+            lines.append(f"- `{item['id']}` status=`{item['status']}` — {item['note']}")
+        lines.append("")
     path = target / REPORT_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines), encoding="utf-8")
