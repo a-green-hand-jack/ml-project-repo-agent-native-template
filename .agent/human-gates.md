@@ -26,17 +26,27 @@
 的单一真源，三层门禁同步消费：
 
 - 地板：共享 `pre_tool_guard.py` hook（经 `lab/infra/launch/launch_gate.py`）拦截命中前缀
-  的命令；human 单次放行用 `CLAUDE_ALLOW_LAUNCH=1` / `CODEX_ALLOW_LAUNCH=1`（与 push-main
-  同构，即使 bypass/自主窗口下仍生效）。
-- permission 层：`.claude/settings.json` 的 `ask` 与 `.codex/rules/default.rules` 的
-  `prompt`，与 registry 手工双写、同 commit 对齐。
+  的命令，匹配 wrapper-robust（`env python -u …`、`nohup sbatch` 等包装绕不过；即使
+  bypass/自主窗口下仍生效）。env 放行 `CLAUDE_ALLOW_LAUNCH=1` / `CODEX_ALLOW_LAUNCH=1`
+  与 push-main 的 `*_ALLOW_PUSH_MAIN` 同构，且要**诚实界定**：它是 advisory 级——作用于
+  所加的那条命令，export 到进程环境则整个 session 持续生效，agent 技术上可自行设置，
+  所以它不构成 human 签名；真正不可绕的确认是下面的 permission 层。
+- permission 层（真正的 gate）：`.claude/settings.json` 的 `ask` 与
+  `.codex/rules/default.rules` 的 `prompt`，与 registry 手工双写、同 commit 对齐。静态
+  模式覆盖 canonical 直写形态 + 有限 wrapper 变体；覆盖不到的包装形态由 hook 地板兜。
 - 新增任何 launch 入口（含薄 wrapper）必须同 commit 登记进 registry 并补两侧规则，
   否则等于绕过门禁。
 
 resume/recovery 的批准是**一次性、针对具体提案**的：human 在 ledger 对应 alert 条目里落
 `approved_by` / `approved_at` / `approved_action`（与 `proposal.command` 逐字一致）后，
 `experiment-orchestrator` 才可经 `python lab/infra/launch/expctl.py apply-recovery` 执行
-该条动作（当前仅限 fake/local job）；批准不自动延伸到其他提案或下一个上下文。
+该条动作（当前仅限 fake/local job：脚本 resolve 后必须等于 repo 内 canonical
+`fake_job.py`，且命令 `--run-id` 与 alert 所属 run 精确一致）；批准不自动延伸到其他提案
+或下一个上下文。信任模型要诚实：ledger 里的三字段批准记录是**可审计**、不是**防伪造**
+——repo 内任何进程都能写这份文件。防线是组合的：`apply-recovery` 只认 canonical ledger
+路径（临时目录测试 ledger 显式标 TEST MODE）、ledger 变更走 git commit（可追溯归因、
+validator 校验）、执行入口本身被 permission 层 ask/prompt 门禁。三字段 ≠ human 签名，
+它是审计线索。
 
 ## 门禁形态
 

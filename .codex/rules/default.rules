@@ -73,6 +73,51 @@ prefix_rule(
     justification = "Registered launch-registry entry: executes a human-approved recovery action; approval record is verified but the invocation itself stays gated.",
 )
 
+# Wrapper 变体加宽（issue #16 Codex 初审 BLOCKER-1）：静态前缀只能覆盖有限包装形态
+# （env/nohup/nice/setsid/stdbuf 直接包一层、python -u）；带参数的 wrapper（timeout 60、
+# nice -n 10）与更深组合由共享 pre_tool_guard 地板（launch_gate.py 的 wrapper 剥离）兜底。
+prefix_rule(
+    pattern = [["env", "nohup", "nice", "setsid", "stdbuf"], ["sbatch", "scancel", "srun", "runai"]],
+    decision = "prompt",
+    justification = "Wrapped scheduler commands are still compute side effects (launch registry, issue #16); deeper wrapper variants are caught by the shared pre_tool_guard floor.",
+)
+
+prefix_rule(
+    pattern = ["env", ["python", "python3"], "lab/infra/launch/fake_job.py", ["launch", "kill", "restart"]],
+    decision = "prompt",
+    justification = "env-wrapped launch-registry entry: still a human gate.",
+)
+
+prefix_rule(
+    pattern = [["python", "python3"], "-u", "lab/infra/launch/fake_job.py", ["launch", "kill", "restart"]],
+    decision = "prompt",
+    justification = "python -u variant of a launch-registry entry: still a human gate.",
+)
+
+prefix_rule(
+    pattern = ["env", ["python", "python3"], "lab/infra/launch/expctl.py", "apply-recovery"],
+    decision = "prompt",
+    justification = "env-wrapped launch-registry entry: still a human gate.",
+)
+
+prefix_rule(
+    pattern = [["python", "python3"], "-u", "lab/infra/launch/expctl.py", "apply-recovery"],
+    decision = "prompt",
+    justification = "python -u variant of a launch-registry entry: still a human gate.",
+)
+
+prefix_rule(
+    pattern = ["env", ["python", "python3"], "-u", "lab/infra/launch/fake_job.py", ["launch", "kill", "restart"]],
+    decision = "prompt",
+    justification = "env + python -u variant of a launch-registry entry: still a human gate.",
+)
+
+prefix_rule(
+    pattern = ["env", ["python", "python3"], "-u", "lab/infra/launch/expctl.py", "apply-recovery"],
+    decision = "prompt",
+    justification = "env + python -u variant of a launch-registry entry: still a human gate.",
+)
+
 prefix_rule(
     pattern = ["gh", "pr", ["create", "merge"]],
     decision = "prompt",

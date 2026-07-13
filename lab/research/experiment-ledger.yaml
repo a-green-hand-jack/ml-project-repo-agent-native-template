@@ -46,7 +46,8 @@ experiments:
     # alerts 条目结构（由 expctl.py watch 生成、orchestrator 并入；human 批准后三个
     # approved_* 字段必须同时落，且 approved_action 与 proposal.command 逐字一致）：
     #   - id: alert-<ts>-<type>
-    #     type: metric-stall | crash | OOM | NaN | missing-checkpoint | config-mismatch | failure
+    #     type: metric-stall | crash | OOM | NaN | missing-checkpoint | stale-checkpoint
+    #           | config-mismatch | failure | <card failure_signals 自定义项>
     #     at: "<时间戳>"
     #     evidence: "<有界证据摘要，不贴长日志>"
     #     proposal:

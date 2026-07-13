@@ -12,9 +12,14 @@
                   resume/recovery 提案草案。只读，不写任何文件。
 - apply-recovery  半自动执行 ledger 里**已获 human 批准**的一条 resume/recovery 提案：
                   要求 approved_by/approved_at/approved_action 齐备且 approved_action 与
-                  proposal.command 逐字一致，且命令仅限 local-fake adapter（fake_job.py）
-                  ——真实后端命令一律拒绝。批准缺失/不匹配时拒绝执行并报错，不静默跳过。
-                  本子命令是 launch registry 登记的 human-gate 入口。
+                  proposal.command 逐字一致；命令脚本 resolve 后必须等于 repo 内 canonical
+                  fake_job.py、动作限 launch/kill/restart、--run-id 与 alert 所属 run 精确
+                  一致（run-a 的批准不能执行 run-b）——真实后端命令一律拒绝。ledger 只认
+                  canonical 路径（临时目录下的测试 ledger 例外，显式标记 TEST MODE）。
+                  批准缺失/不匹配时拒绝执行并报错，不静默跳过。本子命令是 launch registry
+                  登记的 human-gate 入口。信任模型（诚实界定）：文件级批准记录是可审计、
+                  不是防伪造——防线 = ledger 变更走 git commit（可追溯）+ 本命令的调用
+                  本身被 permission 层 ask/prompt 门禁（见 .agent/human-gates.md）。
 
 YAML 解析复用 scripts/validate-experiment-state.py 的 load_yaml（PyYAML 优先 + 受限
 解析器回退），经 importlib 加载，避免两份解析逻辑漂移（同 check-adoption-integrity 先例）。
@@ -31,6 +36,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -41,10 +47,16 @@ LEDGER = REPO_ROOT / "lab" / "research" / "experiment-ledger.yaml"
 
 DEFAULT_LOG_TAIL = 200
 DEFAULT_HEARTBEAT_TIMEOUT = 120.0
+# 内置日志 failure patterns（experiment card 的 failure_signals 缺失时的回退）。
 FAILURE_PATTERNS = (
     ("OOM", re.compile(r"\b(OOM|out of memory)\b", re.IGNORECASE)),
     ("NaN", re.compile(r"\bnan\b", re.IGNORECASE)),
     ("crash", re.compile(r"Traceback \(most recent call last\)|Segmentation fault")),
+)
+# 这些 signal 名对应 watch 的结构化检查（心跳/checkpoint/config/终态），不是日志 pattern。
+STRUCTURAL_SIGNALS = frozenset(
+    {"metric-stall", "metric stall", "missing-checkpoint", "missing checkpoint",
+     "stale-checkpoint", "config-mismatch", "failure", "crash"}
 )
 
 
@@ -152,17 +164,63 @@ def cmd_plan(args: argparse.Namespace) -> int:
 # -------------------------------------------------------------------- watch ----
 
 
-def _tail(path: Path, n: int) -> list[str]:
-    """有界读取：只保留最后 n 行，不把整个文件读进输出。"""
-    if not path.exists():
-        return []
-    from collections import deque
+def _tail(path: Path, n: int, max_bytes: int = 1 << 20) -> list[str]:
+    """有界读取最后 n 行：从文件尾部 seek 回读固定字节窗口，I/O 与文件总大小无关。
 
-    dq: deque[str] = deque(maxlen=n)
-    with path.open("r", encoding="utf-8", errors="replace") as f:
-        for line in f:
-            dq.append(line.rstrip("\n"))
-    return list(dq)
+    逐块（8 KiB）向前回读，凑够 n 行或触到 max_bytes 上限即停——日志再大也只读
+    有界字节数（此前实现从头遍历全文件，I/O 随日志无限增长）。
+    """
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return []
+    if size == 0 or n <= 0:
+        return []
+    block = 8192
+    buf = b""
+    with path.open("rb") as f:
+        pos = size
+        while pos > 0 and buf.count(b"\n") <= n and len(buf) < max_bytes:
+            step = min(block, pos)
+            pos -= step
+            f.seek(pos)
+            buf = f.read(step) + buf
+    # 未读到文件头时窗口最前一行可能被截断；取最后 n 行即天然排除该残行。
+    return buf.decode("utf-8", errors="replace").splitlines()[-n:]
+
+
+def _load_failure_signals(ledger_path: Path, run_id: str) -> tuple[list[tuple[str, re.Pattern]], str]:
+    """合并 experiment card/ledger 的 failure_signals 与内置日志 patterns。
+
+    返回 (patterns, source 说明)。card 里的自定义 signal（非内置名、非结构化检查名）
+    按 case-insensitive 正则编译（非法正则退化为字面量匹配）。ledger 缺失 / run 未登记 /
+    无 failure_signals 字段时回退内置三种（OOM/NaN/crash）并在 source 里注明。
+    """
+    patterns = list(FAILURE_PATTERNS)
+    builtin_names = {name for name, _ in FAILURE_PATTERNS}
+    fallback = f"builtin OOM/NaN/crash（{ledger_path} 无 run {run_id} 的 failure_signals，回退内置）"
+    try:
+        data = _load_yaml_file(ledger_path)
+    except Exception:  # noqa: BLE001  ledger 不可读：回退内置，watch 保持只读不报错
+        return patterns, f"builtin OOM/NaN/crash（ledger 不可读：{ledger_path}）"
+    exps = {e.get("id"): e for e in (data or {}).get("experiments") or [] if isinstance(e, dict)}
+    signals = (exps.get(run_id) or {}).get("failure_signals")
+    if not isinstance(signals, list) or not signals:
+        return patterns, fallback
+    custom = []
+    for sig in signals:
+        s = str(sig).strip()
+        if not s or s in builtin_names or s in STRUCTURAL_SIGNALS:
+            continue  # 内置已含 / 结构化检查已覆盖
+        try:
+            pat = re.compile(s, re.IGNORECASE)
+        except re.error:
+            pat = re.compile(re.escape(s), re.IGNORECASE)
+        custom.append((s, pat))
+    patterns.extend(custom)
+    src = f"builtin + card failure_signals（{ledger_path}"
+    src += f"，自定义 {len(custom)} 条）" if custom else "，无额外日志 pattern）"
+    return patterns, src
 
 
 def _age_seconds(path: Path) -> float | None:
@@ -185,6 +243,8 @@ def cmd_watch(args: argparse.Namespace) -> int:
     status_f = workdir / "status.json"
     checks: list[tuple[str, bool, str]] = []
     alerts: list[dict] = []
+    ledger_path = Path(args.ledger) if args.ledger else LEDGER
+    failure_patterns, signal_source = _load_failure_signals(ledger_path, args.run_id)
 
     def alert(atype: str, evidence: str, action: str = "restart") -> None:
         cmd = (
@@ -245,8 +305,15 @@ def cmd_watch(args: argparse.Namespace) -> int:
                 alert("missing-checkpoint", "checkpoints/ 目录为空")
             else:
                 ck_age = _age_seconds(ckpts[0])
-                checks.append(("checkpoint", ck_age is not None and ck_age <= args.heartbeat_timeout,
+                ck_fresh = ck_age is not None and ck_age <= args.heartbeat_timeout
+                checks.append(("checkpoint", ck_fresh,
                                f"latest={ckpts[0].name} age={None if ck_age is None else round(ck_age, 1)}s"))
+                if not ck_fresh:
+                    alert(
+                        "stale-checkpoint",
+                        f"最新 checkpoint {ckpts[0].name} 停更超过 {args.heartbeat_timeout}s"
+                        f"（age={None if ck_age is None else round(ck_age, 1)}s）",
+                    )
 
         # config drift
         cfg_path, cfg_sha = status.get("config_path"), status.get("config_sha256")
@@ -264,10 +331,10 @@ def cmd_watch(args: argparse.Namespace) -> int:
                 if now_sha != cfg_sha:
                     alert("config-mismatch", f"config drift：{cfg_path} 内容与 launch 时 sha256 不一致", action="kill")
 
-        # failure signals（有界日志尾部扫描）
+        # failure signals（有界日志尾部扫描；pattern 集 = 内置 + card failure_signals）
         tail_lines = _tail(workdir / "job.log", args.log_tail)
         checks.append(("log-tail", True, f"scanned last {len(tail_lines)} lines (bound={args.log_tail})"))
-        for sig, pattern in FAILURE_PATTERNS:
+        for sig, pattern in failure_patterns:
             hits = [ln for ln in tail_lines if pattern.search(ln)]
             if hits:
                 alert(sig if sig != "crash" else "crash", f"日志尾部命中 {sig}：{hits[-1][:160]}",
@@ -283,6 +350,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
     print(f"  workdir: {workdir}")
     print(f"  state: {state}")
     print(f"  health: {health}")
+    print(f'  failure_signal_source: "{signal_source}"')
     print("  checks:")
     for name, ok, detail in checks:
         print(f"    - name: {name}")
@@ -319,24 +387,91 @@ def _is_placeholder(v) -> bool:
     return v is None or (isinstance(v, str) and (not v.strip() or v.strip().startswith("<")))
 
 
-def _local_only(command: str) -> bool:
-    """已批准命令必须仅限 local-fake adapter（fake_job.py 的 launch/kill/restart）。"""
+FAKE_JOB_CANONICAL = (_HERE / "fake_job.py").resolve()
+
+
+def _resolve_ledger(arg: str | None) -> tuple[Path | None, bool, str | None]:
+    """approval 只认 canonical ledger；--ledger 覆盖仅允许临时目录下的测试 ledger。
+
+    返回 (path, test_mode, reject_reason)。信任模型（诚实界定，见 .agent/human-gates.md）：
+    ledger 里的三字段批准记录是**可审计**不是**防伪造**——repo 内谁都能写文件；真正的
+    防线是 ledger 变更走 git commit（可追溯归因）+ apply-recovery 本身是 permission 层
+    gated 入口（ask/prompt）。锁死路径是为了让「批准记录」至少来自那份被 git 跟踪、
+    被 validator 校验的 canonical 文件，而不是任意自造输入（如 /dev/stdin）。
+    """
+    if not arg:
+        return LEDGER, False, None
+    p = Path(arg)
+    try:
+        rp = p.resolve()
+    except OSError as e:
+        return None, False, f"--ledger 无法解析：{e}"
+    if rp == LEDGER.resolve():
+        return rp, False, None
+    tmp_root = Path(tempfile.gettempdir()).resolve()
+    if tmp_root == rp or tmp_root in rp.parents:
+        return rp, True, None  # 测试 ledger：允许但显式标记 TEST MODE
+    return None, False, (
+        f"--ledger 只接受 canonical 路径 {LEDGER}（或 {tmp_root} 下的测试 ledger，"
+        "带 TEST MODE 标记）。批准记录必须来自 git 跟踪的 canonical ledger，"
+        "不接受任意文件/流（如 /dev/stdin）自造批准。"
+    )
+
+
+def _approved_command_reason(command: str, run_id: str) -> str | None:
+    """核对已批准命令确实是「同一个 fake job」的 local-fake 动作。
+
+    - 脚本路径 resolve 后必须**等于** repo 内 canonical fake_job.py 的绝对路径
+      （不是字符串后缀匹配——/tmp/evil/lab/infra/launch/fake_job.py 会被拒）。
+    - 命令的 --run-id 必须与 alert 所属 run 精确一致（run-a 的批准不能执行 run-b）。
+    返回 None = 通过；str = 拒绝理由。
+    """
     try:
         tokens = shlex.split(command)
     except ValueError:
-        return False
+        return "命令无法解析（引号不闭合？）"
     if len(tokens) < 3:
-        return False
+        return "命令过短，不是合法的 fake_job.py 调用"
     if os.path.basename(tokens[0]) not in ("python", "python3"):
-        return False
-    script = tokens[1]
-    if not script.replace("\\", "/").endswith("lab/infra/launch/fake_job.py"):
-        return False
-    return tokens[2] in ("launch", "kill", "restart")
+        return f"入口 {tokens[0]} 不是 python/python3 直接调用"
+    script = Path(tokens[1])
+    if not script.is_absolute():
+        script = REPO_ROOT / script  # 执行时 cwd=REPO_ROOT，与执行语义一致
+    try:
+        script = script.resolve()
+    except OSError as e:
+        return f"脚本路径无法解析：{e}"
+    if script != FAKE_JOB_CANONICAL:
+        return (
+            f"脚本 {tokens[1]} resolve 后为 {script}，不是 repo 内 canonical "
+            f"fake_job.py（{FAKE_JOB_CANONICAL}）"
+        )
+    if tokens[2] not in ("launch", "kill", "restart"):
+        return f"动作 {tokens[2]} 不在允许集 launch/kill/restart"
+    cmd_run_id = None
+    for i, t in enumerate(tokens):
+        if t == "--run-id" and i + 1 < len(tokens):
+            cmd_run_id = tokens[i + 1]
+        elif t.startswith("--run-id="):
+            cmd_run_id = t.split("=", 1)[1]
+    if cmd_run_id is None:
+        return "命令缺 --run-id，无法核对是否针对同一 run"
+    if cmd_run_id != run_id:
+        return (
+            f"命令的 --run-id {cmd_run_id} 与 alert 所属 run {run_id} 不一致"
+            "（run-a 的批准不能执行 run-b）"
+        )
+    return None
 
 
 def cmd_apply_recovery(args: argparse.Namespace) -> int:
-    ledger_path = Path(args.ledger) if args.ledger else LEDGER
+    ledger_path, test_mode, reject = _resolve_ledger(args.ledger)
+    if reject:
+        print(f"[expctl] 拒绝：{reject}", file=sys.stderr)
+        return 2
+    if test_mode:
+        print(f"[expctl] TEST MODE：使用临时目录下的非 canonical ledger（{ledger_path}）——"
+              "仅供测试，正式批准记录必须落在 lab/research/experiment-ledger.yaml。")
     try:
         data = _load_yaml_file(ledger_path)
     except Exception as e:  # noqa: BLE001
@@ -374,10 +509,12 @@ def cmd_apply_recovery(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
-    if not _local_only(command):
+    cmd_reason = _approved_command_reason(command, args.run_id)
+    if cmd_reason:
         print(
-            "[expctl] 拒绝执行：已批准命令超出 local-fake 范围（本 issue 的半自动执行仅限 "
-            "fake/local job，见 plan 非目标与 .agent/action-boundary.md）。",
+            f"[expctl] 拒绝执行：已批准命令超出 local-fake 范围或指向不同 run：{cmd_reason}"
+            "（本 issue 的半自动执行仅限 repo 内 fake_job.py 对同一 run 的动作，"
+            "见 plan 非目标与 .agent/action-boundary.md）。",
             file=sys.stderr,
         )
         return 2
@@ -439,6 +576,26 @@ def _self_test() -> int:  # noqa: PLR0915
         r = run(["watch", "--run-id", "t-w", "--workdir", str(w), "--heartbeat-timeout", "5"])
         expect(r.returncode == 0 and "health: ok" in r.stdout, f"健康 job 应 ok：\n{r.stdout}")
 
+        # 3b. 自定义 failure signal（card/ledger 的 failure_signals 并入日志扫描）
+        with (w / "job.log").open("a", encoding="utf-8") as f:
+            f.write("CUDA error: device-side assert triggered\n")
+        sig_ledger = root / "signals-ledger.yaml"
+        sig_ledger.write_text(
+            "experiments:\n"
+            "  - id: t-w\n"
+            "    status: running\n"
+            '    failure_signals: [OOM, NaN, "CUDA error"]\n',
+            encoding="utf-8",
+        )
+        r = run(["watch", "--run-id", "t-w", "--workdir", str(w), "--heartbeat-timeout", "5",
+                 "--ledger", str(sig_ledger)])
+        expect(r.returncode == 3 and "CUDA error" in r.stdout,
+               f"自定义 failure signal 应命中并出 alert：\n{r.stdout}")
+        expect("card failure_signals" in r.stdout, "watch 应注明 signal 来源为 card")
+        # 3c. ledger 无该 run 的 failure_signals → 回退内置并注明
+        r = run(["watch", "--run-id", "t-w", "--workdir", str(w), "--heartbeat-timeout", "5"])
+        expect("回退内置" in r.stdout or "builtin" in r.stdout, "缺 card signals 应注明回退内置")
+
         w2 = root / "stalled"
         subprocess.run(  # noqa: S603
             [sys.executable, fake_job, "launch", "--run-id", "t-s", "--workdir", str(w2),
@@ -448,6 +605,7 @@ def _self_test() -> int:  # noqa: PLR0915
         r = run(["watch", "--run-id", "t-s", "--workdir", str(w2), "--heartbeat-timeout", "2"])
         expect(r.returncode == 3, f"stall 应 exit 3：exit={r.returncode}\n{r.stdout}")
         expect("metric-stall" in r.stdout and "proposal:" in r.stdout, "stall 应产出 alert+提案")
+        expect("stale-checkpoint" in r.stdout, "checkpoint 停更应产出 stale-checkpoint alert（而非只记 ok:false）")
         expect(f"--run-id t-s" in r.stdout, "提案命令应指向同一 run")
 
         # 4. watch bounded：日志行数上限生效（scanned 行数 ≤ bound）
@@ -457,11 +615,12 @@ def _self_test() -> int:  # noqa: PLR0915
         expect(m is not None and int(m.group(1)) <= 2, f"log tail 应有界：\n{r2.stdout}")
 
         # 5. apply-recovery：批准缺失 → 拒绝(2)；批 A 执 B → 拒绝(2)；非 local → 拒绝(2)；
+        #    伪 ledger 路径 → 拒绝(2)；run-id 不匹配 → 拒绝(2)；假路径 fake_job → 拒绝(2)；
         #    齐备且匹配 → 执行成功(0) 且 job 恢复 running
         cmd_restart = f"python lab/infra/launch/fake_job.py restart --run-id t-s --workdir {w2}"
         ledger = root / "ledger.yaml"
 
-        def write_ledger(alert_extra: str) -> None:
+        def write_ledger(alert_extra: str, command: str = cmd_restart) -> None:
             ledger.write_text(
                 "experiments:\n"
                 "  - id: t-s\n"
@@ -472,11 +631,15 @@ def _self_test() -> int:  # noqa: PLR0915
                 '        at: "2026-07-13"\n'
                 "        proposal:\n"
                 "          action: restart\n"
-                f'          command: "{cmd_restart}"\n'
+                f'          command: "{command}"\n'
                 '          radius: "fake/local only"\n'
                 + alert_extra,
                 encoding="utf-8",
             )
+
+        def approved(command: str = cmd_restart) -> str:
+            return ('        approved_by: "h"\n        approved_at: "2026-07-13"\n'
+                    f'        approved_action: "{command}"\n')
 
         write_ledger("")  # 无批准
         r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s", "--alert-id", "alert-1"])
@@ -487,16 +650,32 @@ def _self_test() -> int:  # noqa: PLR0915
         r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s", "--alert-id", "alert-1"])
         expect(r.returncode == 2 and "不一致" in r.stderr, "批 A 执 B 应拒绝")
 
-        ledger.write_text(ledger.read_text(encoding="utf-8").replace(cmd_restart, "sbatch real.sh")
-                          .replace('approved_action: "some other command"', 'approved_action: "sbatch real.sh"'),
-                          encoding="utf-8")
+        cmd_sbatch = "sbatch real.sh"
+        write_ledger(approved(cmd_sbatch), command=cmd_sbatch)
         r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s", "--alert-id", "alert-1"])
         expect(r.returncode == 2 and "local-fake" in r.stderr, "真实后端命令应拒绝")
 
-        write_ledger(f'        approved_by: "h"\n        approved_at: "2026-07-13"\n'
-                     f'        approved_action: "{cmd_restart}"\n')
+        # 伪 ledger（BLOCKER-2）：canonical / 临时目录之外的 --ledger 一律拒绝
+        r = run(["apply-recovery", "--ledger", str(REPO_ROOT / "README.md"),
+                 "--run-id", "t-s", "--alert-id", "alert-1"])
+        expect(r.returncode == 2 and "canonical" in r.stderr, "非 canonical 且非临时目录的 ledger 应拒绝")
+
+        # run-id 不匹配（BLOCKER-3）：run-a 的批准不能执行 run-b
+        cmd_other = f"python lab/infra/launch/fake_job.py restart --run-id t-other --workdir {w2}"
+        write_ledger(approved(cmd_other), command=cmd_other)
+        r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s", "--alert-id", "alert-1"])
+        expect(r.returncode == 2 and "不能执行 run-b" in r.stderr, "批准命令指向其他 run 应拒绝")
+
+        # 假路径 fake_job（BLOCKER-3）：路径 resolve 必须等于 repo 内 canonical fake_job.py
+        cmd_evil = f"python /tmp/evil/lab/infra/launch/fake_job.py restart --run-id t-s --workdir {w2}"
+        write_ledger(approved(cmd_evil), command=cmd_evil)
+        r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s", "--alert-id", "alert-1"])
+        expect(r.returncode == 2 and "canonical" in r.stderr, "非 repo 内 fake_job.py 应拒绝")
+
+        write_ledger(approved())
         r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s", "--alert-id", "alert-1"])
         expect(r.returncode == 0, f"齐备批准应执行成功：{r.stderr}")
+        expect("TEST MODE" in r.stdout, "非 canonical 测试 ledger 应显式标记 TEST MODE")
         status = json.loads((w2 / "status.json").read_text(encoding="utf-8"))
         expect(status.get("state") == "running", "restart 后应回到 running")
 
@@ -539,11 +718,14 @@ def main(argv: list[str]) -> int:
     p.add_argument("--workdir", required=True)
     p.add_argument("--log-tail", type=int, default=DEFAULT_LOG_TAIL)
     p.add_argument("--heartbeat-timeout", type=float, default=DEFAULT_HEARTBEAT_TIMEOUT)
+    p.add_argument("--ledger", default=None,
+                   help="读取该 run 的 failure_signals（默认 canonical ledger；只读）")
 
     p = sub.add_parser("apply-recovery", help="执行 ledger 里一条已获 human 批准的提案（human gate 入口）")
     p.add_argument("--run-id", required=True)
     p.add_argument("--alert-id", required=True)
-    p.add_argument("--ledger", default=None)
+    p.add_argument("--ledger", default=None,
+                   help="仅接受 canonical ledger 路径；临时目录下的测试 ledger 会标记 TEST MODE")
     p.add_argument("--dry-run", action="store_true")
 
     args = parser.parse_args(argv)

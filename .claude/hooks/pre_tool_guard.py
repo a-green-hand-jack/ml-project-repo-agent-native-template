@@ -211,8 +211,9 @@ def _launch_gate_reason(raw_cmd: str) -> str | None:
     """launch registry 门禁（薄接线）：判定逻辑与单一真源在 lab/infra/launch/。
 
     launch/kill/restart 类命令（lab/infra/launch/registry.yaml 的 gated_prefixes）是
-    human gate；`CLAUDE_ALLOW_LAUNCH=1` / `CODEX_ALLOW_LAUNCH=1` 为单次放行（与
-    push-main 地板同构）。判定脚本缺失或异常时保守放行——本地板其余红线不受影响。
+    human gate；`CLAUDE_ALLOW_LAUNCH=1` / `CODEX_ALLOW_LAUNCH=1` 为 advisory 放行
+    （作用于所加命令/进程环境，与 push-main 地板同构；不可绕的确认在 permission 层
+    ask/prompt）。判定脚本缺失或异常时保守放行——本地板其余红线不受影响。
     """
     gate = REPO_ROOT / "lab" / "infra" / "launch" / "launch_gate.py"
     if not gate.is_file():

@@ -6,10 +6,15 @@
 #    不代替 human 按下启动键；后端 CLI 不存在时由 expctl.py 优雅降级 local-only。
 # 2. gated_prefixes：哪些命令前缀属于「launch/kill/restart 类计算副作用入口」。
 #    由 .claude/hooks/pre_tool_guard.py（Claude 与 Codex 共享）经
-#    lab/infra/launch/launch_gate.py 消费：未带 human 放行环境变量
-#    （CLAUDE_ALLOW_LAUNCH=1 / CODEX_ALLOW_LAUNCH=1，单次）时地板拒绝。
-#    permission 层（.claude/settings.json 的 ask + .codex/rules/default.rules
-#    的 prompt）与本清单同步手工维护（三处同 commit）。
+#    lab/infra/launch/launch_gate.py 消费：未获 env 放行（CLAUDE_ALLOW_LAUNCH=1 /
+#    CODEX_ALLOW_LAUNCH=1）时地板拒绝。匹配是 wrapper-robust 的：脚本类前缀按
+#    「归一化脚本路径 + 紧邻 action」任意位置匹配，可执行类前缀先剥常见 wrapper
+#    （env/nohup/nice/stdbuf/timeout/setsid 等）再匹配——env python -u 之类的包装
+#    绕不过地板。env 放行是 advisory 级（作用于所加命令/进程环境，非单次消费的
+#    human 签名）；不可绕的确认在 permission 层（.claude/settings.json 的 ask +
+#    .codex/rules/default.rules 的 prompt），与本清单同步手工维护（三处同 commit）。
+#    permission 层的静态模式只能覆盖 canonical 直写形态与有限 wrapper 变体；
+#    更深的 wrapper 组合由 hook 地板兜底。
 #
 # 维护规则：
 # - 新增任何 wrapper / launch 入口（哪怕只是薄包装脚本）必须同 commit 登记进
