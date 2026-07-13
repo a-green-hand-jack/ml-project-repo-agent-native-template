@@ -35,9 +35,10 @@ draft/in-review 天然通过，状态进阶才强制证据。PyYAML 可选：缺
 同时暴露 `pretooluse_reason(tool_name, tool_input, repo_root)` 给
 `.claude/hooks/pre_tool_guard.py` 做机械拦截（Claude/Codex 共用同一物理 hook）：
 在编辑动作阶段拦「状态跃迁到进阶态但完整性不成立」的写入。hook 侧解析失败原则上保守放行，
-两个例外**保守拦截**（宁可要求换工具，不能静默放行）：
+三个例外**保守拦截**（宁可要求换工具，不能静默放行）：
 - 删除/移走 `memory/doc-lifecycle.yaml`（apply_patch Delete/Move、Bash rm/mv 等）——治理面不可拆除；
 - apply_patch Update 触碰受管文档/注册表但 hunk 无法可靠重建 patch 后全文——提示改用 Edit 或分两步。
+- `cp` 参数含除 `$PWD`/`${PWD}` 外无法安全静态求值的活动 shell 展开——目的路径不可核验。
 human 显式绕过：`DOC_LIFECYCLE_SKIP=1`（validator 仍会事后校验）。
 
 用法：
@@ -1166,12 +1167,18 @@ _GIT_GLOBAL_FLAGS_WITH_VALUE = {
     "-C", "-c", "--config-env", "--exec-path", "--git-dir", "--work-tree",
     "--namespace", "--super-prefix", "--list-cmds", "--attr-source",
 }
-_SHELL_LITERAL_GLOB_MARKERS = {
+_SHELL_LITERAL_MARKERS = {
     "*": "__DL_LITERAL_STAR__",
     "?": "__DL_LITERAL_QMARK__",
     "[": "__DL_LITERAL_LBRACKET__",
     "]": "__DL_LITERAL_RBRACKET__",
+    "$": "__DL_LITERAL_DOLLAR__",
+    "`": "__DL_LITERAL_BACKTICK__",
+    "{": "__DL_LITERAL_LBRACE__",
+    "}": "__DL_LITERAL_RBRACE__",
+    "~": "__DL_LITERAL_TILDE__",
 }
+_SHELL_GLOB_CHARS = "*?["
 
 
 def _is_registry_path(
@@ -1411,7 +1418,7 @@ def _cd_target(args: list[str], cwd: Path) -> Path | None:
 
 
 def _prepare_shell_source(cmd: str) -> str:
-    """标记 shell-literal glob 字符，并把引号外换行变成 `;` 命令边界。"""
+    """标记 shell-literal 特殊字符，并把引号外换行变成 `;` 命令边界。"""
     out: list[str] = []
     quote: str | None = None
     i = 0
@@ -1421,8 +1428,8 @@ def _prepare_shell_source(cmd: str) -> str:
             if cmd[i + 1] == "\n":
                 i += 2
                 continue
-            if cmd[i + 1] in _SHELL_LITERAL_GLOB_MARKERS:
-                out.append(_SHELL_LITERAL_GLOB_MARKERS[cmd[i + 1]])
+            if cmd[i + 1] in _SHELL_LITERAL_MARKERS:
+                out.append(_SHELL_LITERAL_MARKERS[cmd[i + 1]])
                 i += 2
                 continue
             out.extend((char, cmd[i + 1]))
@@ -1431,8 +1438,10 @@ def _prepare_shell_source(cmd: str) -> str:
         if char in "'\"":
             quote = None if quote == char else (char if quote is None else quote)
             out.append(char)
-        elif quote is not None and char in _SHELL_LITERAL_GLOB_MARKERS:
-            out.append(_SHELL_LITERAL_GLOB_MARKERS[char])
+        elif quote is not None and char in _SHELL_GLOB_CHARS + "{}~":
+            out.append(_SHELL_LITERAL_MARKERS[char])
+        elif quote == "'" and char in "$`":
+            out.append(_SHELL_LITERAL_MARKERS[char])
         else:
             out.append(";" if char == "\n" and quote is None else char)
         i += 1
@@ -1441,13 +1450,13 @@ def _prepare_shell_source(cmd: str) -> str:
 
 def _restore_shell_literals(raw: str) -> str:
     restored = raw
-    for literal, marker in _SHELL_LITERAL_GLOB_MARKERS.items():
+    for literal, marker in _SHELL_LITERAL_MARKERS.items():
         restored = restored.replace(marker, literal)
     return restored
 
 
 def _has_active_shell_glob(raw: str) -> bool:
-    return any(ch in raw for ch in "*?[")
+    return any(ch in raw for ch in _SHELL_GLOB_CHARS)
 
 
 def _shell_glob_matches(raw: str, cwd: Path, *, limit: int = 1024) -> tuple[list[str], bool]:
@@ -1577,32 +1586,64 @@ def _git_pathspec_covers_registry(
     return False
 
 
-def _cp_destination_paths(args: list[str], cwd: Path) -> list[str]:
-    """Return every path GNU cp can write for the supported invocation forms."""
+def _cp_static_word(raw: str, cwd: Path) -> tuple[str, bool]:
+    """Resolve deterministic `$PWD`; report other active shell expansion as unsafe."""
+    word = re.sub(
+        r"\$(?:\{PWD\}|PWD(?=/|$))",
+        os.fspath(cwd),
+        raw,
+    )
+    dynamic = (
+        "$" in word
+        or "`" in word
+        or _has_active_shell_glob(word)
+        or (word.startswith("~") and not word.startswith("__DL_LITERAL_TILDE__"))
+        or bool(re.search(r"\{[^{}]*(?:,|\.\.)[^{}]*\}", word))
+    )
+    return _restore_shell_literals(word), dynamic
+
+
+def _gnu_long_abbreviation(option: str, canonical: str, minimum: str) -> bool:
+    """Match an unambiguous GNU long-option prefix, excluding shorter ambiguous forms."""
+    return len(option) >= len(minimum) and canonical.startswith(option)
+
+
+def _cp_destination_paths(args: list[str], cwd: Path) -> tuple[list[str], bool]:
+    """Return GNU cp destinations and whether shell expansion made them unverifiable."""
+    static_args: list[str] = []
+    for raw in args:
+        word, dynamic = _cp_static_word(raw, cwd)
+        if dynamic:
+            return [], True
+        static_args.append(word)
+
     target_dir: str | None = None
     no_target_dir = False
     parents = False
     operands: list[str] = []
     options = True
     i = 0
-    while i < len(args):
-        arg = args[i]
+    while i < len(static_args):
+        arg = static_args[i]
         if options and arg == "--":
             options = False
             i += 1
             continue
         if options and arg.startswith("--"):
-            if arg == "--target-directory":
-                if i + 1 >= len(args):
-                    return []
-                target_dir = args[i + 1]
+            option, equals, value = arg.partition("=")
+            if _gnu_long_abbreviation(option, "--target-directory", "--t"):
+                if equals:
+                    target_dir = value
+                    i += 1
+                    continue
+                if i + 1 >= len(static_args):
+                    return [], False
+                target_dir = static_args[i + 1]
                 i += 2
                 continue
-            if arg.startswith("--target-directory="):
-                target_dir = arg.split("=", 1)[1]
-            elif arg == "--no-target-directory":
+            if _gnu_long_abbreviation(option, "--no-target-directory", "--no-t"):
                 no_target_dir = True
-            elif arg == "--parents":
+            elif _gnu_long_abbreviation(option, "--parents", "--pa"):
                 parents = True
             i += 1
             continue
@@ -1614,16 +1655,16 @@ def _cp_destination_paths(args: list[str], cwd: Path) -> list[str]:
                 if option == "t":
                     if pos + 1 < len(chars):
                         target_dir = chars[pos + 1:]
-                    elif i + 1 < len(args):
-                        target_dir = args[i + 1]
+                    elif i + 1 < len(static_args):
+                        target_dir = static_args[i + 1]
                         i += 1
                     else:
-                        return []
+                        return [], False
                     break
                 if option == "S":
                     if pos + 1 == len(chars):
-                        if i + 1 >= len(args):
-                            return []
+                        if i + 1 >= len(static_args):
+                            return [], False
                         i += 1
                     break
                 if option == "T":
@@ -1642,9 +1683,9 @@ def _cp_destination_paths(args: list[str], cwd: Path) -> list[str]:
         return os.fspath(Path(directory) / suffix) if suffix else None
 
     if target_dir is not None:
-        return [path for source in operands if (path := destination(target_dir, source))]
+        return [path for source in operands if (path := destination(target_dir, source))], False
     if len(operands) < 2:
-        return []
+        return [], False
 
     direct = operands[-1]
     destinations = [direct]
@@ -1652,7 +1693,7 @@ def _cp_destination_paths(args: list[str], cwd: Path) -> list[str]:
         destinations.extend(
             path for source in operands[:-1] if (path := destination(direct, source))
         )
-    return destinations
+    return destinations, False
 
 
 def _bash_reason(cmd: str, repo: Path) -> str | None:
@@ -1700,6 +1741,12 @@ def _bash_reason(cmd: str, repo: Path) -> str | None:
             subcommand, args, command_cwd = _git_subcommand(args, command_cwd)
             name = subcommand.rsplit("/", 1)[-1]
         if name == "cp":
+            cp_targets, cp_dynamic = _cp_destination_paths(args, command_cwd)
+            if cp_dynamic:
+                return (
+                    "doc-lifecycle: cp 参数含无法安全静态核验的活动 shell 展开；"
+                    f"为防绕过覆盖 {REGISTRY_REL} 已 fail-closed。{_ESCAPE_HINT}"
+                )
             if any(
                 _path_covers_registry(
                     target,
@@ -1708,7 +1755,7 @@ def _bash_reason(cmd: str, repo: Path) -> str | None:
                     follow_final_symlink=True,
                     include_ancestors=False,
                 )
-                for target in _cp_destination_paths(args, command_cwd)
+                for target in cp_targets
             ):
                 return _REGISTRY_REMOVE_MSG
             continue
@@ -2242,7 +2289,14 @@ def self_test() -> int:
         "cp -vt memory /tmp/doc-lifecycle.yaml",
         "cp --target-directory memory /tmp/doc-lifecycle.yaml",
         "cp --target-directory=memory /tmp/doc-lifecycle.yaml",
+        "cp --t=memory /tmp/doc-lifecycle.yaml",
+        "cp --ta memory /tmp/doc-lifecycle.yaml",
+        "cp --target-directory=$PWD/memory /tmp/doc-lifecycle.yaml",
+        "cp --target-directory=${PWD}/memory /tmp/doc-lifecycle.yaml",
+        "cp /tmp/doc-lifecycle.yaml $PWD/memory",
+        "cp --target-directory=$DEST /tmp/doc-lifecycle.yaml",
         "cd source && cp --parents memory/doc-lifecycle.yaml ..",
+        "cd source && cp --pa --t=.. memory/doc-lifecycle.yaml",
         f"dd if=/dev/null of={REGISTRY_REL}",
         f"printf x | tee {REGISTRY_REL}",
         f'env -S "rm {REGISTRY_REL}"',
@@ -2407,6 +2461,11 @@ def self_test() -> int:
         "cp /dev/null /tmp/not-this-repo/memory/doc-lifecycle.yaml",
         "cp -t /tmp/not-this-repo/memory /tmp/doc-lifecycle.yaml",
         "cp --target-directory=/tmp/not-this-repo/memory /tmp/doc-lifecycle.yaml",
+        "cp --t=/tmp/not-this-repo/memory /tmp/doc-lifecycle.yaml",
+        "cp --target-directory=$PWD/not-memory /tmp/doc-lifecycle.yaml",
+        "cp /tmp/doc-lifecycle.yaml $PWD/not-memory",
+        "cp /tmp/doc-lifecycle.yaml '$PWD/memory'",
+        r"cp /tmp/doc-lifecycle.yaml \$PWD/memory",
         "dd if=/dev/null of=/tmp/not-this-repo/memory/doc-lifecycle.yaml",
         "printf x | tee /tmp/not-this-repo/memory/doc-lifecycle.yaml",
         f'env -S "echo {REGISTRY_REL}"',

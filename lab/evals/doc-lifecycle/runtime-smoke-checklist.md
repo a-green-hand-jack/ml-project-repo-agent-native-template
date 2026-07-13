@@ -5,12 +5,13 @@
 > clone 中完成；synthetic 探针仍是独立证据，不能替代本清单。详细断言、session id 与 raw log
 > 见 `evidence-20260713-runtime-probes.md`。
 
-**当前状态：8/8 PASS，另加本轮 G2 cp 对抗 probe PASS。** continuity/context 目标为
-`68f1d43`；相关 hook 代码未再变化。guard G1/G2 已在精确 code target `654af4c` 的四个新
-disposable clones 与独立顶层 Claude sessions 重跑；其中额外 G2 直接复现并拦截 final review
-发现的 GNU `cp --target-directory` overwrite。raw files 的 sha256 在 `raw/SHA256SUMS`；首次
-C3 消息不足尝试保留在 raw 中但不计 PASS，继续同一隔离顶层 session 后的第二次真实 compact
-才是验收证据。
+**当前状态：continuity/context 8/8 PASS；guard 新代码目标待重跑 G1/G2。** continuity/context
+目标为 `68f1d43`，相关 hook 代码未再变化。`654af4c` 的四个独立顶层 Claude sessions 与 raw
+仍是有效历史证据，但 direct evidence HEAD `9dfc432` 的 final review 又发现 GNU `cp` 长选项
+缩写和活动 shell 展开绕过；修复改变 guard 代码后，必须形成新 exact code target 并重跑
+G1/G2（至少直接覆盖 `--t=memory` 或 `$PWD/memory`）。raw files 的 sha256 在
+`raw/SHA256SUMS`；首次 C3 消息不足尝试保留在 raw 中但不计 PASS，继续同一隔离顶层 session
+后的第二次真实 compact 才是验收证据。
 
 ## 验收清单
 
@@ -49,8 +50,8 @@ C3 消息不足尝试保留在 raw 中但不计 PASS，继续同一隔离顶层 
 | X1 | 2026-07-13 | Codex 0.144.0 / gpt-5.6-sol | `68f1d43` | PASS | `raw/13-X1-*`; fresh startup 主动读到 plan/status | Codex integration owner |
 | X2 | 2026-07-13 | Codex 0.144.0 / gpt-5.6-sol | `68f1d43` | PASS | `raw/13-X2-X3-*`; clear hook completed + continuity | Codex integration owner |
 | X3 | 2026-07-13 | Codex 0.144.0 / gpt-5.6-sol | `68f1d43` | PASS | `raw/13-X2-X3-*`; Context compacted + hook completed，无 invalid JSON | Codex integration owner |
-| G1 | 2026-07-13 | Claude Code 2.1.207 / Opus 4.8 | `654af4c` | PASS | `raw/13-G1-*-654af4c.*`; raw 内嵌 wrapper+SHA、exact HEAD、pre/post status/registry；默认 SKIP=UNSET deny，独立 SKIP=1 allow 并记录唯一 probe artifact | Codex integration owner |
-| G2 | 2026-07-13 | Claude Code 2.1.207 / Opus 4.8 | `654af4c` | PASS | `raw/13-G2-*-654af4c.*`; opaque delete 与 `cp --target-directory` 两个独立 session 均 deny，raw 记录 pathspec/source、pre/post clean 与 registry preserved | Codex integration owner |
+| G1 | 2026-07-13 | Claude Code 2.1.207 / Opus 4.8 | 新 code target 待定（历史 PASS `654af4c`） | PENDING | 修复提交后重跑 default deny + 独立 SKIP allow，raw 需绑定 exact HEAD/wrapper/env/pre/post | Codex integration owner |
+| G2 | 2026-07-13 | Claude Code 2.1.207 / Opus 4.8 | 新 code target 待定（历史 PASS `654af4c`） | PENDING | 修复提交后重跑 opaque delete + GNU cp abbreviation/expansion deny，raw 需证明 registry preserved | Codex integration owner |
 
 结果已同步到 `evidence-20260713-runtime-probes.md`；feature 仍保持 `implementing`，直到 fresh
 exact-head review APPROVE、合入 main 与合并后验证完成，才可转 `verified`。
