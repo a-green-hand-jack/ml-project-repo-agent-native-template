@@ -3,8 +3,12 @@
 # 证据分层：log < metric < table < figure < paper claim。见 .agent/principles.md。
 #
 # status: proposed | partial | supported | refuted | retired
-# evidence: 指向 evidence.yaml 的 evidence id 列表（可为空表示尚无证据）
+# evidence: 指向 evidence.yaml 的 evidence id 列表（可为空表示尚无证据）；列入的
+# evidence 必须以 supports_claim 指回本 claim，每条完整且指回本 claim 的 evidence 也必须列入。
 # verified_by_fresh_reviewer: paper-grade claim 必须为 true
+# provenance：deliverables 正文用 <!-- claim: id=... --> marker 引用这里的 id，
+# 由 scripts/check-provenance-chain.py 校验（见 .agent/artifact-policy.md）。
+schema_version: 1
 
 claims:
   - id: claim-000

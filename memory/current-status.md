@@ -6,9 +6,10 @@
 ## 当前 objective
 
 按 fresh review 与依赖顺序完成本地 issue 集成。issue #16 已在 exact source HEAD
-`ecf0c80aa17bfa3aad6948f3d36ba49233c02cd6` 获得 fresh Codex `APPROVE`，当前正在合入本地
-`main` 并做冲突后验证；随后合入已 APPROVE 的 issue #17。issue #13/#18 不伪造缺失的
-fresh-session/隔离环境证据，保留可复现 blocker。
+`ecf0c80aa17bfa3aad6948f3d36ba49233c02cd6` 获得 fresh Codex `APPROVE`，已以 merge commit
+`cbf6ab6ca857b2295da4e362aa0e0defe44c79a4` 合入本地 `main` 并完成冲突后验证。当前正在合入
+已 APPROVE 的 issue #17 exact source `52f83aafe54b6891e5963c2d5c4e731717132ff2`。issue #13/#18
+不伪造缺失的 fresh-session/隔离环境证据，保留可复现 blocker。
 
 ## #16 fresh-review handoff（2026-07-13）
 

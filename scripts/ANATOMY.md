@@ -4,6 +4,7 @@ related_files:
   - check-agent-harness.py
   - check-anatomy-drift.py
   - check-outcome-ledger-schema.py
+  - check-provenance-chain.py
   - validate-governance.py
   - validate-experiment-state.py
   - adopt-existing-repo.py
@@ -38,8 +39,9 @@ Codex adapter 同步脚本把 `.claude/` canonical 能力生成到 `.codex/` 与
 | --- | --- | --- |
 | `check-agent-harness.py` | 结构/必需文件/根污染/四件套/能力索引/settings/DESIGN 清单 校验 | `.agent/repo-editing-guardrails.md` · `repo-documentation-topology.md` |
 | `check-anatomy-drift.py` | ANATOMY related_files 与 line citation 漂移 + 120 行硬上限 | `.agent/anatomy-protocol.md` |
-| `validate-governance.py` | 聚合 harness/anatomy/outcome-ledger/实验状态四个子检查 + gitignore/YAML/tracked-bytes + 证据链一致性(overclaim 拦截) | `.agent/action-boundary.md` · `artifact-policy.md` · `principles.md` |
+| `validate-governance.py` | 聚合 harness/anatomy/outcome-ledger/实验状态/provenance-chain 五个子检查 + gitignore/YAML/tracked-bytes + 证据链一致性(overclaim 拦截) | `.agent/action-boundary.md` · `artifact-policy.md` · `principles.md` |
 | `validate-experiment-state.py` | 实验状态机（planned→approved→running→done/failed→superseded，经 status_history 逐步校验）+ approved 必填字段 + alert command/workdir、批准审计与 provenance/consume/execution/resolved 不变量 + done 闭环（run summary 路径/regular-file 安全）。PyYAML 可选（内置受限 block-style 解析器回退）；`--self-test` 内嵌对抗 fixture | `plans/20260712-experiment-control-plane.zh.md` · `.agent/human-gates.md` |
+| `check-provenance-chain.py` | provenance 链：run→artifact→evidence→claim→deliverable；双向 claim/evidence 归属边、行级 marker 覆盖、run 闭环、checksum（sha256）、active-only gate artifact、安全 repo-relative regular-file path、dataset split、ID 唯一性；active/submitted/passed 状态 fail-closed，`--self-test` 跑内嵌对抗 fixture | `.agent/artifact-policy.md` |
 | `check-same-commit.py` | same-commit rule：结构改动(A/D/R)未同变更集更新对应 ANATOMY → 拦。diff 驱动，不进 governance；由 `.githooks/pre-commit` + CI 调用 | `.agent/anatomy-protocol.md` |
 | `check-outcome-ledger-schema.py` | outcome ledger/fixture schema、decision↔outcome 生命周期、完整具体路线证据隔离、正样本地板/零样本与 stale fallback、replay 确定性、credential/写边界防线；经 importlib 复用 skill 内 `outcome_ledger.py` | `.agent/model-routing-policy.md` · `plans/20260712-outcome-aware-routing.zh.md` |
 | `adopt-existing-repo.py` | 分 phase 迁移已有 Git repo：discover（语义归类，B1-B3）/baseline/scaffold/normalize（消费归类计划，B4）/prove（含双 agent surface 报告，B6） | `plans/20260709-adopt-existing-repo.zh.md` · `plans/20260712-bootstrap-adoption-proof.zh.md` · `.claude/skills/adopt-existing-repo/SKILL.md` |
@@ -68,7 +70,8 @@ Inbound:
 - `.codex/agents/*.toml` 与 `.agents/skills/*/SKILL.md` 由 `sync-codex-adapters.py` 生成。
 
 Outbound:
-- `validate-governance.py` 以 subprocess 调用 harness/anatomy/outcome-ledger/experiment-state 四个子检查（用 `sys.executable`）。
+- `validate-governance.py` 以 subprocess 调用 harness/anatomy/outcome-ledger/experiment-state/
+  provenance-chain 五个子检查（用 `sys.executable`）。
 - `check-adoption-integrity.py` 通过 `importlib` 加载 `adopt-existing-repo.py` 的
   `integrity_result()`，避免两份 hash 逻辑漂移。
 - `agent-status.py` / `agent-mailbox.py` / `check-agent-conflicts.py` 通过 `importlib` 加载

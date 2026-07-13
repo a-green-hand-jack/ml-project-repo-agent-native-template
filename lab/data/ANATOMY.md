@@ -40,4 +40,13 @@ Children:
 ## Notes
 
 - manifest ↔ checksum 必须同版本一致，否则 validator 拦截。
+- `dataset-index.yaml` 带共同 provenance 字段（`schema_version` / `location` /
+  `commit`+`config`+`run_id` 三元组 / checksum 三件套，统一 sha256），由
+  `scripts/check-provenance-chain.py` 校验；外部数据集等确无 run 来源须显式豁免
+  （`provenance_unavailable_reason: external-origin` 等固定枚举 + 非占位理由）；
+  `evidence.yaml` 的 `data_split` 以 `<dataset-id>/<split>` 引用其条目，且 split 必须实际
+  出现在对应条目的 `splits` 列表中。
+- manifest 约定（供所有 artifact 类型复用）：`manifests/<id>.yaml`，`files:` 列表逐条
+  `path`/`uri` + `sha256`（或固定枚举 `checksum_unavailable_reason` + 非占位
+  `justification`）；index 条目经 `manifest:` 字段引用。
 - 校验：`python scripts/validate-governance.py`。

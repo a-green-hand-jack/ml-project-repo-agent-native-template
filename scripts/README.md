@@ -4,9 +4,10 @@
 口头纪律不如 validator。
 
 ```bash
-python scripts/validate-governance.py        # 总门禁（harness + anatomy + 治理规则 + 证据链/overclaim）
+python scripts/validate-governance.py        # 总门禁（harness + anatomy + provenance + 治理规则 + 证据链/overclaim）
 python scripts/check-agent-harness.py         # 结构 / 必需文件 / 根污染 / 能力索引 / settings / DESIGN 清单
 python scripts/check-anatomy-drift.py         # ANATOMY 引用与行号漂移 + 120 行硬上限
+python scripts/check-provenance-chain.py      # provenance 链 + 安全路径 + fail-closed gate；--self-test 跑内嵌对抗 fixture
 python scripts/check-same-commit.py --staged  # same-commit rule：结构改动 <-> ANATOMY 同变更集
 python scripts/check-outcome-ledger-schema.py # outcome schema / 具体路线隔离 / 正样本与 fallback / 写入与 credential 防线
 python scripts/sync-codex-adapters.py --check # Codex adapters 与 .claude canonical 能力是否同步
@@ -32,6 +33,16 @@ MAJOR 跨越需 `--allow-major` 人工确认。
 `gate_status` / `last_status` 离开占位默认值（`open` / `unknown`），对应的 `for_claim` /
 `guards_claim` 必须指向 `claims.yaml` 中真实存在的 claim（而非未填占位符或不存在的 id）。
 仍处于占位默认状态时跳过引用校验，模板 scaffold 天然通过。
+
+`check-provenance-chain.py`（`validate-governance.py` 的子检查，也可单独跑）校验
+run→artifact→evidence→claim→deliverable 的 provenance 链：引用完整性、run 闭环
+（`status: done` + `run_summary`）、checksum（统一 sha256，进程内 hashlib；无法校验需
+固定枚举 reason + 非占位人工理由，否则判 fail）、deliverables 的 claim marker
+（`<!-- claim: id=... -->`，核对 supports_claim 归属与行级 claim 覆盖）、安全 repo-relative
+regular-file path、dataset split membership 与 duplicate ID。claim/evidence 归属边必须双向完整；
+release-gate 的 artifact-exists / checksum-verified 只接受 active artifact。active/submitted/passed
+状态不接受 placeholder；passed gate 遇 unknown 也 fail-closed。三态输出：pass / fail / unknown，unknown 不算 pass，
+`--strict` 下 unknown 也算失败。字段与枚举定义见 `.agent/artifact-policy.md`。
 
 `check-same-commit.py` 不进 `validate-governance`（它需要 diff 上下文，干净 checkout 上会 no-op）。
 两处接入：**pre-commit hook**（`.githooks/pre-commit`，每 clone 一次性启用 `git config core.hooksPath .githooks`）+ **CI**（对 PR base / push before 跑 `--against <ref>`）。逃生 `SAME_COMMIT_SKIP=1` / `git commit --no-verify`。

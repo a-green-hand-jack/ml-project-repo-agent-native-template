@@ -27,14 +27,23 @@ maintenance: |
 
 - 索引条目由 `../runs/`、`../models/` 的产出登记而来（bytes 不进 Git）。
 - `../research/evidence.yaml` 引用这些 index 作为证据（table/figure/result 层）。
+- 条目 `run_id` 指向 `../research/experiment-ledger.yaml` 的已闭环 run；
+  `model-index` 的 `checkpoint_ref` 指向 `../models/checkpoint-index.yaml`。
 
 ## State
 
 | 路径 | 写入者 | 含义 |
 | --- | --- | --- |
-| `*-index.yaml` | agent + human | 产物指针（位置 + checksum + 来源），非 bytes |
+| `*-index.yaml` | agent + human | 产物指针（`location` + checksum + 来源三元组），非 bytes |
 
 ## Notes
 
-- 悬空索引（指向不存在产物）应被 validator 拦截。
+- 共同最小 schema（`schema_version` / `location` / `how_to_inspect` /
+  `commit`+`config`+`run_id` / `status` / checksum 三件套）见 `.agent/artifact-policy.md`。
+  三元组全部 7 类统一必填；确无 run 来源（如 human-cc/agent trace）须显式豁免
+  （`provenance_unavailable_reason` 固定枚举 + 非占位理由），不允许静默留空。
+- 悬空索引 / 未闭环 run / checksum 不匹配由 `scripts/check-provenance-chain.py` 拦截
+  （由 `validate-governance.py` 拉起；checksum 统一 sha256，无法校验需固定枚举 reason +
+  非占位人工理由）；`active` 条目的 `how_to_inspect` 必填，本地 location/manifest 必须
+  是安全 repo-relative regular file（拒绝 absolute/`..`/symlink escape/目录），ID 不得重复。
 - 校验：`python scripts/validate-governance.py`。

@@ -18,6 +18,9 @@
 #
 # 注意：本文件保持 block-style YAML（无 flow mapping），保证无 PyYAML 环境下
 # validate-experiment-state.py 的受限解析器可读。
+# provenance：只有 status=done 且 run_summary 已填的「已闭环 run」才允许被
+# evidence / artifact index 引用为来源（scripts/check-provenance-chain.py 校验）。
+schema_version: 1
 
 experiments:
   # run-000 是新 schema 的活样例（2026-07-13 依 plan #16 决策升级）：一个已通过
