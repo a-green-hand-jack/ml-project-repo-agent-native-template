@@ -216,11 +216,13 @@ repo 里已经有好几套相邻但不统一的"状态/审批"机制，设计新
 
 - **全部 open question 已收敛，功能实现与 C1-C3/X1-X3 runtime evidence 已完成。** 当前处于
   final-review 收口，不再等待进入实现的批准。
-- evidence-only `83be6d5` 的独立 final review 已完成并给出 `CHANGES_REQUESTED`：GNU
-  `cp -t/--target-directory` 可覆盖 registry 而 hook 放行，且 durable plan/checklist/status 记录
-  仍有矛盾。当前正在修复并补 normal/`python -S` 对抗 fixtures。
-- 形成新 code target 后，在该精确目标重跑三个独立顶层 Claude G1/G2 sessions，再提交 direct
-  evidence child、跑全 strict gates 与独立 fresh review。仅 `APPROVE` 后才把本 plan 标为
+- evidence-only `83be6d5` 的两项 MAJOR 已由 exact code target `654af4c` 修复：GNU cp 的
+  direct/existing-directory/`-t`/`--target-directory`/short-bundle/`--parents` destination 均纳入
+  registry guard，任务树与 durable status/checklist 同步收口。
+- 四个新 disposable clones 的独立顶层 Claude sessions 已完成 G1 default deny、仅进程级 SKIP
+  allow、G2 opaque delete deny，并直接证明本轮 `cp --target-directory` overwrite deny；raw 内嵌
+  wrapper/SHA、环境与 pre/post facts。受审 symbolic `HEAD` 是 `654af4c` 的 direct evidence
+  child；对该 HEAD 跑全 strict gates 与独立 fresh review，仅 `APPROVE` 后才把本 plan 标为
   verified 并本地合入。
 
 ## Plan revision log
@@ -253,3 +255,4 @@ repo 里已经有好几套相邻但不统一的"状态/审批"机制，设计新
 - 2026-07-13 **evidence-only `1a970291` 独立 final review：`CHANGES_REQUESTED`（4 MAJOR）**。reviewer 认可 62 份 raw gzip/SHA256、G1/G2 exact-target 绑定与全 strict gates，但新增四个对抗发现：(1) 无 PyYAML fallback 忽略缩进层级，把 `meta:` 下的 `kind/status` 扁平化并 fail-open；(2) Bash `dd of=` 与 `tee` 可覆盖注册表；(3) 四空格 Markdown 代码块可冒充 Status 锚点；(4) durable status 与本节「下一步」仍描述已完成步骤。恢复门槛固定为：同一 code target 修复四项并补 normal/`python -S` validator/真实 hook fixtures，在该精确 target 重跑 G1/G2，evidence-only direct child 后跑全 strict gates与独立 final fresh review；记录使用 symbolic `HEAD` 与 direct parent，避免要求 commit 正文预知自身 SHA。
 - 2026-07-13 **最终 code target `22d7572` 修复四项 MAJOR，G1/G2 exact-target runtime PASS**。受限 parser 改为精确缩进语法并拒绝嵌套 mapping；Status/H1 只接受 0–3 个前导空格；Bash guard 覆盖 `dd of=` 与 `tee` 的普通、symlink 与外部 control。normal/`python -S` self-test 与真实 hook regression 均锁定这些对抗 case。三个新 disposable clones 中，独立顶层 Claude sessions 分别完成 malformed Write 默认 deny、进程级 `DOC_LIFECYCLE_SKIP=1` 下唯一 Write allow、opaque `git rm --pathspec-from-file` registry delete deny；wrapper 记录 exact HEAD、pre/post status、registry/pathspec/probe SHA 与正文，六份 raw/debug 以 `gzip -n` 和 SHA256 纳入 direct evidence-only child。状态保持 implementing，下一门槛仅为该 symbolic `HEAD` 的全 strict gates 与独立 final fresh review。
 - 2026-07-13 **evidence-only `83be6d5` 独立 final review：`CHANGES_REQUESTED`（2 MAJOR）**。(1) GNU `cp -t memory /tmp/doc-lifecycle.yaml` 与 `cp --target-directory=memory /tmp/doc-lifecycle.yaml` 的真实 hook 在 normal/`python -S` 均 exit 0，可覆盖 registry；guard 必须解析 target-directory 与有效目标路径并补真实 hook parity fixtures。(2) current-status 仍称 evidence child 待提交、runtime checklist 仍以 `8eea18e` 为当前 G1/G2 target，任务树全未勾选，三处与已完成实现/证据矛盾。修复后必须在精确新 code target 重跑 G1/G2、全 strict gates 与独立 final fresh review。
+- 2026-07-13 **最终 code target `654af4c` 修复 cp/durable 两项 MAJOR，G1/G2 exact-target runtime PASS**。GNU cp destination parser 覆盖 direct target、existing directory、`-t`/`--target-directory`、short option bundle 与 `--parents`，normal/`python -S` self-test、真实 hook regression 及 repo 外 controls 全绿；任务树全量勾选，current-status/checklist 与已完成证据一致。四个全新 disposable clones 的独立顶层 Claude Code 2.1.207 / Opus 4.8 sessions 分别证明 default malformed Write deny、仅进程级 `DOC_LIFECYCLE_SKIP=1` allow、opaque registry delete deny、`cp --target-directory` overwrite deny；每份 raw 内嵌 exact HEAD、wrapper 全文+SHA、环境与 pre/post facts，八份 raw/debug gzip+SHA256 纳入 direct evidence child。下一门槛仅为全 strict gates 与独立 exact-HEAD final review。
