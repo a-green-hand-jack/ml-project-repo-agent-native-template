@@ -45,6 +45,8 @@ ROOT_WHITELIST = {
 ROOT_IGNORE = {
     ".git", ".venv", "__pycache__", ".DS_Store", ".ruff_cache",
     ".mypy_cache", ".pytest_cache", ".idea", ".vscode", ".env", ".omx",
+    # agent 运行时身份文件（gitignored，见 .agent/agent-identity.md 与 .gitignore 对应条目）
+    ".agent-identity",
 }
 
 # 需要完整四件套的目录。
