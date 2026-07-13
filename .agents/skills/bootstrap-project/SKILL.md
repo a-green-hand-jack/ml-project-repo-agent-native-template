@@ -35,8 +35,10 @@ CODEOWNERS owner、`PROJECT.md` 内容、要不要删无用目录的步骤（本
 
 1. 确认目标已是 Git repo（`.git` 存在）。主路径是 **self-bootstrap**：在派生 repo 内运行它
    自己的脚本、目标就是自身（`.`）；用上游 checkout 的脚本对另一个路径运行也可以。脚本会拒绝
-   把**上游模板 repo 自身**当目标（判据：目标的 git remote 指向与 `--origin` 相同的 slug；
-   派生 repo 的 remote 是自己的新 slug、clone+reinit 没有 remote，均不受影响）。
+   把**上游模板 repo 自身**当目标（判据只看**身份 remote `origin`**：URL 归一化后——大小写
+   不敏感、剥 `.git` 后缀——与 `--origin` 同 slug 即拒绝；`upstream` 等其它 remote 不参与，
+   派生 repo 保留指回模板的 `upstream` remote 不会被误拒）。这是 best-effort 防呆护栏、不是
+   安全边界：没有 remote 或 `origin` 被改名/改指向的模板 checkout 识别不出来，属已知残余风险。
 2. 运行（在派生出的新 repo 内）：
 
    ```bash

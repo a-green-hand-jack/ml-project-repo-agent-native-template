@@ -65,8 +65,11 @@ python scripts/bootstrap-project.py . --origin <owner/repo>
 
 `--origin` 必须显式传入（不推断上游 template repo slug），第二次以相同 `--origin` 重跑是幂等的
 （state/report 内容不变则不改写；`state/run-log.jsonl` 是追加式审计日志，每次运行追加一行）。
-脚本会拒绝把**上游模板 repo 自身**当目标（判据：目标的 git remote 指向与 `--origin` 相同的
-slug——派生 repo 的 remote 是它自己的新 slug，clone+reinit 则没有 remote，都不会误伤）。
+脚本会拒绝把**上游模板 repo 自身**当目标（判据只看**身份 remote `origin`**：其 URL 归一化后
+——大小写不敏感、剥 `.git` 后缀——与 `--origin` 是同一个 slug 就拒绝；`upstream` 等其它 remote
+不参与判定，所以派生 repo 保留指回模板的 `upstream` remote 不会被误拒）。注意这只是 best-effort
+的防呆护栏、不是安全边界：模板 checkout 没有 remote、或 `origin` 被改名/改指向时不会被识别，
+属已知残余风险。
 这一条命令会自动做：
 
 1. 写/确认 `.template.toml`（origin + version 锚点；已存在且 origin 不一致时报错停止，需要覆盖

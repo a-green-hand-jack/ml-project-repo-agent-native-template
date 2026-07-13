@@ -10,8 +10,9 @@ The README main path is *self-bootstrap*: the derived repo runs its own
 copy of this script against itself (`python scripts/bootstrap-project.py .
 --origin <owner/repo>` inside the derived repo). Running the upstream
 checkout's copy against a separate target path also works. What is refused
-is bootstrapping the *upstream template repo itself* — see
-`refuse_upstream_template()` for the criterion.
+(best-effort, not a security boundary) is bootstrapping the *upstream
+template repo itself* — see `refuse_upstream_template()` for the criterion
+and its known residual gaps.
 
 Automated substeps (see plans/20260712-bootstrap-adoption-proof.zh.md, A2):
   1. `.template.toml` generation/confirmation (origin + version anchor).
@@ -108,24 +109,44 @@ def require_git_repo(target: Path) -> None:
         )
 
 
-def _remote_slugs(target: Path) -> set[str]:
-    """<owner/repo> slugs of the target's git remotes (ssh/https forms)."""
+def _normalize_slug(slug: str) -> str:
+    """Comparison form of a <owner/repo> slug, per hosting-platform semantics.
+
+    GitHub-style slugs are case-insensitive and a trailing `.git` (or `/`)
+    is URL decoration, not identity — strip both and lowercase so that e.g.
+    `Acme/Repo.git` and `acme/repo` compare equal.
+    """
+    slug = slug.strip().rstrip("/")
+    if slug.lower().endswith(".git"):
+        slug = slug[: -len(".git")]
+    return slug.lower()
+
+
+def _origin_remote_slugs(target: Path) -> set[str]:
+    """Normalized <owner/repo> slugs of the target's *origin* remote only.
+
+    Only the identity remote (`origin`) participates in the upstream-template
+    refusal criterion. A legitimately derived repo commonly carries extra
+    remotes — e.g. `upstream` pointing back at the template for
+    template-sync — and those must NOT trip the guard (Codex review round 2,
+    MAJOR-1). Both fetch and push URLs of `origin` are considered.
+    """
     proc = run(["git", "remote", "-v"], target)
     slugs: set[str] = set()
     if proc["returncode"] != 0:
         return slugs
     for line in proc["stdout"].splitlines():
         parts = line.split()
-        if len(parts) < 2:
+        if len(parts) < 2 or parts[0] != "origin":
             continue
-        m = re.search(r"[:/]([\w.-]+/[\w.-]+?)(?:\.git)?/?$", parts[1])
+        m = re.search(r"[:/]([\w.-]+/[\w.-]+?)(?:\.[gG][iI][tT])?/?$", parts[1])
         if m:
-            slugs.add(m.group(1))
+            slugs.add(_normalize_slug(m.group(1)))
     return slugs
 
 
 def refuse_upstream_template(target: Path, origin: str) -> None:
-    """Refuse to bootstrap the *upstream template repo itself*.
+    """Best-effort refusal to bootstrap the *upstream template repo itself*.
 
     An earlier guard rejected `target == TEMPLATE_ROOT` (the repo containing
     this running script). That criterion was wrong: derived repos ship their
@@ -133,23 +154,28 @@ def refuse_upstream_template(target: Path, origin: str) -> None:
     (`python scripts/bootstrap-project.py .` inside the derived repo), where
     target == TEMPLATE_ROOT is the normal, intended case.
 
-    What the guard must actually protect: never dirty the upstream template
-    repo by bootstrapping it into "a project derived from itself". Criterion:
-    the caller already names the upstream explicitly via `--origin`; if any
-    of the *target's own git remotes* resolves to that same <owner/repo>
-    slug, the target IS a checkout of the upstream template — refuse before
-    any mutation. Derived repos never trip this: "Use this template" /
-    `gh repo create --template` clones point at the new project's own slug,
-    and clone+reinit (`rm -rf .git && git init`) has no remotes at all.
-    (`--origin` is still never *inferred* from remotes — see 未解决问题 2;
-    remotes are only read to detect self-pollution, never to fill in origin.)
+    What the guard tries to protect: don't dirty the upstream template repo
+    by bootstrapping it into "a project derived from itself". Criterion: the
+    caller already names the upstream explicitly via `--origin`; if the
+    target's *identity remote* (`origin`) resolves to that same <owner/repo>
+    slug (compared case-insensitively, `.git` suffix stripped), the target
+    looks like a checkout of the upstream template — refuse before any
+    mutation. Other remotes (`upstream` etc.) deliberately do NOT participate:
+    a derived repo often keeps an `upstream` remote pointing back at the
+    template (e.g. for template-sync), and that is a legitimate setup.
+
+    This is a best-effort footgun guard, not a security boundary: a template
+    checkout with no remotes (or with `origin` renamed/re-pointed) will not
+    be caught, and that residual risk is accepted. (`--origin` is still never
+    *inferred* from remotes — see 未解决问题 2; remotes are only read for
+    this self-pollution check, never to fill in origin.)
     """
-    if origin in _remote_slugs(target):
+    if _normalize_slug(origin) in _origin_remote_slugs(target):
         raise SystemExit(
             "refusing to bootstrap the upstream template repo into itself: "
-            f"target {target} has a git remote pointing at --origin {origin!r}. "
-            "A derived project's remote should be its own slug (or absent for "
-            "clone+reinit), not the template's."
+            f"target {target} has its `origin` remote pointing at --origin "
+            f"{origin!r}. A derived project's origin remote should be its own "
+            "slug (or absent for clone+reinit), not the template's."
         )
 
 

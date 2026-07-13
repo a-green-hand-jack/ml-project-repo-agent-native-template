@@ -21,9 +21,15 @@ asserting:
   all green;
 - (negative) a copy without `.githooks/` fails bootstrap with a non-zero
   exit — plan A2 mandates core.hooksPath, missing must not be "skipped";
-- (negative) a target whose git remote points at the `--origin` slug (i.e.
-  a checkout of the upstream template itself) is refused before any
-  mutation.
+- (negative) a target whose *origin* remote points at the `--origin` slug
+  (i.e. a checkout of the upstream template itself) is refused, and the
+  refusal is a strict no-op: a full before/after tree snapshot (including
+  `.git/config` and the core.hooksPath value) shows zero changes. The
+  fixture URL uses a different case + `.git` suffix to also exercise slug
+  normalization;
+- (positive) a legitimately derived repo whose *upstream* remote points back
+  at the template (origin = its own slug) is NOT refused — only the identity
+  remote (`origin`) participates in the refusal criterion.
 
 Uncommitted worktree changes are NOT covered (the target is built from
 HEAD): commit first, then run this smoke.
@@ -195,22 +201,87 @@ def check_missing_githooks_fails(tmp: Path) -> int:
     return 0
 
 
+def tree_snapshot(target: Path) -> dict[str, bytes]:
+    """Full content snapshot of the target tree, `.git/` included, so the
+    refusal path can be asserted to be a strict zero-change no-op (round-2
+    MINOR-2: asserting only `.template.toml` absence was too weak)."""
+    snap: dict[str, bytes] = {}
+    for p in sorted(target.rglob("*")):
+        if p.is_symlink():
+            snap[str(p.relative_to(target))] = p.readlink().as_posix().encode()
+        elif p.is_file():
+            snap[str(p.relative_to(target))] = p.read_bytes()
+    return snap
+
+
 def check_upstream_refusal(tmp: Path) -> int:
-    """Negative (MAJOR-1 guard): a checkout of the upstream template itself
-    (remote slug == --origin) must be refused before any mutation."""
+    """Negative (round-1 MAJOR-1 guard): a checkout of the upstream template
+    itself (*origin* remote slug == --origin) must be refused, and the
+    refusal must leave the target tree completely untouched. The remote URL
+    deliberately differs in case and carries a `.git` suffix to exercise
+    hosting-platform slug normalization (round-2 MAJOR-1)."""
     target = tmp / "upstream-checkout"
     materialize_template(target)
     git_init(target)
-    proc = run(["git", "remote", "add", "origin", f"https://github.com/{ORIGIN}.git"], target)
+    proc = run(
+        ["git", "remote", "add", "origin", f"https://GitHub.com/{ORIGIN.upper()}.git"], target
+    )
     if proc.returncode != 0:
         return fail("git remote add for upstream-refusal fixture", proc)
+
+    before = tree_snapshot(target)
+    hooks_before = run(["git", "config", "--get", "core.hooksPath"], target)
+
     refused = self_bootstrap(target, "--origin", ORIGIN)
     if refused.returncode == 0:
         return fail("bootstrapping the upstream template itself should be refused", refused)
     if "upstream template" not in refused.stderr:
         return fail("refusal message should name the upstream-template guard", refused)
-    if (target / ".template.toml").exists():
-        return fail("upstream refusal must happen before any mutation (.template.toml written)")
+
+    after = tree_snapshot(target)
+    if after != before:
+        changed = sorted(
+            (set(before) ^ set(after))
+            | {k for k in set(before) & set(after) if before[k] != after[k]}
+        )
+        return fail(
+            "upstream refusal must be a strict no-op, but the tree changed: "
+            f"{changed}",
+            refused,
+        )
+    hooks_after = run(["git", "config", "--get", "core.hooksPath"], target)
+    if (hooks_after.returncode, hooks_after.stdout) != (hooks_before.returncode, hooks_before.stdout):
+        return fail(
+            "upstream refusal must not touch core.hooksPath "
+            f"(before={hooks_before.stdout!r}, after={hooks_after.stdout!r})",
+            refused,
+        )
+    return 0
+
+
+def check_derived_with_upstream_remote(tmp: Path) -> int:
+    """Positive (round-2 MAJOR-1): a legitimately derived repo whose
+    *upstream* remote points back at the template — while `origin` is its own
+    slug — must NOT be refused; only the identity remote participates."""
+    target = tmp / "derived-with-upstream"
+    materialize_template(target)
+    git_init(target)
+    for name, url in (
+        ("origin", "https://github.com/acme/derived-project.git"),
+        ("upstream", f"https://github.com/{ORIGIN}.git"),
+    ):
+        proc = run(["git", "remote", "add", name, url], target)
+        if proc.returncode != 0:
+            return fail(f"git remote add {name} for derived-with-upstream fixture", proc)
+    proc = self_bootstrap(target, "--origin", ORIGIN)
+    if proc.returncode != 0:
+        return fail(
+            "derived repo with an upstream remote pointing at the template "
+            "must not be refused (origin remote is its own slug)",
+            proc,
+        )
+    if not (target / ".template.toml").exists():
+        return fail(".template.toml missing after derived-with-upstream bootstrap")
     return 0
 
 
@@ -229,6 +300,7 @@ def main() -> int:
             lambda: check_validators(target),
             lambda: check_missing_githooks_fails(tmp),
             lambda: check_upstream_refusal(tmp),
+            lambda: check_derived_with_upstream_remote(tmp),
         ):
             rc = check()
             if rc != 0:
