@@ -558,6 +558,9 @@ def _check_manifest(root: Path, ident: str, manifest_rel: str, rep: Report) -> N
         path_state, _path, path_detail = _locate(
             root, floc, allow_external=bool(fe.get("uri")), require_file=True
         )
+        if path_state == "missing":
+            rep.fail(f"{fid}：manifest local path 不存在 regular file：{floc}")
+            continue
         if path_state == "invalid":
             rep.fail(f"{fid}：artifact path 非法：{path_detail}")
             continue
@@ -2054,6 +2057,29 @@ def _self_test() -> int:
                ))
     _run_case("negative-manifest-entry-symlink", manifest_entry_symlink_escape,
               ["artifact path 非法", "symlink escape"], False, failures)
+
+    def manifest_missing_waived_passed_gate(root: Path, digest: str) -> None:
+        _write(root, "lab/data/manifests/result-001.yaml",
+               "files:\n"
+               "  - path: lab/runs/exports/not-uploaded.bin\n"
+               "    checksum_unavailable_reason: pending-upload\n"
+               "    checksum_unavailable_justification: \"bytes 尚未上传，"
+               "manifest 条目先行登记并等待产物落盘\"\n")
+        _write(root, "lab/artifacts/result-index.yaml",
+               _result_index(
+                   digest,
+                   location="s3://bucket/results/result-001",
+                   checksum_block="    manifest: lab/data/manifests/result-001.yaml\n",
+               ))
+        _write(root, "lab/research/release-gates.yaml",
+               _GOOD_GATES.replace(
+                   "      - kind: checksum-verified\n"
+                   "        artifact: result-001\n", ""
+               ).replace("gate_status: open", "gate_status: passed"))
+    _run_case("negative-manifest-local-member-missing-waived-passed-gate",
+              manifest_missing_waived_passed_gate,
+              ["manifest local path 不存在 regular file", "不该放行"],
+              False, failures)
 
     def manifest_directory(root: Path, digest: str) -> None:
         (root / "lab/data/manifests").mkdir(parents=True, exist_ok=True)
