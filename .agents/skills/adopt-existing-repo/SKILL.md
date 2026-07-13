@@ -38,21 +38,28 @@ bytes 与测试能力。
 覆盖入口，见 `plans/20260712-bootstrap-adoption-proof.zh.md` 开放问题 4）：
 
 - `template_control_item`：命中 `CONTROL_ITEMS`（模板自身的顶层结构，如
-  `.claude`/`.codex`/`.agents`/`scripts`/`lab`/`AGENTS.md` 等）。目录永远留原处（`scaffold`
-  逐文件合并内容）；单文件若与模板同名文件 hash 一致，也留原处；若不一致，`scaffold`
-  会把原文件搬到 `human/imported/adoption-conflicts/`、在原路径装模板版本——同样留原处，
-  **永远不会**被整体移入 `lab/code/imported/`。
+  `.claude`/`.codex`/`.agents`/`scripts`/`lab`/`AGENTS.md` 等）**且**（对单文件）与模板同名
+  文件 hash 一致——留原处，无需 reconcile；目录也留原处（`scaffold` 逐文件合并内容）。
+  单文件 hash 不一致/不可比**不算** control item，按 `conflict` 登记 blocker（见下），
+  **永远不会**被整体移入 `lab/code/imported/`，也不会被模板版本覆盖。
 - `conservative_import`：既不是 control item 也不受保护，且导入目标位置尚无内容——整体
   移入 `lab/code/imported/<slug>/<name>`。
-- `protected`：命中 `lab/data/**`、`lab/runs/**`、`lab/models/**`、`lab/infra/private/**`、
-  `checkpoints`、`wandb`、`.env` 等受保护路径——登记 blocker，不移动、不编辑。
-- `conflict`：导入目标位置（`lab/code/imported/<slug>/<name>`）已经有不一致内容（例如上
-  一次部分失败的运行留下的）——登记 blocker，不覆盖。
+- `protected`：entry 本身**或其内部任意嵌套路径**命中 `lab/data/**`、`lab/runs/**`、
+  `lab/models/**`、`lab/infra/private/**`、`checkpoints`、`wandb`、`.env` 等受保护路径
+  （例如 `src/checkpoints/model.bin`、目标 repo 自带的 `lab/data/**`）——整个 entry 登记
+  blocker，不移动、不编辑、不做部分移动；`scaffold` 对内含保护内容的同名 control 目录
+  （如 `lab`）先检测后跳过，不写入也不搬走其中文件。与模板同 hash 的模板自带占位文件
+  （scaffold 合入的 `lab/data/README.md` 等）不算保护命中，重跑保持幂等。
+- `conflict`：root 同名 control 单文件与模板内容不一致/不可比（B1「目标位置已存在不一致
+  内容」分支），或导入目标位置（`lab/code/imported/<slug>/<name>`）已经有不一致内容（例如
+  上一次部分失败的运行留下的）——登记 blocker，不覆盖、留原处交 human 处理。
 
 每个 entry 都能在 `adoption-plan.json` 的 `classification` 字段（或 `--dry-run` 的
 stdout）里读到 `category` / `target_path` / `reason` / `blocker`。`normalize` 消费的正是
-这份归类计划，不是硬编码的二元判断（B4）；`protected`/`conflict` 命中时仍然停下报告
-（`--allow-blocked-normalize` 才允许记录后继续）。
+这份归类计划，不是硬编码的二元判断（B4），但计划只是提案不是授权：执行前会按当前
+文件树重新校验安全不变量（保护路径重扫、category 白名单、target_path 合法性），
+计划与现状不符（陈旧/被篡改）即拒绝该 entry 并登记 blocker；`protected`/`conflict`
+命中时仍然停下报告（`--allow-blocked-normalize` 才允许记录后继续）。
 
 ## 步骤
 
@@ -71,8 +78,10 @@ stdout）里读到 `category` / `target_path` / `reason` / `blocker`。`normaliz
      --test-command "python -m unittest discover"
    ```
 
-4. 运行 scaffold，把模板 control plane 写入目标 repo。冲突文件会先搬到
-   `human/imported/adoption-conflicts/`，不会覆盖丢失。
+4. 运行 scaffold，把模板 control plane 写入目标 repo。control 目录**内部**逐文件合并时，
+   不一致的内部文件会先搬到 `human/imported/adoption-conflicts/`，不会覆盖丢失；root
+   同名 control 单文件不一致则登记 blocker、原样留下（不搬走、不装模板版本）；内含保护
+   内容的 control 目录整个跳过并登记 blocker。
 5. 运行 normalize，按 discover 的归类计划把 `conservative_import` 项移动到
    `lab/code/imported/<slug>/`；`template_control_item` 永不移动。若命中 `protected` 或
    `conflict`，停下并报告（不静默继续）。
@@ -92,9 +101,10 @@ stdout）里读到 `category` / `target_path` / `reason` / `blocker`。`normaliz
 至少报告：
 
 - Claude/Codex 两侧文件就位计数（信息展示，不是判据）；
-- `check-agent-harness.py --strict`（经由本 phase 已跑的 `governance` 结果）与
-  `sync-codex-adapters.py --check`（本 phase 单独只读跑一次）这两个 validator 的
-  ground-truth 状态；
+- `check-agent-harness.py --strict` 与 `sync-codex-adapters.py --check`（两者都由本
+  phase 在目标 repo 内单独只读各跑一次）这两个 validator 的 ground-truth 状态——
+  `validate-governance.py --strict` 的聚合结果是 report 里独立的 `governance` 字段，
+  不再冒充 harness 字段；
 - `core.hooksPath` 当前状态——**adoption 只读取，不代为设置**（是否覆盖 adopted repo 已有
   的 hooksPath 配置由 human 决定，跟 bootstrap 主动 `git config` 的行为不同）；
 - Codex trust 是 out-of-band 前提，adoption 不假装已替 human 完成 trust。

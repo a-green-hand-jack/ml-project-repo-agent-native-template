@@ -270,26 +270,80 @@ def hash_matches_template(src: Path, template_item: Path) -> bool | None:
     return src_hash == template_hash
 
 
+def protected_hits_within(target: Path, name: str, limit: int = 5) -> list[str]:
+    """Recursively scan a root entry for protected content (review
+    BLOCKER-1: name-only checks miss nested protected paths such as
+    `src/checkpoints/model.bin` or a target repo's own `lab/data/**`).
+
+    Returns repo-root-relative posix paths under `name` that match a
+    protected pattern and are NOT byte-identical to the template's own
+    file at the same relative path. The template itself ships placeholder
+    docs under `lab/data/`, `lab/runs/`, `lab/models/`, `lab/infra/private/`
+    — scaffold legitimately copies those in, and an unmodified copy must
+    not turn every re-run into a blocker. Anything else that matches a
+    protected pattern makes the WHOLE entry a blocker: the conservative
+    policy never does partial moves.
+    """
+    hits: list[str] = []
+    if protected_path(name):
+        hits.append(name)
+    root = target / name
+    if not root.is_dir():
+        return hits[:limit]
+    for walk_root, dirnames, filenames in os.walk(root):
+        walk_path = Path(walk_root)
+        dirnames[:] = [d for d in dirnames if d not in EXCLUDE_DIR_NAMES]
+        for child in dirnames:
+            rel = rel_posix(walk_path / child, target)
+            if protected_path(rel) and not (TEMPLATE_ROOT / rel).is_dir():
+                hits.append(rel)
+        for filename in filenames:
+            path = walk_path / filename
+            rel = rel_posix(path, target)
+            if not protected_path(rel):
+                continue
+            if hash_matches_template(path, TEMPLATE_ROOT / rel) is True:
+                continue  # unmodified template placeholder, not target data
+            hits.append(rel)
+        if len(hits) >= limit:
+            break
+    return hits[:limit]
+
+
 def classify_entry(target: Path, name: str, kind: str, import_root_rel: str) -> dict[str, Any]:
     """Classify a single root entry into one of the four built-in
     conservative buckets (plan B1, human-decided 2026-07-12 — no external
     rule file/CLI override, see 开放问题 4):
 
-    - protected: hits a forbidden/protected path — never moved, registered
-      as a blocker.
-    - template_control_item: hits `CONTROL_ITEMS` — always left in place
-      (structural directories are merged file-by-file by `scaffold`;
-      single files that diverge from the template are reconciled by
-      `scaffold` itself, which stashes the original under
-      `human/imported/adoption-conflicts/` and installs the template's
-      version here — normalize never moves a control item wholesale).
-    - conflict: not a control item, not protected, but its intended import
-      destination (`lab/code/imported/<slug>/<name>`) already holds
-      different content — registered as a blocker, not overwritten.
+    - protected: hits a forbidden/protected path — either the entry name
+      itself or (for directories) any nested path inside it (review
+      BLOCKER-1) — never moved, registered as a blocker for the whole
+      entry (conservative: no partial moves).
+    - template_control_item: hits `CONTROL_ITEMS` **and** the content hash
+      is unchanged vs the template (plan B1, human-decided 2026-07-12) —
+      left in place, nothing to reconcile. Structural control directories
+      are merged file-by-file by `scaffold`; normalize never moves a
+      control item wholesale.
+    - conflict: either a same-named control-item file whose hash differs
+      from / is not comparable to the template's canonical content (plan
+      B1 conflict branch: the target position already holds inconsistent
+      content — review MAJOR-2), or a non-control entry whose intended
+      import destination (`lab/code/imported/<slug>/<name>`) already holds
+      different content — registered as a blocker, never overwritten.
     - conservative_import: everything else — moved wholesale into
       `lab/code/imported/<slug>/<name>`.
     """
-    if protected_path(name):
+    protected_hits = protected_hits_within(target, name)
+    if protected_hits:
+        if protected_hits == [name]:
+            detail = (
+                f"matches a forbidden/protected path (lab/data, lab/runs, lab/models, "
+                f"lab/infra/private, checkpoints, wandb, .env, ...): '{name}'"
+            )
+        else:
+            detail = (
+                f"'{name}' contains protected content ({', '.join(protected_hits)})"
+            )
         return {
             "path": name,
             "kind": kind,
@@ -297,42 +351,54 @@ def classify_entry(target: Path, name: str, kind: str, import_root_rel: str) -> 
             "target_path": None,
             "blocker": True,
             "reason": (
-                f"matches a forbidden/protected path (lab/data, lab/runs, lab/models, "
-                f"lab/infra/private, checkpoints, wandb, .env, ...): '{name}' is never moved "
-                "or edited by adoption; registered as a blocker"
+                detail + " — never moved, scaffolded over, or edited by adoption "
+                "(conservative: the whole entry is a blocker, no partial moves)"
             ),
         }
     if name in CONTROL_ITEMS:
         template_item = TEMPLATE_ROOT / name
         if kind == "dir":
-            reason = (
-                "template-managed directory: scaffold merges/copies its contents in place "
-                "file-by-file; the directory itself is never moved as a whole"
-            )
-            hash_note = "not-applicable (directory)"
-        else:
-            same = hash_matches_template(target / name, template_item)
-            if same is True:
-                hash_note = "matches template"
-                reason = "matches the template's canonical content for this control item; nothing to reconcile"
-            elif same is False:
-                hash_note = "differs from template"
-                reason = (
-                    "differs from the template's canonical content for this control item; "
-                    "scaffold preserves the original under human/imported/adoption-conflicts/ "
-                    "and installs the template's version at this path — left in place, "
-                    "never moved into lab/code/imported"
-                )
-            else:
-                hash_note = "not comparable"
-                reason = "template control item; left in place by policy (no comparable template file)"
+            return {
+                "path": name,
+                "kind": kind,
+                "category": "template_control_item",
+                "target_path": name,
+                "blocker": False,
+                "reason": (
+                    "template-managed directory: scaffold merges/copies its contents in place "
+                    "file-by-file; the directory itself is never moved as a whole"
+                ),
+                "hash_note": "not-applicable (directory)",
+            }
+        same = hash_matches_template(target / name, template_item)
+        if same is True:
+            return {
+                "path": name,
+                "kind": kind,
+                "category": "template_control_item",
+                "target_path": name,
+                "blocker": False,
+                "reason": "matches the template's canonical content for this control item; nothing to reconcile",
+                "hash_note": "matches template",
+            }
+        # Plan B1 (review MAJOR-2): only "hits CONTROL_ITEMS *and* hash
+        # unchanged" is a template_control_item. A same-named file with
+        # different (or non-comparable) content is the target's own file
+        # at a position the template also claims — that is B1's conflict
+        # branch: register a blocker and stop; never silently stash the
+        # original and install the template's version.
+        hash_note = "differs from template" if same is False else "not comparable"
         return {
             "path": name,
             "kind": kind,
-            "category": "template_control_item",
+            "category": "conflict",
             "target_path": name,
-            "blocker": False,
-            "reason": reason,
+            "blocker": True,
+            "reason": (
+                f"same-named as template control item but content {hash_note} "
+                "(plan B1 conflict: the target position already holds inconsistent "
+                "content); registered as a blocker, left untouched for the human to reconcile"
+            ),
             "hash_note": hash_note,
         }
     dst_rel = f"{import_root_rel}/{name}"
@@ -531,6 +597,13 @@ def copy_file_preserving(src: Path, dst: Path, rel: str, target: Path, dry_run: 
     if dst.exists():
         if dst.is_file() and sha256_file(src) == sha256_file(dst):
             return "same"
+        if protected_path(rel):
+            # Review BLOCKER-1 (belt and suspenders): never stash/move or
+            # overwrite existing target content at a protected path, even
+            # when the template ships a same-named file. Scaffold's
+            # detect-before-scaffold check should prevent reaching here;
+            # if it is reached anyway, skip rather than touch the bytes.
+            return "protected_skip"
         preserve_existing(target, rel, dry_run)
     if dry_run:
         print(f"DRY-RUN copy {src} -> {dst}")
@@ -541,7 +614,7 @@ def copy_file_preserving(src: Path, dst: Path, rel: str, target: Path, dry_run: 
 
 
 def copy_template_tree(src_root: Path, dst_root: Path, target: Path, dry_run: bool) -> dict[str, int]:
-    counts = {"copy": 0, "same": 0, "skip": 0}
+    counts = {"copy": 0, "same": 0, "skip": 0, "protected_skip": 0}
     for root, dirnames, filenames in os.walk(src_root):
         root_path = Path(root)
         rel_root = root_path.relative_to(TEMPLATE_ROOT).as_posix()
@@ -561,24 +634,61 @@ def copy_template_tree(src_root: Path, dst_root: Path, target: Path, dry_run: bo
 
 
 def scaffold(args: argparse.Namespace) -> dict[str, Any]:
+    """Copy/merge template control items into the target.
+
+    Detect-before-scaffold (review BLOCKER-1): a control item that already
+    exists in the target and contains protected content (e.g. the target's
+    own `lab/data/**`) is skipped entirely and registered as a blocker —
+    scaffold must not write into it or stash same-named protected files
+    away before normalize's blocker gate is reached.
+
+    Plan B1 (review MAJOR-2): a same-named control-item *file* whose hash
+    differs from the template is a conflict blocker — left untouched, not
+    stashed under human/imported/adoption-conflicts/ with the template's
+    version installed over it.
+    """
     target = args.target.resolve()
     require_git_repo(target)
     if not state_path(target, BASELINE_FILE).exists():
         baseline(args)
-    counts = {"copy": 0, "same": 0, "skip": 0}
+    counts = {"copy": 0, "same": 0, "skip": 0, "protected_skip": 0}
+    blockers: list[str] = []
     for item in CONTROL_ITEMS:
         src = TEMPLATE_ROOT / item
         if not src.exists():
             continue
+        protected_hits = protected_hits_within(target, item)
+        if protected_hits:
+            blockers.append(
+                f"protected: {item} — contains protected content "
+                f"({', '.join(protected_hits)}); scaffold skipped this control item entirely"
+            )
+            continue
+        dst = target / item
         if src.is_file():
-            status = copy_file_preserving(src, target / item, item, target, args.dry_run)
+            if dst.exists():
+                if hash_matches_template(dst, src) is True:
+                    counts["same"] += 1
+                else:
+                    blockers.append(
+                        f"conflict: {item} — existing root file differs from the template's "
+                        "control item content (plan B1 conflict); left untouched"
+                    )
+                continue
+            status = copy_file_preserving(src, dst, item, target, args.dry_run)
             counts[status] += 1
         elif src.is_dir():
-            sub = copy_template_tree(src, target / item, target, args.dry_run)
+            sub = copy_template_tree(src, dst, target, args.dry_run)
             counts = {k: counts[k] + sub[k] for k in counts}
-    append_log(target, "scaffold", "ok", counts, args.dry_run)
-    print(f"[scaffold] copied={counts['copy']} same={counts['same']} skipped={counts['skip']}")
-    return counts
+    status = "blocked" if blockers else "ok"
+    append_log(target, "scaffold", status, {**counts, "blockers": blockers}, args.dry_run)
+    print(
+        f"[scaffold] copied={counts['copy']} same={counts['same']} skipped={counts['skip']} "
+        f"protected_skipped={counts['protected_skip']} blockers={len(blockers)}"
+    )
+    for blocker in blockers:
+        print(f"[scaffold] BLOCKER {blocker}")
+    return {**counts, "blockers": blockers}
 
 
 def path_hash(path: Path) -> str | None:
@@ -593,7 +703,15 @@ def normalize(args: argparse.Namespace) -> dict[str, Any]:
     moved wholesale into `plan["import_root"]`; `protected`/`conflict`
     entries stay put and are registered as blockers — the pipeline still
     stops here unless `--allow-blocked-normalize` is passed (unchanged
-    conservative behavior)."""
+    conservative behavior).
+
+    Review MAJOR-3: the persisted plan is a *proposal*, not a trusted
+    authorization. Before moving anything, normalize re-verifies the
+    safety invariants against the tree as it exists now: the category must
+    be one of the known four, the entry (and its descendants) must not
+    have become protected since discover, and the recorded target_path
+    must be sane (present, non-protected). A stale/tampered plan entry is
+    rejected with a blocker instead of executed."""
     target = args.target.resolve()
     require_git_repo(target)
     plan = read_json(state_path(target, PLAN_FILE))
@@ -603,6 +721,7 @@ def normalize(args: argparse.Namespace) -> dict[str, Any]:
         # per-entry classification — recompute it now with the same
         # conservative rules rather than silently doing nothing.
         classification = classify_root_entries(target, plan["project_slug"])
+    known_categories = {"protected", "template_control_item", "conflict", "conservative_import"}
     moved: list[dict[str, str]] = []
     blockers: list[str] = []
     for entry in sorted(classification, key=lambda e: e["path"]):
@@ -614,12 +733,41 @@ def normalize(args: argparse.Namespace) -> dict[str, Any]:
             # Entry no longer present between discover and normalize
             # (e.g. already moved by a prior partial run) — nothing to do.
             continue
-        if entry["blocker"]:
-            blockers.append(f"{entry['category']}: {name} — {entry['reason']}")
+        category = entry.get("category")
+        if category not in known_categories:
+            blockers.append(
+                f"unknown-category: {name} — plan entry carries unrecognized "
+                f"category {category!r}; refusing to act on it"
+            )
             continue
-        if entry["category"] == "template_control_item":
+        if entry["blocker"]:
+            blockers.append(f"{category}: {name} — {entry['reason']}")
+            continue
+        if category == "template_control_item":
             continue  # stays in place by definition, never moved
-        dst = target / entry["target_path"]
+        # category == "conservative_import" and plan said non-blocker:
+        # re-check the current tree before trusting the persisted plan.
+        current_hits = protected_hits_within(target, name)
+        if current_hits:
+            blockers.append(
+                f"protected: {name} — protected content present at normalize time "
+                f"({', '.join(current_hits)}); stale plan rejected for this entry"
+            )
+            continue
+        if name in CONTROL_ITEMS:
+            blockers.append(
+                f"plan-mismatch: {name} — plan says {category!r} but the entry is a "
+                "template control item; stale/tampered plan rejected for this entry"
+            )
+            continue
+        target_path = entry.get("target_path")
+        if not target_path or protected_path(target_path):
+            blockers.append(
+                f"plan-mismatch: {name} — plan target_path {target_path!r} is missing "
+                "or protected; refusing to move"
+            )
+            continue
+        dst = target / target_path
         if dst.exists():
             blockers.append(
                 f"conflict: {name} — destination appeared after discover: "
@@ -719,14 +867,34 @@ def run_sync_codex_check(target: Path) -> dict[str, Any]:
     }
 
 
-def agent_surface_report(target: Path, governance: dict[str, Any] | None) -> dict[str, Any]:
+def run_check_agent_harness(target: Path) -> dict[str, Any]:
+    """Read-only diagnostic: `check-agent-harness.py --strict` inside the
+    target repo. Review MINOR-4: the shared checklist contract
+    (`_agent_surface.agent_surface_checklist`) documents the
+    `check_agent_harness_strict` ground-truth field as exactly this
+    validator's result, so adoption runs the real script instead of
+    masquerading `validate-governance.py --strict`'s aggregate return code
+    under the harness field name (bootstrap keeps passing `None` →
+    `not-run-by-caller`, which the contract also allows)."""
+    script = target / "scripts" / "check-agent-harness.py"
+    if not script.exists():
+        return {"status": "missing", "path": "scripts/check-agent-harness.py"}
+    result = run([sys.executable, str(script), "--strict"], target, timeout=120)
+    return {
+        "status": "ok" if result["returncode"] == 0 else "failed",
+        "returncode": result["returncode"],
+        "stdout_tail": result["stdout"][-2000:],
+    }
+
+
+def agent_surface_report(target: Path) -> dict[str, Any]:
     """B6/D2c: adoption's Claude/Codex postflight checklist, built on the
     same shared `_agent_surface.agent_surface_checklist()` bootstrap uses
-    (plan A4) so the two entry points do not drift. `governance` is
-    `prove()`'s own `validate-governance.py --strict` run inside the
-    target, which already subsumes `check-agent-harness.py --strict`
-    (harness check #5/#6) — reused here as the ground-truth signal instead
-    of re-running it a second time."""
+    (plan A4) so the two entry points do not drift. The harness ground
+    truth is a dedicated `check-agent-harness.py --strict` run (see
+    `run_check_agent_harness`, review MINOR-4) — `prove()`'s
+    `validate-governance.py --strict` result stays its own separate field
+    in the proof report."""
     hooks_state = inspect_hooks_path(target)
     hooks_item = {
         "id": "core-hooks-path",
@@ -738,9 +906,7 @@ def agent_surface_report(target: Path, governance: dict[str, Any] | None) -> dic
         ),
     }
     sync_codex_result = run_sync_codex_check(target)
-    harness_result = {
-        "status": "not-run" if governance is None else ("ok" if governance["returncode"] == 0 else "failed"),
-    }
+    harness_result = run_check_agent_harness(target)
     return AGENT_SURFACE.agent_surface_checklist(target, hooks_item, sync_codex_result, harness_result)
 
 
@@ -758,7 +924,7 @@ def prove(args: argparse.Namespace) -> dict[str, Any]:
         if not cwd.exists():
             cwd = target
         original_test = run(plan["test_command"], cwd, shell=True, timeout=args.test_timeout)
-    agent_surface = agent_surface_report(target, governance)
+    agent_surface = agent_surface_report(target)
     report = {
         "schema": "template-adoption-proof-v1",
         "created_at": now_iso(),
