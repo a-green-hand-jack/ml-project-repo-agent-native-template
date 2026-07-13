@@ -27,9 +27,12 @@
   status-only `df61087` 的独立 review 以 `CHANGES_REQUESTED` 报告三项 MAJOR：durable status 把
   evidence parent 误写成 exact HEAD、缺一级标题的文档仍可接受 Status 锚点、G1/G2 raw 没有
   pre/post clone 状态与 pathspec bytes，因而不足以支撑 exact-head/clean/preserved 断言。标题校验与
-  normal/`python -S` 对抗 fixtures 已修；下一门槛是在新代码 target 上重跑带完整 pre/post 原文的
-  G1/G2，提交 evidence child 并对该 symbolic `HEAD` 做独立 final fresh review。未获 `APPROVE` 前
-  仍保持 implementing、不得合入。
+  normal/`python -S` 对抗 fixtures 已修，exact code target 为 `8eea18e`。三个新顶层 Claude
+  sessions 已在该 target 重跑 G1/G2；同一 raw typescript 同时包含 exact HEAD、pre/post status、
+  registry 状态、hook events，G2 还包含 opaque pathspec 的 bytes/text/SHA256。默认 G1 与 G2
+  post-status 均空、registry present；SKIP clone 只新增预期 probe。下一门槛是提交这些 raw 的
+  evidence child、跑全 strict gates，并对该 symbolic `HEAD` 做独立 final fresh review。未获
+  `APPROVE` 前仍保持 implementing、不得合入。
 - 权威状态注册表：`memory/doc-lifecycle.yaml`（brief/plan/review/decision 四类统一，语义见 `plans/ANATOMY.md`）。
 - 其余存量 plan 均已 `verified`，decisions 均 `approved`（详见注册表）。
 - 本节由 agent 在状态流转时更新；compact/clear 后 `context_continuity.py` 会把本文件回注新上下文。
@@ -62,9 +65,9 @@
 
 ## 未合入 blocker
 
-- #13：既有 C1-C3/X1-X3 真实 runtime evidence 有效；`df61087` final review 的标题 MAJOR 已修，
-  但 G1/G2 必须在新代码 target 上用 raw pre/post 状态重新证明，随后完成全 strict gates 与 exact
-  symbolic `HEAD` 独立 fresh `APPROVE`，否则不得合入。
+- #13：既有 C1-C3/X1-X3 真实 runtime evidence 有效；`df61087` final review 的标题 MAJOR 已由
+  `8eea18e` 修复，G1/G2 也已用包含 exact HEAD/pathspec/pre-post 状态的 raw 重新证明。仍须提交
+  evidence child、完成全 strict gates 与 exact symbolic `HEAD` 独立 fresh `APPROVE`，否则不得合入。
 - #18 `cebe427`：raw-evidence 绑定 validator 的代码 MAJOR 已修复并获 code APPROVE；仍须纳入
   #13 hook 兼容修复，在最终 exact target 完成 C1-C7/X1-X7、`--require-fresh` exit 0 与 fresh
   final review。未取得这些证据前不得合入。
@@ -430,7 +433,7 @@ kind/category/blocker/target_path 都按当前树重算；
 本轮由 Codex 接管已停止的 Paseo agent，并使用隔离 worktree 的 native subagents 做实现/终审切片。
 截至当前：#12/#12b/#12c/#14/#15/#16/#17 已 fresh `APPROVE` 并合入本地 main；#13 的
 C1-C3/X1-X3 真实 runtime smoke 已 PASS；`df61087` final review 新发现的无标题锚点代码 MAJOR
-已修，G1/G2 正在新代码 target 上补含 exact HEAD、pathspec bytes 与 post-state 的 raw evidence；
+已由 `8eea18e` 修复，G1/G2 已补含 exact HEAD、pathspec bytes 与 post-state 的 raw evidence；
 #18 仍待纳入 #13 hook 后完成最终 runtime 矩阵与 fresh review。
 
 ## Open issues / blockers（issue #12 part A，本轮新增）
