@@ -21,7 +21,8 @@
 6. 过期 approval（human 拍板：唯一触发）：上游引用被标 superseded → 本条 approved/implementing 失效。
 7. approved/implementing 态的「## Human 批注区」不得残留 `[?]` / `[改]` 未决批注
    （格式约定 + 模式匹配，不做语义分类；防止未收敛被误判为已收敛）。
-8. 文档状态锚点必须与注册表一致（矛盾即错）；四类文档（导航四件套除外）必须登记。
+8. 文档状态锚点必须是标题后的第一条非空正文、全文唯一、且与注册表一致（矛盾即错）；
+   fenced 示例不算锚点；四类文档（导航四件套除外）必须登记。
 9. kind 必须与路径类别一致（plans/ 只能登记 kind=plan，human/decisions/ 只能 kind=decision，
    以此类推；防止谎报 kind 绕过 plan 必填段校验）。路径不在四类目录内才允许自由声明 kind（告警）。
 10. 存在四类受管文档但注册表缺失 → error（非 strict 也 fail）：注册表一旦建立就是治理面，
@@ -365,22 +366,84 @@ def scan_docs(repo: Path) -> list[str]:
 
 
 def _parse_status_anchor(text: str) -> tuple[str | None, str | None]:
-    """返回 (status, error)：没有锚点不是解析错误，出现 Status 前缀却不完整则是。"""
-    for line in text.splitlines():
-        if not STATUS_PREFIX.match(line):
+    """返回 (status, error)，只认标题后的第一条非空正文，且全文只能有一个锚点。"""
+    lines = text.splitlines()
+    visible_lines: list[str] = []
+    in_comment = False
+    for raw in lines:
+        visible: list[str] = []
+        cursor = 0
+        while cursor < len(raw):
+            if in_comment:
+                end = raw.find("-->", cursor)
+                if end < 0:
+                    cursor = len(raw)
+                else:
+                    in_comment = False
+                    cursor = end + 3
+                continue
+            start = raw.find("<!--", cursor)
+            if start < 0:
+                visible.append(raw[cursor:])
+                break
+            visible.append(raw[cursor:start])
+            in_comment = True
+            cursor = start + 4
+        visible_lines.append("".join(visible))
+
+    candidates: list[tuple[int, str]] = []
+    fence: tuple[str, int] | None = None
+    for index, line in enumerate(visible_lines):
+        stripped = line.strip()
+        for _ in range(8):
+            unquoted = BLOCKQUOTE_PREFIX.sub("", stripped).strip()
+            if unquoted == stripped:
+                break
+            stripped = unquoted
+        fence_match = FENCE_LINE.match(stripped)
+        if fence_match:
+            marker = fence_match.group(1)
+            if fence is None:
+                fence = (marker[0], len(marker))
+            elif marker[0] == fence[0] and len(marker) >= fence[1]:
+                fence = None
             continue
-        m = STATUS_LINE.fullmatch(line)
-        if not m:
-            return None, "状态锚点格式非法（应为 Status: <enum> · <YYYY-MM-DD> · <ref>）"
-        status, raw_date, ref = m.groups()
-        try:
-            date.fromisoformat(raw_date)
-        except ValueError:
-            return None, f"状态锚点日期非法：{raw_date}（应为真实 YYYY-MM-DD 日期）"
-        if _is_evidence_missing_or_placeholder(ref):
-            return None, "状态锚点 ref 缺失/占位（需可核验的非占位引用）"
-        return status, None
-    return None, None
+        if fence is None and STATUS_PREFIX.match(line):
+            candidates.append((index, line))
+
+    if len(candidates) > 1:
+        return None, "状态锚点重复/歧义（全文只能有一条正文 Status 锚点）"
+    if not candidates:
+        return None, None
+
+    anchor_index, line = candidates[0]
+    first_nonblank = next((i for i, raw in enumerate(visible_lines) if raw.strip()), None)
+    expected_index = first_nonblank
+    if first_nonblank is not None and re.match(
+        r"^\s*#(?:\s+|$)", visible_lines[first_nonblank]
+    ):
+        expected_index = next(
+            (
+                i
+                for i in range(first_nonblank + 1, len(visible_lines))
+                if visible_lines[i].strip()
+            ),
+            None,
+        )
+    if anchor_index != expected_index:
+        return None, "状态锚点不在正文顶部（必须是标题后的第一条非空行）"
+
+    m = STATUS_LINE.fullmatch(line)
+    if not m:
+        return None, "状态锚点格式非法（应为 Status: <enum> · <YYYY-MM-DD> · <ref>）"
+    status, raw_date, ref = m.groups()
+    try:
+        date.fromisoformat(raw_date)
+    except ValueError:
+        return None, f"状态锚点日期非法：{raw_date}（应为真实 YYYY-MM-DD 日期）"
+    if _is_evidence_missing_or_placeholder(ref):
+        return None, "状态锚点 ref 缺失/占位（需可核验的非占位引用）"
+    return status, None
 
 
 def extract_status(text: str) -> str | None:
@@ -484,33 +547,70 @@ def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(["git", *args], 127, "", "git unavailable")
 
 
-def _branch_exists(repo: Path, branch: str) -> bool:
-    """只接受一个真实 Git ref；活跃 plan 不允许用自由文本拼多个 branch。"""
+def _branch_refs(repo: Path, branch: str) -> dict[str, str]:
+    """解析声明 branch；本地 branch 优先，detached clone 才回退到同名 remote refs。"""
     branch = branch.strip()
     if not branch or any(ch.isspace() for ch in branch):
-        return False
-    refs = [branch] if branch.startswith("refs/") else [
-        f"refs/heads/{branch}",
-        f"refs/remotes/{branch}",
-    ]
-    return any(_git(repo, "show-ref", "--verify", "--quiet", ref).returncode == 0 for ref in refs)
+        return {}
+    if branch.startswith("refs/"):
+        if _git(repo, "check-ref-format", branch).returncode != 0:
+            return {}
+        proc = _git(repo, "rev-parse", "--verify", f"{branch}^{{commit}}")
+        return {branch: proc.stdout.strip()} if proc.returncode == 0 and proc.stdout.strip() else {}
+
+    if _git(repo, "check-ref-format", "--branch", branch).returncode != 0:
+        return {}
+
+    local_ref = f"refs/heads/{branch}"
+    local = _git(repo, "rev-parse", "--verify", f"{local_ref}^{{commit}}")
+    if local.returncode == 0 and local.stdout.strip():
+        return {local_ref: local.stdout.strip()}
+
+    proc = _git(
+        repo,
+        "for-each-ref",
+        "--format=%(refname)%09%(objectname)",
+        f"refs/remotes/*/{branch}",
+    )
+    if proc.returncode != 0:
+        return {}
+    refs: dict[str, str] = {}
+    for line in proc.stdout.splitlines():
+        ref, sep, target = line.partition("\t")
+        if sep and ref and target:
+            refs[ref] = target
+    return refs
 
 
-def _worktree_records(repo: Path) -> list[tuple[Path, str | None]]:
+def _branch_target(repo: Path, branch: str) -> str | None:
+    refs = _branch_refs(repo, branch)
+    targets = set(refs.values())
+    return next(iter(targets)) if len(targets) == 1 else None
+
+
+def _branch_exists(repo: Path, branch: str) -> bool:
+    """只接受能唯一解析到一个 commit 的真实 Git branch/ref。"""
+    return _branch_target(repo, branch) is not None
+
+
+def _worktree_records(repo: Path) -> list[tuple[Path, str | None, str | None]]:
     proc = _git(repo, "worktree", "list", "--porcelain")
     if proc.returncode != 0:
         return []
-    records: list[tuple[Path, str | None]] = []
+    records: list[tuple[Path, str | None, str | None]] = []
     path: Path | None = None
     branch: str | None = None
+    head: str | None = None
     for line in [*proc.stdout.splitlines(), ""]:
         if line.startswith("worktree "):
             path = Path(line[len("worktree "):]).resolve()
+        elif line.startswith("HEAD "):
+            head = line[len("HEAD "):].strip()
         elif line.startswith("branch "):
             branch = line[len("branch "):].strip()
         elif not line and path is not None:
-            records.append((path, branch))
-            path, branch = None, None
+            records.append((path, branch, head))
+            path, branch, head = None, None, None
     return records
 
 
@@ -527,16 +627,38 @@ def _worktree_candidates(repo: Path, raw: str) -> set[Path]:
 
 
 def _worktree_matches(repo: Path, raw: str, branch: str) -> bool:
-    expected_branch = branch if branch.startswith("refs/") else f"refs/heads/{branch}"
+    refs = _branch_refs(repo, branch)
+    targets = set(refs.values())
+    if len(targets) != 1:
+        return False
+    target = next(iter(targets))
+    expected_local_refs = {ref for ref in refs if ref.startswith("refs/heads/")}
     records = _worktree_records(repo)
     # `worktree: .` is portable: discover the checkout bound to the declared branch.
-    # An explicit path remains strict and must match that exact registered worktree.
+    # CI/exact-review clones may be detached: accept only the current checkout at the exact
+    # branch tip, or a two-parent synthetic merge whose direct parent is that tip.
+    # An explicit path remains strict and must match that exact branch-bound worktree.
     if raw.strip() == ".":
-        return any(actual_branch == expected_branch for _, actual_branch in records)
+        if any(
+            actual_branch in expected_local_refs and head == target
+            for _, actual_branch, head in records
+        ):
+            return True
+        current = repo.resolve()
+        for path, actual_branch, head in records:
+            if path != current or actual_branch is not None or not head:
+                continue
+            if head == target:
+                return True
+            parents = _git(repo, "rev-list", "--parents", "-n", "1", head)
+            fields = parents.stdout.split() if parents.returncode == 0 else []
+            if len(fields) >= 3 and target in fields[1:]:
+                return True
+        return False
     candidates = _worktree_candidates(repo, raw)
     return any(
-        path in candidates and actual_branch == expected_branch
-        for path, actual_branch in records
+        path in candidates and actual_branch in expected_local_refs and head == target
+        for path, actual_branch, head in records
     )
 
 
@@ -866,7 +988,10 @@ def _doc_write_reason(rel: str, kind: str, content: str, markers_text: str, repo
     if anchor_error:
         return f"doc-lifecycle: {rel} 的{anchor_error}。{_ESCAPE_HINT}"
     if status is None:
-        return None  # 无状态锚点：coverage 由 validator 事后管，hook 不拦
+        return (
+            f"doc-lifecycle: {rel} 缺状态锚点"
+            f"（必须是标题后的第一条非空行，且全文唯一）。{_ESCAPE_HINT}"
+        )
     if status not in VALID_STATUS:
         return (
             f"doc-lifecycle: {rel} 的状态锚点非法：{status}"
@@ -2198,6 +2323,7 @@ def self_test() -> int:
     td, root = fresh({"plans/demo.zh.md": implementing_plan, REGISTRY_REL: implementing_reg})
     errs, _ = validate_repo(root)
     check("implementing plan 的真实 issue/branch/worktree 关联通过", errs == [])
+    check("branch 声明不能借 glob 匹配多个 refs", not _branch_exists(root, "feat/*"))
 
     for label, bad_reg, needle in (
         ("issue 占位", implementing_reg.replace('issue: "#123"', 'issue: "<issue>"'), "issue"),
@@ -2215,6 +2341,108 @@ def self_test() -> int:
             ) is not None,
         )
     td.cleanup()
+
+    # 独立 reviewer/CI checkout 通常是 detached HEAD：无本地 branch 时允许唯一同名 remote
+    # ref，且 `worktree: .` 只接受 exact tip 或以该 tip 为直接父提交的双亲 synthetic merge。
+    detached_td = tempfile.TemporaryDirectory()
+    detached_base = Path(detached_td.name)
+    source = detached_base / "source"
+    clone = detached_base / "clone"
+    _mk(source, {"plans/demo.zh.md": implementing_plan, REGISTRY_REL: implementing_reg})
+    _init_fixture_git(source)
+    subprocess.run(["git", "-C", str(source), "add", "."], check=True, capture_output=True)
+    subprocess.run(
+        [
+            "git", "-C", str(source), "-c", "user.name=doc-lifecycle-fixture",
+            "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture files",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "clone", "-q", "--no-local", str(source), str(clone)],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(clone), "checkout", "--detach", "-q", "HEAD"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(clone), "branch", "-D", "feat/demo"],
+        check=True,
+        capture_output=True,
+    )
+    target = _git(clone, "rev-parse", "HEAD").stdout.strip()
+    base_commit = _git(clone, "rev-parse", "HEAD^").stdout.strip()
+    tree = _git(clone, "rev-parse", "HEAD^{tree}").stdout.strip()
+    errs, _ = validate_repo(clone)
+    check("detached exact clone 通过唯一 remote branch + worktree=. 绑定", errs == [])
+
+    subprocess.run(
+        ["git", "-C", str(clone), "update-ref", "refs/remotes/other/feat/demo", target],
+        check=True,
+        capture_output=True,
+    )
+    errs, _ = validate_repo(clone)
+    check("多个同名 remote refs 指向同一 commit 不制造假歧义", errs == [])
+
+    merge_commit = subprocess.run(
+        [
+            "git", "-C", str(clone), "-c", "user.name=doc-lifecycle-fixture",
+            "-c", "user.email=fixture@example.invalid", "commit-tree", tree,
+            "-p", base_commit, "-p", target, "-m", "synthetic merge",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    subprocess.run(
+        ["git", "-C", str(clone), "checkout", "--detach", "-q", merge_commit],
+        check=True,
+        capture_output=True,
+    )
+    errs, _ = validate_repo(clone)
+    check("detached synthetic merge 的直接 feature parent 通过 worktree=. 绑定", errs == [])
+
+    linear_commit = subprocess.run(
+        [
+            "git", "-C", str(clone), "-c", "user.name=doc-lifecycle-fixture",
+            "-c", "user.email=fixture@example.invalid", "commit-tree", tree,
+            "-p", target, "-m", "linear descendant",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    subprocess.run(
+        ["git", "-C", str(clone), "checkout", "--detach", "-q", linear_commit],
+        check=True,
+        capture_output=True,
+    )
+    errs, _ = validate_repo(clone)
+    check(
+        "detached 普通后继 commit 不冒充 declared branch checkout",
+        any("worktree" in e for e in errs),
+    )
+
+    subprocess.run(
+        ["git", "-C", str(clone), "checkout", "--detach", "-q", target],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(clone), "update-ref", "refs/remotes/other/feat/demo", base_commit],
+        check=True,
+        capture_output=True,
+    )
+    errs, _ = validate_repo(clone)
+    check(
+        "同名 remote branches 指向不同 commits 时 fail-closed",
+        any("branch" in e for e in errs) and any("worktree" in e for e in errs),
+    )
+    detached_td.cleanup()
 
     verified_plan = _OK_PLAN.replace("Status: approved", "Status: verified")
     verified_reg = (
@@ -2276,6 +2504,59 @@ def self_test() -> int:
             ) is not None,
         )
         td.cleanup()
+
+    ambiguous_anchors = (
+        (
+            "重复",
+            _OK_PLAN.replace(
+                "Status: approved · 2026-07-12 · human 批准（demo）",
+                "Status: approved · 2026-07-12 · human 批准（demo）\n"
+                "Status: draft · 2026-07-13 · conflicting",
+            ),
+            "重复/歧义",
+        ),
+        (
+            "非顶部",
+            _OK_PLAN.replace(
+                "Status: approved · 2026-07-12 · human 批准（demo）",
+                "intro before anchor\n\nStatus: approved · 2026-07-12 · human 批准（demo）",
+            ),
+            "正文顶部",
+        ),
+        (
+            "仅 fenced 示例",
+            "# demo plan\n\n```text\nStatus: draft · 2026-07-12 · example only\n```\n",
+            "缺状态锚点",
+        ),
+    )
+    for label, malformed, needle in ambiguous_anchors:
+        td, root = fresh({"plans/demo.zh.md": malformed, REGISTRY_REL: _OK_REGISTRY})
+        errs, _ = validate_repo(root)
+        check(f"{label}状态锚点被 validator 报错", any(needle in e for e in errs))
+        check(
+            f"hook 拦 Write {label}状态锚点",
+            pretooluse_reason(
+                "Write", {"file_path": str(root / "plans/demo.zh.md"), "content": malformed}, root
+            ) is not None,
+        )
+        td.cleanup()
+
+    fenced_example = (
+        _OK_PLAN
+        + "\n```text\nStatus: draft · 2026-07-13 · example only\n```\n"
+        + "\n> ```text\n> Status: verified · 2026-07-13 · quoted example only\n> ```\n"
+        + "\n<!-- Status: superseded · 2026-07-13 · commented example only -->\n"
+    )
+    td, root = fresh({"plans/demo.zh.md": fenced_example, REGISTRY_REL: _OK_REGISTRY})
+    errs, _ = validate_repo(root)
+    check("真实顶部锚点 + fenced Status 示例不误判为重复", errs == [])
+    check(
+        "hook 放行真实顶部锚点 + fenced Status 示例",
+        pretooluse_reason(
+            "Write", {"file_path": str(root / "plans/demo.zh.md"), "content": fenced_example}, root
+        ) is None,
+    )
+    td.cleanup()
 
     prose_ref_plan = _OK_PLAN.replace(
         "human 批准（demo）", "review completed after checking TODO handling"

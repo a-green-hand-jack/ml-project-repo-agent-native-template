@@ -172,6 +172,19 @@ def main() -> int:
         "Status: approved · 2026-07-13 · synthetic human approval",
         "Status: approved · 2026-07-13 · TODO",
     )
+    duplicate_anchor_plan = TMP_ANCHOR_PLAN_TEXT.replace(
+        "Status: approved · 2026-07-13 · synthetic human approval",
+        "Status: approved · 2026-07-13 · synthetic human approval\n"
+        "Status: draft · 2026-07-13 · conflicting",
+    )
+    late_anchor_plan = TMP_ANCHOR_PLAN_TEXT.replace(
+        "Status: approved · 2026-07-13 · synthetic human approval",
+        "intro before anchor\n\nStatus: approved · 2026-07-13 · synthetic human approval",
+    )
+    fenced_only_anchor_plan = (
+        "# fenced-only status\n\n```text\n"
+        "Status: draft · 2026-07-13 · example only\n```\n"
+    )
     placeholder_section_plan = TMP_ANCHOR_PLAN_TEXT.replace(
         "- plans/.guard-regression-anchor-tmp.zh.md", "- [ ] TODO"
     )
@@ -436,6 +449,12 @@ def main() -> int:
          {"file_path": TMP_ANCHOR_PLAN_REL, "content": invalid_date_plan}, 2, None),
         ("fresh-review-5c: 状态锚点占位 ref 拦", "Write",
          {"file_path": TMP_ANCHOR_PLAN_REL, "content": placeholder_ref_plan}, 2, None),
+        ("final-review: 重复/歧义状态锚点拦", "Write",
+         {"file_path": TMP_ANCHOR_PLAN_REL, "content": duplicate_anchor_plan}, 2, None),
+        ("final-review: 非顶部状态锚点拦", "Write",
+         {"file_path": TMP_ANCHOR_PLAN_REL, "content": late_anchor_plan}, 2, None),
+        ("final-review: fenced 示例不能冒充正文状态锚点", "Write",
+         {"file_path": TMP_ANCHOR_PLAN_REL, "content": fenced_only_anchor_plan}, 2, None),
         ("fresh-review-6a: registry approval=TODO 拦", "Write",
          {"file_path": REGISTRY, "content": placeholder_approval_registry}, 2, None),
         ("fresh-review-6b: plan section checkbox TODO 拦", "Write",
@@ -550,16 +569,19 @@ def main() -> int:
             ok = got == want
             failures += 0 if ok else 1
             print(f"  {'PASS' if ok else 'FAIL'}  {name} (exit {got}, want {want})")
-        got = run_no_site(
-            "Write", {"file_path": REGISTRY, "content": duplicate_docs_registry}
-        )
-        ok = got == 2
-        failures += 0 if ok else 1
-        print(
-            "  "
-            f"{'PASS' if ok else 'FAIL'}  real python -S hook: 第二份合法重复 docs fail-closed "
-            f"(exit {got}, want 2)"
-        )
+        for name, path, content in (
+            ("第二份合法重复 docs", REGISTRY, duplicate_docs_registry),
+            ("重复/歧义状态锚点", TMP_ANCHOR_PLAN_REL, duplicate_anchor_plan),
+            ("fenced 示例冒充状态锚点", TMP_ANCHOR_PLAN_REL, fenced_only_anchor_plan),
+        ):
+            got = run_no_site("Write", {"file_path": path, "content": content})
+            ok = got == 2
+            failures += 0 if ok else 1
+            print(
+                "  "
+                f"{'PASS' if ok else 'FAIL'}  real python -S hook: {name} fail-closed "
+                f"(exit {got}, want 2)"
+            )
     finally:
         TMP_PLAN.unlink(missing_ok=True)
         TMP_ANCHOR_PLAN.unlink(missing_ok=True)

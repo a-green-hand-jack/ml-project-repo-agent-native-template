@@ -1,7 +1,8 @@
 # doc-lifecycle.yaml — brief/plan/review/decision 四类文档生命周期注册表（issue #13）
 #
-# 由 agent 维护，human 不手填复杂 YAML；文档正文的状态锚点行（Status: <enum> · <date> · <ref>）
-# 是人类可读锚，本文件是机器可解析的关联/证据。两处必须一致（validator 在 commit 粒度强制）。
+# 由 agent 维护，human 不手填复杂 YAML；文档标题后的第一条非空正文必须是唯一状态锚点行
+# （Status: <enum> · <date> · <ref>；fenced 示例不算），本文件是机器可解析的关联/证据。
+# 两处必须一致（validator 在 commit 粒度强制）。
 #
 # 校验：scripts/check-doc-lifecycle.py（由 validate-governance.py 拉起）。
 # 机械拦截：.claude/hooks/pre_tool_guard.py 经 pretooluse_reason() 复用同一份判定逻辑。
@@ -13,7 +14,8 @@
 #   issue / branch / worktree —— 执行关联坐标。活跃 plan（approved/implementing）的 issue
 #     必须是非占位 `#N` 或 GitHub issue URL，branch 必须是现存 Git ref；implementing 的
 #     worktree 必须是 `git worktree list` 中绑定该 branch 的真实条目；`.` 表示按 branch
-#     自动发现 checkout，适用于 linked worktree 与独立 clone。verified 是历史态，
+#     自动发现 checkout。独立 detached clone 可用唯一同名 remote ref 绑定 exact tip 或以它为
+#     直接父提交的双亲 synthetic merge；同名 refs 分叉时 fail-closed。verified 是历史态，
 #     合并后允许 branch/worktree 被清理，历史事实由 approval 的 commit/PR/test 引用承担。
 #   approval —— human gate 证据引用（approved/implementing/verified 必填、非占位）
 #   upstream / downstream —— 注册表内其他条目 id（必须真实存在；上游被标 superseded

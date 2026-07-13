@@ -13,10 +13,12 @@
   默认非法 Write deny、仅显式 `DOC_LIFECYCLE_SKIP=1` allow、registry delete deny 均有顶层
   Claude Code session hook raw evidence。
   raw 转录、debug log 与 sha256 见 `lab/evals/doc-lifecycle/evidence-20260713-runtime-probes.md`。
-  evidence-only `54822ff` 的独立 fresh review 发现 PyYAML 正常路径会静默采用第二份合法
-  `docs:`；代码提交 `de9aa2e` 已在 AST 阶段统一拒绝该重复根，并以 normal/`python -S`
-  对抗 fixture、strict gates 及三场 exact-target G1/G2 顶层 session 验证。下一门槛仅为把
-  raw gzip+SHA 作为 evidence-only direct child 提交并取得 exact HEAD fresh APPROVE。
+  evidence-only `d57957c` 的独立 fresh review 认可 raw/duplicate-root/Null/非标量/wrapper
+  证据，但发现三个 MAJOR：detached exact clone 的 branch/worktree 绑定失败、本文旧段仍称
+  runtime smoke 缺失、状态锚点不要求顶部且不唯一。本轮修复已加入 detached exact + 双亲
+  synthetic merge + remote 分叉对抗 fixtures、唯一顶部锚点/fenced 示例对抗 fixtures，并删除
+  下方旧状态矛盾；下一门槛是提交新 code target、重跑 exact-target G1/G2 与全 strict gates，
+  再创建 evidence-only direct child 做独立 final review。
 - 权威状态注册表：`memory/doc-lifecycle.yaml`（brief/plan/review/decision 四类统一，语义见 `plans/ANATOMY.md`）。
 - 其余存量 plan 均已 `verified`，decisions 均 `approved`（详见注册表）。
 - 本节由 agent 在状态流转时更新；compact/clear 后 `context_continuity.py` 会把本文件回注新上下文。
@@ -414,9 +416,10 @@ kind/category/blocker/target_path 都按当前树重算；
 
 ## Subagent reports
 
-本轮由 Codex 接管已停止的 Paseo agent，并使用隔离 worktree 的 native subagents 做实现/终审切片：
-#12b、#12c、#15 已取得独立 `APPROVE`；#13 仍缺真实 Claude/Codex runtime smoke，#16/#17
-仍在修复，#18 fresh review 为 `REQUEST_CHANGES`。最终集成与验证由主 agent 负责。
+本轮由 Codex 接管已停止的 Paseo agent，并使用隔离 worktree 的 native subagents 做实现/终审切片。
+截至当前：#12/#12b/#12c/#14/#15/#16/#17 已 fresh `APPROVE` 并合入本地 main；#13 的
+C1-C3/X1-X3/G1-G2 真实 runtime smoke 已 8/8 PASS，正在修复 exact `d57957c` final review 的
+三个代码/状态 MAJOR；#18 仍待纳入 #13 hook 后完成最终 runtime 矩阵与 fresh review。
 
 ## Open issues / blockers（issue #12 part A，本轮新增）
 
