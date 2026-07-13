@@ -51,7 +51,7 @@ description: 当要跑一个实验或复现一篇 paper 时，用来写 experime
    不改运行中的 job。
 6. 异常路径：watcher 的结构化 alerts 由 experiment-orchestrator 并入 ledger `alerts` 字段；
    approved_by/approved_at/approved_action 只作审计。orchestrator 用
-   `expctl.py apply-recovery --dry-run` 校验同 run/workdir 的 fake/local 提案，再交 human
+   `expctl.py validate-recovery` 只读校验同 run/workdir 的 fake/local 提案，再交 human
    在 agent hook 外亲自执行；repo-local provenance 不受信，actual apply-recovery fail-closed。
 7. 跑完写 run summary（`.agent/templates/run-summary.md`）；状态转 done/failed；
    产出物交 artifact-indexing 登记（done 的闭环由 validate-experiment-state 校验）。

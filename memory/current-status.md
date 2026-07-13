@@ -6,21 +6,25 @@
 ## 当前 objective
 
 在 `feat/16-experiment-control-plane` 收敛 fresh review 的三个安全 blocker：launch gate
-不得被 caller env / env split / shell eval 绕过；repo-local recovery 因缺可信 provenance 与
-原子 consumer 而 actual fail-closed；fake job 严格绑定 interpreter/run/workdir/status。
+不得被 caller env / wrapper operands / 路径与 module 别名 / 动态 eval 绕过；repo-local recovery
+用独立只读入口校验、actual fail-closed；fake job 严格绑定 interpreter/run/workdir/status；done
+run summary 只能是允许目录内安全的 tracked regular file。
 
 ## #16 fresh-review handoff（2026-07-13）
 
-- launch hook 命中即拒，`CLAUDE_ALLOW_LAUNCH` / `CODEX_ALLOW_LAUNCH` 永不放行；新增
-  `env -S`、`env --split-string`、shell `-c/-lc` 对抗覆盖。
-- `expctl apply-recovery` 仅允许 `--dry-run`；`/tmp` 测试 ledger actual apply 先于解析即拒，
-  canonical ledger actual apply 也因无可信 provenance/原子消费 fail-closed。
+- launch hook 命中即拒，`CLAUDE_ALLOW_LAUNCH` / `CODEX_ALLOW_LAUNCH` 永不放行；覆盖
+  `env -S`、shell/python `-c`、内部 `.`/`..`、`python -m`、`_worker`、带 operand 的
+  `timeout --signal TERM 60` 与 `env -u FOO`。
+- agent 使用 `expctl validate-recovery` 只读校验；`/tmp` 与 canonical ledger 的 actual
+  `apply-recovery` 都因无可信 provenance/原子消费 fail-closed。
 - alert schema 新增 proposal.workdir、approval_provenance、consume/execution/resolved 状态；
   当前 provenance 必须为 null，非 null 自称批准由 validator 拒绝。
 - `fake_job.py` 仅接受无 symlink 的字面 `/tmp/.../<run-id>`，核对受信解释器/status/worker argv，
   以 control lock 串行控制动作，并用 pidfd 避免 PID reuse signal。
+- status=done 的 `run_summary` 必须位于 `lab/code/experiments/`，且是 repo-relative、无
+  traversal/symlink 的 regular file。
 - 不运行真实训练/scheduler；验证只使用脚本内置 fake/local self-test。
-- fresh validation：launch gate 48/48、fake job 12/12、expctl self-test、experiment state
+- fresh validation：launch gate 60/60、fake job 12/12、expctl self-test、experiment state
   self-test/strict、adapter sync check、harness strict、anatomy、governance strict、diff check 全绿。
 
 ## Constraints

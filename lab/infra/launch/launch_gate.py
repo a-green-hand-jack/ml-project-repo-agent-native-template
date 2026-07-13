@@ -21,7 +21,7 @@ restart 类计算副作用入口）。命中即由 hook 地板拒绝；调用者
 - 不存在 env 放行：`CLAUDE_ALLOW_LAUNCH` / `CODEX_ALLOW_LAUNCH` 是调用者可自设输入，
   不构成 human provenance，也不会改变判定。human 若要执行，必须在 agent hook 外亲自
   运行；repo-local 半自动 recovery 在可信批准/原子消费合同落地前 fail-closed。
-- 路径归一化：绝对路径 / `./` 前缀的脚本路径折算成 repo 相对形态再比对。
+- 路径归一化：绝对路径及相对路径中的 `.` / `..` 折算成 repo 相对形态再比对。
 
 对外 API：
 - gate_reason(raw_cmd) -> str | None   # None = 放行；str = 拒绝理由
@@ -76,15 +76,17 @@ def load_gated_prefixes(registry_path: Path | None = None) -> list[str]:
 
 
 def _norm_token(tok: str) -> str:
-    """路径归一化：./ 前缀去掉；指向 repo 内的绝对路径折算成 repo 相对路径。"""
+    """把可能的脚本路径按 repo cwd 语义归一化；普通命令名保持不变。"""
     t = tok.strip().strip('"').strip("'")
-    if t.startswith("./"):
-        t = t[2:]
-    if t.startswith("/"):
-        try:
-            t = str(Path(t).resolve().relative_to(REPO_ROOT))
-        except ValueError:
-            pass  # repo 外的绝对路径保持原样
+    if "/" not in t and not t.startswith("."):
+        return t
+    candidate = Path(t)
+    if not candidate.is_absolute():
+        candidate = REPO_ROOT / candidate
+    try:
+        t = str(candidate.resolve().relative_to(REPO_ROOT))
+    except (OSError, ValueError):
+        t = str(candidate.resolve(strict=False))
     return t
 
 
@@ -117,8 +119,100 @@ def _split_env(tokens: list[str]) -> tuple[list[str], list[str]]:
     return tokens[:i], tokens[i:]
 
 
+def _strip_wrapper_once(tokens: list[str]) -> list[str]:
+    """剥一层已知 wrapper，并消费会占用下一 token 的已知选项。"""
+    base = os.path.basename(tokens[0])
+    i = 1
+    if base in ("nohup", "command", "exec"):
+        while i < len(tokens) and tokens[i].startswith("-"):
+            i += 1
+        return tokens[i:]
+    if base == "env":
+        operand_options = {
+            "-u", "--unset", "-C", "--chdir", "--argv0",
+            "--block-signal", "--default-signal", "--ignore-signal",
+        }
+        while i < len(tokens):
+            token = tokens[i]
+            if token == "--":
+                return tokens[i + 1:]
+            if _ENV_ASSIGN.match(token):
+                i += 1
+                continue
+            if token in operand_options:
+                i += 2
+                continue
+            if token.startswith(("--unset=", "--chdir=", "--argv0=", "--block-signal=",
+                                 "--default-signal=", "--ignore-signal=")):
+                i += 1
+                continue
+            if re.match(r"^-u.+", token) or re.match(r"^-C.+", token):
+                i += 1
+                continue
+            if token.startswith("-"):
+                i += 1
+                continue
+            break
+        return tokens[i:]
+    if base == "timeout":
+        operand_options = {"-k", "--kill-after", "-s", "--signal"}
+        while i < len(tokens) and tokens[i].startswith("-"):
+            token = tokens[i]
+            if token == "--":
+                i += 1
+                break
+            if token in operand_options:
+                i += 2
+            else:
+                i += 1
+        if i < len(tokens) and _WRAPPER_NUM_ARG.match(tokens[i]):
+            i += 1
+        return tokens[i:]
+    if base == "nice":
+        if i < len(tokens) and tokens[i] in ("-n", "--adjustment"):
+            i += 2
+        elif i < len(tokens) and (tokens[i].startswith("--adjustment=")
+                                  or re.match(r"^-[0-9]+$", tokens[i])):
+            i += 1
+        return tokens[i:]
+    if base == "stdbuf":
+        operand_options = {"-i", "-o", "-e", "--input", "--output", "--error"}
+        while i < len(tokens) and tokens[i].startswith("-"):
+            token = tokens[i]
+            if token in operand_options:
+                i += 2
+            else:
+                i += 1
+        return tokens[i:]
+    if base == "time":
+        operand_options = {"-f", "--format", "-o", "--output"}
+        while i < len(tokens) and tokens[i].startswith("-"):
+            token = tokens[i]
+            if token in operand_options:
+                i += 2
+            else:
+                i += 1
+        return tokens[i:]
+    if base == "ionice":
+        operand_options = {
+            "-c", "--class", "-n", "--classdata", "-p", "--pid",
+            "-P", "--pgid", "-u", "--uid",
+        }
+        while i < len(tokens) and tokens[i].startswith("-"):
+            token = tokens[i]
+            if token in operand_options:
+                i += 2
+            else:
+                i += 1
+        return tokens[i:]
+    # setsid and any future registered wrapper: their common options have no operand.
+    while i < len(tokens) and tokens[i].startswith("-"):
+        i += 1
+    return tokens[i:]
+
+
 def _strip_wrappers(tokens: list[str]) -> list[str]:
-    """剥离前导 wrapper（env/nohup/timeout …）及其选项/时长/赋值参数，露出真实命令。"""
+    """剥离前导 wrapper（env/nohup/timeout …），露出真实命令。"""
     toks = list(tokens)
     while toks:
         base = os.path.basename(toks[0])
@@ -127,13 +221,7 @@ def _strip_wrappers(tokens: list[str]) -> list[str]:
         # `command -v/-V x` 是查询不是执行：保留原样（不会匹配任何 gated 可执行名）。
         if base == "command" and len(toks) > 1 and toks[1] in ("-v", "-V"):
             break
-        toks = toks[1:]
-        while toks and (
-            toks[0].startswith("-")
-            or _WRAPPER_NUM_ARG.match(toks[0])
-            or _ENV_ASSIGN.match(toks[0])
-        ):
-            toks = toks[1:]
+        toks = _strip_wrapper_once(toks)
     return toks
 
 
@@ -190,6 +278,8 @@ def _dynamic_eval_surface(tokens: list[str]) -> str | None:
             for token in rest[1:]
         ):
             return f"{base} -c/-lc"
+        if _INTERPRETER.match(base) and "-c" in rest[1:]:
+            return f"{base} -c"
     return None
 
 
@@ -199,6 +289,14 @@ def _matches_prefix(tokens: list[str], prefix: str) -> bool:
     if not ptoks:
         return False
     if _INTERPRETER.match(os.path.basename(ptoks[0])) and len(ptoks) >= 2:
+        if len(ptoks) >= 4 and ptoks[1] == "-m":
+            module = ptoks[2]
+            action = ptoks[3]
+            norm = [_norm_token(t) for t in tokens]
+            for i in range(len(norm) - 2):
+                if norm[i:i + 3] == ["-m", module, action]:
+                    return True
+            return False
         # 脚本类前缀：签名 = 归一化脚本路径 (+ 紧邻的 action)。任意位置扫描，
         # 解释器选项（python -u/-X …）与 wrapper 都影响不了脚本 token 本身。
         script = ptoks[1]
@@ -223,7 +321,11 @@ def gate_reason(raw_cmd: str) -> str | None:
         return None
     prefixes = load_gated_prefixes()
     if not prefixes:
-        if re.search(r"\b(?:sbatch|scancel|srun|runai)\b|fake_job\.py|apply-recovery", raw_cmd):
+        if re.search(
+            r"\b(?:sbatch|scancel|srun|runai)\b|fake_job\.py|"
+            r"lab\.infra\.launch\.fake_job|apply-recovery",
+            raw_cmd,
+        ):
             return "launch registry 不可用/为空，已对已知 launch 入口 fail-closed。"
         return None
     for outer in _split_commands(raw_cmd):
@@ -259,6 +361,7 @@ def _self_test() -> int:
         "echo ok && sbatch train.sh",
         f"python {REPO_ROOT}/lab/infra/launch/fake_job.py restart --run-id r1",
         "python ./lab/infra/launch/expctl.py apply-recovery --run-id r1 --alert-id a1",
+        "python lab/infra/launch/expctl.py apply-recovery --run-id r1 --alert-id a1 --dry-run",
         # wrapper / 解释器选项绕过（Codex 初审 BLOCKER-1 PoC 及变体）
         "env python lab/infra/launch/fake_job.py launch --run-id r1 --workdir /tmp/x",
         "python -u lab/infra/launch/fake_job.py launch --run-id r1",
@@ -268,6 +371,8 @@ def _self_test() -> int:
         "nohup sbatch train.sh",
         "timeout 60 sbatch train.sh",
         "timeout -k 5 60s sbatch train.sh",
+        "timeout --signal TERM 60 sbatch train.sh",
+        "env -u FOO sbatch train.sh",
         "nice -n 10 scancel 12345",
         "stdbuf -oL srun --pty bash",
         "setsid runai submit job1 -i image",
@@ -286,12 +391,21 @@ def _self_test() -> int:
         'sh -lc "python lab/infra/launch/fake_job.py restart --run-id r1 --workdir /tmp/r1"',
         'bash -c "printf safe"',  # 动态执行面本身 fail-closed，不只检查表面 payload
         'env -S "printf safe"',
+        'python -c "print(1)"',
+        'python3 -I -c "import subprocess; subprocess.run([\"sbatch\", \"x\"])"',
+        "python lab/infra/launch/./fake_job.py launch --run-id r1 --workdir /tmp/r1",
+        "python lab/infra/launch/../launch/fake_job.py restart --run-id r1 --workdir /tmp/r1",
+        "python -m lab.infra.launch.fake_job launch --run-id r1 --workdir /tmp/r1",
+        "python3 -I -m lab.infra.launch.fake_job restart --run-id r1 --workdir /tmp/r1",
+        "python lab/infra/launch/fake_job.py _worker --run-id r1 --workdir /tmp/r1",
+        "python -m lab.infra.launch.fake_job _worker --run-id r1 --workdir /tmp/r1",
     ]
     cases_allow = [
         "python lab/infra/launch/fake_job.py status --run-id r1",
         "env python lab/infra/launch/fake_job.py status --run-id r1",  # 只读入口带 wrapper 也放
         "python lab/infra/launch/expctl.py watch --run-id r1 --workdir /tmp/x",
         "python lab/infra/launch/expctl.py plan --action launch --run-id r1",
+        "python lab/infra/launch/expctl.py validate-recovery --run-id r1 --alert-id a1",
         "echo 'sbatch train.sh'",  # 引号内字面量不拦
         "grep -rn sbatch lab/",  # 非命令位出现 gated 词不拦
         "command -v sbatch",  # 可用性查询不拦

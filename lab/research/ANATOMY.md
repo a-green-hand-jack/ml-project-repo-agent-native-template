@@ -39,7 +39,7 @@ maintenance: |
 
 - overclaim = claim 强度超出其 evidence，属违规；`validate-governance.py` 会拦截（引用可解析 + claim 强度 ≤ 最强证据）。
 - ledger 的非法状态转换（跳过 approved、done 回转 running）、approved 必填字段缺失、
-  done 闭环缺口（无 run summary / artifact index 条目）、alert 批准记录不完整或与提案
+  done 闭环缺口（run summary 非允许目录内 repo-relative non-symlink regular file，或无 artifact index 条目）、alert 批准记录不完整或与提案
   不匹配、伪造 provenance 或消费状态不一致，均由 `validate-experiment-state.py`
   （validate-governance 拉起）拦截。repo-local provenance 当前不受信，必须为 null。
 - `release-gates.yaml` / `regression-matrix.yaml` 枚举字段与 claim 引用一致性，已由

@@ -10,7 +10,9 @@
 # alerts：watcher（python lab/infra/launch/expctl.py watch）检出的异常并入对应条目的
 #   alerts 列表（结构见下方 run-000 注释）；approved_by / approved_at / approved_action
 #   只作 human 审计记录，不是防伪造 capability。当前无外部可信 provenance + 原子 consumer，
-#   所以 `expctl.py apply-recovery` 仅支持 --dry-run，actual execution fail-closed。
+#   所以只用 `expctl.py validate-recovery` 做只读校验；actual `apply-recovery` fail-closed。
+# status=done 的 run_summary 必须是 `lab/code/experiments/` 内 repo-relative、非 symlink
+# regular file；绝对路径、`..` traversal、repo/目录逃逸都会被 validator 拒绝。
 # status: planned | approved | running | done | failed | superseded
 # promote: no | unclear | yes  （是否应升级为 evidence/paper claim；yes 走 human gate）
 #

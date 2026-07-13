@@ -10,10 +10,10 @@
                   checkpoint 新鲜度/config drift/failure signals。检查完即退出，不常驻
                   不轮询。输出结构化 alert（可直接并入 ledger alerts 字段），附带
                   resume/recovery 提案草案。只读，不写任何文件。
-- apply-recovery  校验 ledger 里一条 resume/recovery 提案与批准审计字段。当前实际执行
-                  **fail-closed**：repo-local approved_by/at/action 可被调用者伪造，现有合同
-                  没有可信 human provenance + 原子一次性消费能力，因此不产生副作用；
-                  `--dry-run` 仅做完整校验。临时测试 ledger 强制只能 dry-run/self-test。
+- validate-recovery 只读校验 ledger 里一条 resume/recovery 提案与批准审计字段。
+- apply-recovery  为未来的实际消费入口；当前**始终 fail-closed**：repo-local
+                  approved_by/at/action 可被调用者伪造，现有合同没有可信 human provenance +
+                  原子一次性消费能力，因此不产生副作用。临时测试 ledger 也绝不执行。
                   若未来接入外部可信签名与原子 consumer，仍须满足：
                   要求 approved_by/approved_at/approved_action 齐备且 approved_action 与
                   proposal.command 逐字一致；命令脚本 resolve 后必须等于 repo 内 canonical
@@ -438,7 +438,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
         print(
             "# 下一步：experiment-orchestrator 把上述 alerts 并入 "
             "lab/research/experiment-ledger.yaml 对应条目的 alerts 字段；"
-            "approved_* 仅作审计；`expctl.py apply-recovery --dry-run` 可校验，"
+            "approved_* 仅作审计；`expctl.py validate-recovery` 可只读校验，"
             "actual recovery fail-closed，由 human 在 agent hook 外亲自执行。"
         )
     return 3 if alerts else 0
@@ -787,7 +787,7 @@ def _self_test() -> int:  # noqa: PLR0915
         m = re.search(r"scanned last (\d+) lines \(bound=2\)", r2.stdout)
         expect(m is not None and int(m.group(1)) <= 2, f"log tail 应有界：\n{r2.stdout}")
 
-        # 5. apply-recovery 只做安全校验：/tmp actual 永拒，dry-run 覆盖批准、路径、
+        # 5. validate-recovery 只做安全校验：/tmp actual 永拒，覆盖批准、路径、
         #    run/workdir/interpreter、resolved/consumed 对抗场景，不产生恢复副作用。
         cmd_restart = f"python lab/infra/launch/fake_job.py restart --run-id t-s --workdir {w2}"
         ledger = root / "ledger.yaml"
@@ -825,39 +825,39 @@ def _self_test() -> int:  # noqa: PLR0915
                     f'        approved_action: "{command}"\n')
 
         write_ledger("")  # 无批准
-        r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s",
-                 "--alert-id", "alert-1", "--dry-run"])
+        r = run(["validate-recovery", "--ledger", str(ledger), "--run-id", "t-s",
+                 "--alert-id", "alert-1"])
         expect(r.returncode == 2 and "缺批准字段" in r.stderr, "无批准应拒绝")
 
         write_ledger('        approved_by: "h"\n        approved_at: "2026-07-13"\n'
                      '        approved_action: "some other command"\n')
-        r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s",
-                 "--alert-id", "alert-1", "--dry-run"])
+        r = run(["validate-recovery", "--ledger", str(ledger), "--run-id", "t-s",
+                 "--alert-id", "alert-1"])
         expect(r.returncode == 2 and "不一致" in r.stderr, "批 A 执 B 应拒绝")
 
         cmd_sbatch = "sbatch real.sh"
         write_ledger(approved(cmd_sbatch), command=cmd_sbatch)
-        r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s",
-                 "--alert-id", "alert-1", "--dry-run"])
+        r = run(["validate-recovery", "--ledger", str(ledger), "--run-id", "t-s",
+                 "--alert-id", "alert-1"])
         expect(r.returncode == 2 and "local-fake" in r.stderr, "真实后端命令应拒绝")
 
         # 伪 ledger（BLOCKER-2）：canonical / 临时目录之外的 --ledger 一律拒绝
-        r = run(["apply-recovery", "--ledger", str(REPO_ROOT / "README.md"),
-                 "--run-id", "t-s", "--alert-id", "alert-1", "--dry-run"])
+        r = run(["validate-recovery", "--ledger", str(REPO_ROOT / "README.md"),
+                 "--run-id", "t-s", "--alert-id", "alert-1"])
         expect(r.returncode == 2 and "canonical" in r.stderr, "非 canonical 且非临时目录的 ledger 应拒绝")
 
         # run-id 不匹配（BLOCKER-3）：run-a 的批准不能执行 run-b
         cmd_other = f"python lab/infra/launch/fake_job.py restart --run-id t-other --workdir {w2}"
         write_ledger(approved(cmd_other), command=cmd_other)
-        r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s",
-                 "--alert-id", "alert-1", "--dry-run"])
+        r = run(["validate-recovery", "--ledger", str(ledger), "--run-id", "t-s",
+                 "--alert-id", "alert-1"])
         expect(r.returncode == 2 and "不能执行 run-b" in r.stderr, "批准命令指向其他 run 应拒绝")
 
         # 假路径 fake_job（BLOCKER-3）：路径 resolve 必须等于 repo 内 canonical fake_job.py
         cmd_evil = f"python /tmp/evil/lab/infra/launch/fake_job.py restart --run-id t-s --workdir {w2}"
         write_ledger(approved(cmd_evil), command=cmd_evil)
-        r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s",
-                 "--alert-id", "alert-1", "--dry-run"])
+        r = run(["validate-recovery", "--ledger", str(ledger), "--run-id", "t-s",
+                 "--alert-id", "alert-1"])
         expect(r.returncode == 2 and "canonical" in r.stderr, "非 repo 内 fake_job.py 应拒绝")
 
         # workdir 必须绑定同 run，且只能是字面 /tmp 安全 leaf。
@@ -866,8 +866,8 @@ def _self_test() -> int:  # noqa: PLR0915
             f"--workdir {root / 't-other'}"
         )
         write_ledger(approved(cmd_cross_workdir), command=cmd_cross_workdir)
-        r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s",
-                 "--alert-id", "alert-1", "--dry-run"])
+        r = run(["validate-recovery", "--ledger", str(ledger), "--run-id", "t-s",
+                 "--alert-id", "alert-1"])
         expect(r.returncode == 2 and "workdir" in r.stderr, "跨 run workdir 应拒绝")
 
         cmd_protected = (
@@ -875,47 +875,47 @@ def _self_test() -> int:  # noqa: PLR0915
             f"--workdir {REPO_ROOT / 'lab/runs/t-s'}"
         )
         write_ledger(approved(cmd_protected), command=cmd_protected)
-        r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s",
-                 "--alert-id", "alert-1", "--dry-run"])
+        r = run(["validate-recovery", "--ledger", str(ledger), "--run-id", "t-s",
+                 "--alert-id", "alert-1"])
         expect(r.returncode == 2 and "字面 /tmp" in r.stderr, "protected/repo workdir 应拒绝")
 
         cmd_untrusted_python = cmd_restart.replace("python ", "/bin/false ", 1)
         write_ledger(approved(cmd_untrusted_python), command=cmd_untrusted_python)
-        r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s",
-                 "--alert-id", "alert-1", "--dry-run"])
+        r = run(["validate-recovery", "--ledger", str(ledger), "--run-id", "t-s",
+                 "--alert-id", "alert-1"])
         expect(r.returncode == 2 and "受信 Python" in r.stderr, "非受信解释器应拒绝")
 
         write_ledger(approved(), proposal_action="kill")
-        r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s",
-                 "--alert-id", "alert-1", "--dry-run"])
+        r = run(["validate-recovery", "--ledger", str(ledger), "--run-id", "t-s",
+                 "--alert-id", "alert-1"])
         expect(r.returncode == 2 and "proposal.action" in r.stderr, "proposal action/command 不一致应拒绝")
 
         write_ledger(approved() + '        approval_provenance: "self-asserted-human"\n')
-        r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s",
-                 "--alert-id", "alert-1", "--dry-run"])
+        r = run(["validate-recovery", "--ledger", str(ledger), "--run-id", "t-s",
+                 "--alert-id", "alert-1"])
         expect(r.returncode == 2 and "provenance" in r.stderr, "repo-local 自称 provenance 应拒绝")
 
         # resolved / consumed / non-pending 均在执行前拒绝，不能重放。
         write_ledger(approved() + "        consumed_at: \"2026-07-13\"\n")
-        r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s",
-                 "--alert-id", "alert-1", "--dry-run"])
+        r = run(["validate-recovery", "--ledger", str(ledger), "--run-id", "t-s",
+                 "--alert-id", "alert-1"])
         expect(r.returncode == 2 and "resolved/consumed" in r.stderr, "consumed approval 应拒绝")
 
         write_ledger(approved() + "        resolved: true\n")
-        r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s",
-                 "--alert-id", "alert-1", "--dry-run"])
+        r = run(["validate-recovery", "--ledger", str(ledger), "--run-id", "t-s",
+                 "--alert-id", "alert-1"])
         expect(r.returncode == 2 and "resolved/consumed" in r.stderr, "resolved approval 应拒绝")
 
         write_ledger(approved() + '        execution_status: "executing"\n')
-        r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s",
-                 "--alert-id", "alert-1", "--dry-run"])
+        r = run(["validate-recovery", "--ledger", str(ledger), "--run-id", "t-s",
+                 "--alert-id", "alert-1"])
         expect(r.returncode == 2 and "只有 pending" in r.stderr, "non-pending approval 应拒绝")
 
-        # 完整批准在 TEST MODE 仅 dry-run 可通过；不带 dry-run 永拒且不执行。
+        # 完整批准在 TEST MODE 可由只读入口校验；actual apply 永拒且不执行。
         write_ledger(approved())
-        r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s",
-                 "--alert-id", "alert-1", "--dry-run"])
-        expect(r.returncode == 0, f"齐备批准 dry-run 应校验成功：{r.stderr}")
+        r = run(["validate-recovery", "--ledger", str(ledger), "--run-id", "t-s",
+                 "--alert-id", "alert-1"])
+        expect(r.returncode == 0, f"齐备批准只读校验应成功：{r.stderr}")
         expect("TEST MODE" in r.stdout, "非 canonical 测试 ledger 应显式标记 TEST MODE")
         expect("不消费、不执行" in r.stdout, "dry-run 必须明确无消费/执行")
         before = (w2 / "status.json").read_bytes()
@@ -987,8 +987,18 @@ def main(argv: list[str]) -> int:
                    help="读取该 run 的 failure_signals（默认 canonical ledger；只读）")
 
     p = sub.add_parser(
+        "validate-recovery",
+        help="只读校验 ledger 恢复提案（不消费、不执行）",
+    )
+    p.add_argument("--run-id", required=True)
+    p.add_argument("--alert-id", required=True)
+    p.add_argument("--ledger", default=None,
+                   help="仅接受 canonical ledger 路径；临时目录下的测试 ledger 会标记 TEST MODE")
+    p.set_defaults(dry_run=True)
+
+    p = sub.add_parser(
         "apply-recovery",
-        help="校验 ledger 恢复提案；actual execution fail-closed，仅支持 --dry-run",
+        help="实际恢复入口；缺可信 capability，当前始终 fail-closed",
     )
     p.add_argument("--run-id", required=True)
     p.add_argument("--alert-id", required=True)
@@ -999,7 +1009,8 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
     handlers = {
         "detect": cmd_detect, "plan": cmd_plan,
-        "watch": cmd_watch, "apply-recovery": cmd_apply_recovery,
+        "watch": cmd_watch, "validate-recovery": cmd_apply_recovery,
+        "apply-recovery": cmd_apply_recovery,
     }
     return handlers[args.cmd](args)
 

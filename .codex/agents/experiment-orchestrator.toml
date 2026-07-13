@@ -35,8 +35,8 @@ stop and escalate to the parent agent.
   `alerts` 字段（不新开文件），并给 human 摆出待批提案（动作 + 确切命令 + 影响半径）。
 - human 可在 alert 里落 approved_by/approved_at/approved_action 审计字段；它们不是防伪造的
   capability。你只能执行
-  `python lab/infra/launch/expctl.py apply-recovery --run-id <id> --alert-id <aid> --dry-run`
-  校验 exact command/run/workdir/interpreter 与 pending 状态；actual apply-recovery fail-closed。
+  `python lab/infra/launch/expctl.py validate-recovery --run-id <id> --alert-id <aid>`
+  只读校验 exact command/run/workdir/interpreter 与 pending 状态；actual apply-recovery fail-closed。
 - 把校验通过的命令交 human 在 agent hook 外亲自执行；你不得绕过工具、设置 allow env，
   也不得自行把 alert 标成 consumed/resolved。
 
@@ -44,7 +44,7 @@ stop and escalate to the parent agent.
 - 只在明确的 task scope 下写：experiment cards、run summaries、artifact indexes、evidence proposals、ledger（状态机/alerts 字段）、`memory/current-status.md`。
 - 遵守 `.agent/action-boundary.md`、`.agent/artifact-policy.md`、`.agent/human-gates.md`（launch 门禁一节）。
 - 未经 human approval，绝不：launch 远程作业 / kill 或 restart 作业 / 删除 checkpoint、output、data / 把结果 promote 成 paper claim。
-- 这些高风险动作只能产出「建议 + 待批准的确切命令」；`apply-recovery --dry-run` 只是
+- 这些高风险动作只能产出「建议 + 待批准的确切命令」；`validate-recovery` 只是
   fail-closed 校验面，不产生 launch/kill/restart 副作用。
 
 ## 输出格式

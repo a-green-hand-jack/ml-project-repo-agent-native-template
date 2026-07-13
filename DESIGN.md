@@ -77,7 +77,7 @@ repo 的物理分层（"plane" 地图）在 `ANATOMY.md`（root router）。各 
 
 - **deny**：受保护路径写入、`sudo`、`curl|sh`、`pip install`、无边界 `general-purpose` agent。
 - **ask**：有损/改历史 git（checkout/reset/clean/rebase/merge/branch -d）、`uv add/sync`、`kill/sbatch/runai`、`gh pr create/merge`。
-- **allow**（Claude settings 约 ~115 条；Codex rules 覆盖关键低风险前缀）：只读 shell、只读 git、开发工具、`uv run`、`python -c`、`Edit/Write`（受保护路径除外）、可逆 git（add/commit/stash）、清缓存目录。
+- **allow**（Claude settings 约 ~115 条；Codex rules 覆盖关键低风险前缀）：只读 shell、只读 git、开发工具、`uv run`、受限的 `python -m` 工具入口、`Edit/Write`（受保护路径除外）、可逆 git（add/commit/stash）、清缓存目录。
 
 ### 3.2 hook 地板（`pre_tool_guard.py`）
 
@@ -87,7 +87,9 @@ repo 的物理分层（"plane" 地图）在 `ANATOMY.md`（root router）。各 
 
 它拦：提权/远程执行、`pip install`、`rm -r` **按目标分级**（缓存/构建/临时可删；数据·产物·`.git`·绝对路径·仓库根·`..` 拦；`find -exec` 嵌套有兜底正则）、`mv/cp/rsync/dd` 触碰受保护路径、受保护路径的 `Edit`/`Write`/Codex `apply_patch`、push 到 `main/master`（除非 `CLAUDE_ALLOW_PUSH_MAIN=1` 或 `CODEX_ALLOW_PUSH_MAIN=1`）。
 
-诚实边界：hook 是**防误操作护栏，非对抗性沙箱**——不审查 `python -c`/`uv run`/`pytest` 内部的代码（这类代码执行本就被信任），数据最终靠 gitignore + 备份。
+诚实边界：hook 是**防误操作护栏，非对抗性沙箱**——它拒绝 registry 已登记的 launch
+入口/已知别名以及无法静态证明安全的 shell/env split/`python -c` 动态面，但不审查
+`uv run`/`pytest` 内部代码；受保护数据最终仍靠 gitignore + 备份。
 
 ### 3.3 自主窗口（`autonomous-window.md` + `settings.local.json.example`）
 

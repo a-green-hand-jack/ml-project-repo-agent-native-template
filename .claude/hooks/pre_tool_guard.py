@@ -218,6 +218,7 @@ def _launch_gate_reason(raw_cmd: str) -> str | None:
     if not gate.is_file():
         if re.search(
             r"\b(?:sbatch|scancel|srun|runai)\b|fake_job\.py|"
+            r"lab\.infra\.launch\.fake_job|"
             r"expctl\.py\s+apply-recovery",
             raw_cmd,
         ):
@@ -234,6 +235,7 @@ def _launch_gate_reason(raw_cmd: str) -> str | None:
     except Exception as exc:  # noqa: BLE001
         if re.search(
             r"\b(?:sbatch|scancel|srun|runai)\b|fake_job\.py|"
+            r"lab\.infra\.launch\.fake_job|"
             r"expctl\.py\s+apply-recovery",
             raw_cmd,
         ):

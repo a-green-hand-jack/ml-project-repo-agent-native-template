@@ -40,7 +40,7 @@
 - `.agent/templates/experiment-card.md`、`.agent/templates/run-summary.md`
 - `.agent/human-gates.md`（如状态机新增门禁点，需要补充说明）
 - `lab/infra/launch/`（adapter 草案脚本/文档，仍不代替人执行启动）
-- `.claude/agents/experiment-orchestrator.md`、`.claude/agents/experiment-monitor.md`：bounded watcher/alert 归只读 monitor；提案合并与 `apply-recovery --dry-run` 校验归 orchestrator，不新增 agent，actual execution 不在 agent 权限内。
+- `.claude/agents/experiment-orchestrator.md`、`.claude/agents/experiment-monitor.md`：bounded watcher/alert 归只读 monitor；提案合并与 `validate-recovery` 只读校验归 orchestrator，不新增 agent，actual execution 不在 agent 权限内。
 - `.claude/skills/experiment-workflow/SKILL.md`
 - **`.codex/agents/*.toml`、`.agents/skills/experiment-workflow/SKILL.md`（Codex 侧生成产物）**：这些不是手改目标，而是**改完上面 canonical 后必须跑 `python scripts/sync-codex-adapters.py` 重新生成、并与 canonical 同 commit 提交**。`check-agent-harness.py` 会跑 `sync-codex-adapters.py --check`，不同步会直接 FAIL。**已决策**：本 issue 不新增 agent 文件（扩展既有两个 agent，见上一条），因此预期不会新生成 `.codex/agents/<new-name>.toml`；若 `experiment-orchestrator.md`/`experiment-monitor.md` 的 `tools`/`description` 有调整，仍需 sync 后确认对应的 `.codex/agents/experiment-orchestrator.toml`、`.codex/agents/experiment-monitor.toml` 同步更新并同 commit 提交。
 - `scripts/validate-experiment-state.py`（**已决策（2026-07-12 human 拍板）**：新建独立脚本，不整合进 `validate-governance.py` 现有函数体，仿 `scripts/check-same-commit.py` 先例，由 `validate-governance.py` 通过 `run_subcheck` 拉起——与 #17/#18 已定的独立脚本政策一致）
@@ -89,7 +89,7 @@
   - [x] F. alert → stale run → resume/recovery（human gate）
     - [x] F1. 定义 stale run 判定规则（如：超过预期 runtime 若干倍、或心跳/metric 长时间无更新）
     - [x] F2. **已决策（2026-07-12 human 拍板）**：alert 记录并入 `lab/research/experiment-ledger.yaml` 对应实验条目的新增字段（如 `alerts: [...]`，含时间戳、异常类型、证据引用），不新开独立文件（不建 `experiment-alerts.yaml`，不用 `human/inbox` 风格条目）；不接外部通知系统。
-    - [x] F3. 定义 resume/recovery 提案格式：动作 + exact command + 同 run 的安全 workdir + 影响半径；approved_* 仅作审计。`apply-recovery --dry-run` 校验受信解释器/canonical script/run/workdir/pending 状态，actual execution fail-closed；human 在 agent hook 外亲自执行。
+    - [x] F3. 定义 resume/recovery 提案格式：动作 + exact command + 同 run 的安全 workdir + 影响半径；approved_* 仅作审计。`validate-recovery` 只读校验受信解释器/canonical script/run/workdir/pending 状态，actual `apply-recovery` fail-closed；human 在 agent hook 外亲自执行。
   - [x] G. 与 memory / artifact index / evidence 打通
     - [x] G1. run 完成（`done`）后的闭环校验：ledger status=done ⇒ run_summary 文件存在 ⇒ 对应 artifact index（`lab/artifacts/*-index.yaml`）有条目 ⇒ 缺任一环节时报告缺口而非静默
     - [x] G2. 明确控制面状态与 `memory/current-status.md` 的联动方式（如：activate run 列表、stale run 提醒是否写入 current-status）
@@ -147,7 +147,7 @@
 - 状态机 + 必填字段 + alert 审计 + done 闭环：`scripts/validate-experiment-state.py`（`status_history` 逐步校验使快照式检查也能拦非法转换；PyYAML 可选，内置受限 block-style 解析器回退，`--self-test` 内嵌 fixture 两条解析路径均过）；由 `validate-governance.py` `run_subcheck` 拉起。
 - launch registry / adapter contract：`lab/infra/launch/registry.yaml`（单一真源）+ `expctl.py detect/plan`（草案不执行、缺 CLI 清晰降级 local-only）+ `fake_job.py`（local-fake 后端，支持 NaN/stall 注入）。
 - 门禁三层同 commit 对齐：共享 hook 对 registered launch、caller allow env、env split 与 shell eval 命中即拒；`.claude/settings.json` ask + `.codex/rules/default.rules` prompt 是额外提示，不是 override。
-- watcher/alert/resume：`expctl.py watch` 输出绑定 workdir 的结构化提案；`apply-recovery` 仅 dry-run 校验，canonical 与测试 ledger 的 actual execution 均 fail-closed。
+- watcher/alert/resume：`expctl.py watch` 输出绑定 workdir 的结构化提案；`validate-recovery` 只读校验，canonical 与测试 ledger 的 actual `apply-recovery` 均 fail-closed。
 - run-000 已升级为 approved 态活样例；agent（monitor/orchestrator）与 skill 扩展后 `sync-codex-adapters.py` 重生成（monitor 保持 `read-only`）。
 - D1–D3 的旧 actual restart/kill smoke 不再作为安全验收；fresh review 以脚本内置 fake fixture + 对抗拒绝测试取代，测试 ledger 不产生恢复副作用。
 
@@ -184,7 +184,7 @@
   caller-set `CLAUDE_ALLOW_LAUNCH` / `CODEX_ALLOW_LAUNCH` 不再是任何形式的批准；hook 递归检查
   `env -S` / `env --split-string` 与 shell `-c/-lc` 内层命令，所有 launch/kill/restart 入口
   命中即拒。repo-local ledger 无法提供可信 human provenance 与原子一次性消费，因此
-  `apply-recovery` actual execution fail-closed，只保留 `--dry-run` 校验；`/tmp` 测试 ledger
+  `apply-recovery` actual execution fail-closed，另提供 `validate-recovery` 只读校验；`/tmp` 测试 ledger
   只能 dry-run、不得产生副作用。fake adapter 严格绑定受信 Python、canonical script、同一
   run-id、字面 `/tmp/<run-id>` workdir、status.run_id/workdir 与确切 worker argv。原验证标准中
   “agent 半自动执行恢复”由“对抗测试证明拒绝实际执行 + human 在 agent hook 外亲自执行”取代。

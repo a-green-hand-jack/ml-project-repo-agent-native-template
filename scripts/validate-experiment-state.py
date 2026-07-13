@@ -12,8 +12,9 @@
    approved_at / approved_action 三者必须齐备且逐字匹配 proposal.command。恢复消费状态
    必须满足 pending/executing/succeeded/failed 的字段不变量；当前 repo-local provenance
    不受信，因此 approval_provenance 只能为 null，actual recovery fail-closed。
-4. 闭环（status=done）：run_summary 字段非占位且文件存在，且 lab/artifacts/*-index.yaml
-   有引用该 run id 的条目；缺任一环节报告缺口而非静默。
+4. 闭环（status=done）：run_summary 是 `lab/code/experiments/` 内 repo-relative、非 symlink
+   regular file，且 lab/artifacts/*-index.yaml 有引用该 run id 的条目；绝对路径、traversal、
+   repo/允许目录逃逸与缺任一环节均报告错误。
 
 独立脚本（仿 check-same-commit.py 先例），由 validate-governance.py 经 run_subcheck 拉起。
 YAML 解析：优先 PyYAML；无 PyYAML 时用内置受限解析器（block-style 子集：嵌套 mapping /
@@ -23,11 +24,13 @@ sequence / 内联 list / 引号标量；ledger 与 registry 按约定保持 bloc
 from __future__ import annotations
 
 import re
+import stat
 import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 LEDGER_REL = "lab/research/experiment-ledger.yaml"
+RUN_SUMMARY_DIR_REL = Path("lab/code/experiments")
 
 STATUSES = ("planned", "approved", "running", "done", "failed", "superseded")
 ALLOWED_TRANSITIONS = {
@@ -348,6 +351,44 @@ def _artifact_index_run_ids(root: Path, warnings: list[str]) -> set[str]:
     return ids
 
 
+def _run_summary_reason(root: Path, value: object) -> str | None:
+    """Validate a tracked summary without following links outside its documented directory."""
+    if not isinstance(value, str) or not value.strip():
+        return "必须是非空 repo-relative path"
+    rel = Path(value)
+    if rel.is_absolute():
+        return "必须是 repo-relative path，不能是绝对路径"
+    if ".." in rel.parts:
+        return "不得含 .. traversal"
+    allowed = root / RUN_SUMMARY_DIR_REL
+    candidate = root / rel
+    try:
+        candidate.relative_to(allowed)
+    except ValueError:
+        return f"必须位于 {RUN_SUMMARY_DIR_REL}/"
+
+    current = root
+    for part in rel.parts:
+        current /= part
+        if current.is_symlink():
+            return f"含 symlink component：{current.relative_to(root)}"
+    try:
+        resolved = candidate.resolve(strict=True)
+        resolved.relative_to(root.resolve())
+        resolved.relative_to(allowed.resolve())
+    except FileNotFoundError:
+        return "文件不存在"
+    except (OSError, ValueError) as exc:
+        return f"解析后逃逸 repo/允许目录或无法解析：{exc}"
+    try:
+        mode = candidate.lstat().st_mode
+    except OSError as exc:
+        return f"无法读取文件状态：{exc}"
+    if not stat.S_ISREG(mode):
+        return "必须是 non-symlink regular file"
+    return None
+
+
 def _check_closure(exp: dict, root: Path, artifact_run_ids: set[str], errors: list[str]) -> None:
     eid = exp.get("id")
     if exp.get("status") != "done":
@@ -355,8 +396,10 @@ def _check_closure(exp: dict, root: Path, artifact_run_ids: set[str], errors: li
     summary = exp.get("run_summary")
     if _is_placeholder(summary):
         errors.append(f"{eid}: status=done 但 run_summary 仍是占位——闭环缺 run summary 环节")
-    elif not (root / str(summary)).exists():
-        errors.append(f"{eid}: status=done 但 run_summary 文件不存在：{summary}")
+    else:
+        reason = _run_summary_reason(root, summary)
+        if reason:
+            errors.append(f"{eid}: status=done 但 run_summary 非法：{summary}（{reason}）")
     if eid not in artifact_run_ids:
         errors.append(
             f"{eid}: status=done 但 lab/artifacts/*-index.yaml 无引用该 run 的条目"
@@ -628,6 +671,35 @@ def _self_test() -> int:
         errors, _ = check_ledger(root)
         expect(errors == [], f"合法 ledger 应零 error，得到：{errors}")
 
+        def summary_errors(path: str) -> str:
+            text = _FIXTURE_OK.replace(
+                'run_summary: "lab/code/experiments/run-ok.md"',
+                f'run_summary: "{path}"',
+            )
+            (root / LEDGER_REL).write_text(text, encoding="utf-8")
+            found, _ = check_ledger(root)
+            return "\n".join(found)
+
+        # done summary 必须是允许目录内的 repo-relative、非 symlink regular file。
+        absolute = root / "absolute-summary.md"
+        absolute.write_text("# absolute\n", encoding="utf-8")
+        expect("绝对路径" in summary_errors(str(absolute)), "拒绝 absolute run_summary")
+        (root / "outside-summary.md").write_text("# traversal\n", encoding="utf-8")
+        expect("traversal" in summary_errors("lab/code/experiments/../../../outside-summary.md"),
+               "拒绝 traversal run_summary")
+        (root / "lab/code/elsewhere").mkdir(parents=True)
+        (root / "lab/code/elsewhere/run-ok.md").write_text("# wrong dir\n", encoding="utf-8")
+        expect("必须位于" in summary_errors("lab/code/elsewhere/run-ok.md"),
+               "拒绝允许目录外 run_summary")
+        link = root / "lab/code/experiments/run-link.md"
+        link.symlink_to(root / "lab/code/experiments/run-ok.md")
+        expect("symlink" in summary_errors("lab/code/experiments/run-link.md"),
+               "拒绝 symlink run_summary")
+        directory = root / "lab/code/experiments/run-dir.md"
+        directory.mkdir()
+        expect("regular file" in summary_errors("lab/code/experiments/run-dir.md"),
+               "拒绝 directory run_summary")
+
         # 非法 ledger：逐条命中
         (root / LEDGER_REL).write_text(_FIXTURE_BAD, encoding="utf-8")
         errors, _ = check_ledger(root)
@@ -636,7 +708,7 @@ def _self_test() -> int:
         expect("run-zombie" in text and "done → running" in text, "拦截 done 回转 running")
         expect("run-skip-approval" in text and "approved_by" in text, "缺批准记录报错")
         expect("run-missing-fields" in text and "commit" in text, "缺必填字段清单报错")
-        expect("run-open-closure" in text and "run_summary 文件不存在" in text, "闭环缺 summary 报错")
+        expect("run-open-closure" in text and "run_summary 非法" in text, "闭环缺 summary 报错")
         expect("run-open-closure" in text and "artifact" in text, "闭环缺 artifact index 报错")
         expect("run-bad-approval" in text and "不一致" in text, "批 A 执 B 报错")
         expect("run-bad-approval" in text and "approved_at" in text, "批准记录不完整报错")
