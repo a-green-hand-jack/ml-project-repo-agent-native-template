@@ -122,12 +122,21 @@ part B（existing-repo 语义归类）未在本分支涉及。
   phase-log 条目读出 `warnings` 并在文本/`--json` 输出里显式呈现（`SMOKE WARNING ...` /
   `smoke_warnings` 字段）；`unresolved_blockers` 同样在文本模式打印为 `BLOCKED <path>`；exit code
   语义不变（只反映 `integrity_result().ok`，现在天然覆盖 blocker 未解决的情况）。
-- `lab/evals/adoption/run-adoption-smoke.py`：从单一 happy-path 扩成四个场景：
+- `lab/evals/adoption/run-adoption-smoke.py`：从单一 happy-path 扩成五个场景
+  （**2026-07-13 按 Codex 初审 2 条 MAJOR 修正，初版为四场景且证据声明不成立，见下**）：
   `scenario_happy_path`（回归，新增断言 `smoke_result: pass` + 空 warnings）、
   `scenario_blocked_normalize`（受保护路径 `checkpoints/` 触发 blocker，断言
   `adopt-existing-repo.py` 与 `check-adoption-integrity.py` 均非 0 exit，blocker 文本可读）、
+  `scenario_blocked_conflict`（**2026-07-13 补**：destination-exists 冲突，目标位置
+  `lab/code/imported/<slug>/data.txt` 已存在不一致内容；断言 adopter 非 0 exit 停下、冲突两侧
+  字节未动、`BLOCKED destination exists: ...` 文本与 `--json unresolved_blockers` 可读——初版
+  声称一个 fixture 覆盖「冲突/受保护」两个子类，实际只测了受保护路径）、
   `scenario_smoke_failing_command`（检测到但失败的原生测试，断言两脚本仍 exit 0 但 report/`--json`
-  都带非空 warning）、`scenario_smoke_undetected`（无可探测测试命令，断言 `skipped` + 显式
+  都带非空 warning——**2026-07-13 修**：初版 fixture 是 pytest 风格模块级函数，`unittest
+  discover` 不收集，实际 Ran 0 tests（Python ≤3.11 exit 0 记成 `pass`，≥3.12 靠 NO_TESTS_RAN
+  exit 5 碰巧记成 fail），从未真正验证「检测到且真实跑失败」；现改为必然被收集且失败的
+  `unittest.TestCase`，并从 phase-log smoke exec 断言 `Ran 1 test` + `FAILED` 防再退化）、
+  `scenario_smoke_undetected`（无可探测测试命令，断言 `skipped` + 显式
   `unverified_reason`，同样 exit 0 + 非空 warning）。
 - `.claude/commands/adopt-existing-repo.md`：步骤 4 汇报清单改写，区分 integrity/blocker（应非 0）
   与 smoke（不应非 0，但须转述显式 warning）。
@@ -168,9 +177,9 @@ part B（existing-repo 语义归类）未在本分支涉及。
 
 | command | 结论 |
 | --- | --- |
-| `python lab/evals/adoption/run-adoption-smoke.py`（happy-path + blocked-normalize + smoke-fail + smoke-undetected 四场景） | `[adoption-smoke] OK`，四场景全部通过，含新负向 fixture。 |
+| `python3 lab/evals/adoption/run-adoption-smoke.py`（happy-path + blocked-normalize + blocked-conflict + smoke-fail + smoke-undetected 五场景） | **2026-07-13 修正后真实重跑（Python 3.12.3）**：`[adoption-smoke] OK`，五场景全部通过。此前「四场景全部通过」的声明不成立（smoke-fail fixture 实际 Ran 0 tests，且缺 destination-exists 冲突 fixture），以本行为准。 |
 | 手工冒烟：`checkpoints/` 受保护路径 repo 跑 `adopt-existing-repo.py --phase all` | `exit 1`，stderr 含 `checkpoints` blocker；`check-adoption-integrity.py` 同样 `exit 1`，输出 `BLOCKED checkpoints`，`--json` 里 `ok=false`、`unresolved_blockers=["checkpoints"]`。 |
-| 手工冒烟：失败测试 repo（`tests/test_broken.py` 故意断言失败） | `adopt-existing-repo.py --phase all` `exit 0`；report 含 `smoke_result: fail` 与显式 warning；`check-adoption-integrity.py` `exit 0`，`--json` 的 `smoke_warnings` 非空。 |
+| 手工冒烟：失败测试 repo（`tests/test_broken.py`） | **2026-07-13 更正**：初版该 fixture 是 pytest 风格函数，`unittest discover` 实际 Ran 0 tests（本机 Python 3.12 靠 NO_TESTS_RAN exit 5 记成 fail，并非「故意断言失败」被真实跑出）；修正后（`unittest.TestCase`）复核：`adopt-existing-repo.py --phase all` `exit 0`；phase-log smoke exec 含 `Ran 1 test` + `FAILED (failures=1)`；report 含 `smoke_result: fail` 与显式 warning；`check-adoption-integrity.py` `exit 0`，`--json` 的 `smoke_warnings` 非空。 |
 | `python scripts/adopt-existing-repo.py /tmp/colorama-adoption-replay/Colorama --phase all --policy conservative --project-name colorama`（真实 repo replay，`tartley/colorama` @ `841634e`） | `exit 0`；`integrity=ok`、`normalize blockers=0`、`smoke=fail`（`make test` 检测到但因目标 repo 未 bootstrap venv 而失败）。 |
 | `python scripts/check-adoption-integrity.py /tmp/colorama-adoption-replay/Colorama` / `--json` | `exit 0`；`OK -- present 49/49`；`smoke_warnings` 非空，列出 `original_test` fail + reason。 |
 | `python scripts/validate-governance.py --strict`（`uv run --with pyyaml`） | `OK — 0 error(s), 0 warning(s)`。裸 `python3`（无 PyYAML，本机预置环境缺口，非本轮引入）跑同一命令会因 4 条 YAML-related warning 在 `--strict` 下变 `FAIL`；已用 `git stash` 验证该 warning 在改动前后一致存在，不是本轮回归。 |

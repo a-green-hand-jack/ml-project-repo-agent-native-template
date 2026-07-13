@@ -8,11 +8,15 @@ plans/20260712-bootstrap-adoption-proof.zh.md (smoke/integrity contract):
 2. blocked normalize (protected path) -- adoption-tool-self integrity
    failure: both `adopt-existing-repo.py` and `check-adoption-integrity.py`
    must exit non-zero, and the blocker must be readable in their output.
-3. smoke command detected but failing -- NOT an integrity failure: both
+3. blocked conflict (destination exists) -- the normalize destination for a
+   root entry already holds different content: same non-zero-exit integrity
+   contract as (2), plus the blocker must appear in `--json`
+   `unresolved_blockers` and neither side of the conflict may be touched.
+4. smoke command detected but failing -- NOT an integrity failure: both
    scripts must exit 0, but the generated report / `check-adoption-integrity
    --json` output must carry an explicit, non-empty warning for the failed
-   native test.
-4. smoke command undetected -- same exit-0-with-explicit-warning contract,
+   native test (which must have actually run -- not "Ran 0 tests").
+5. smoke command undetected -- same exit-0-with-explicit-warning contract,
    for the "skipped" (no test command found) case.
 """
 from __future__ import annotations
@@ -197,6 +201,83 @@ def scenario_blocked_normalize(root: Path) -> None:
     print("[adoption-smoke] blocked-normalize OK")
 
 
+def scenario_blocked_conflict(root: Path) -> None:
+    """Destination-exists conflict -> adoption-tool-self integrity failure.
+
+    The normalize destination for a root entry already holds *different*
+    content. The adopter must stop with a non-zero exit (no move, both sides
+    of the conflict byte-untouched), and the blocker must be readable both in
+    `check-adoption-integrity.py` text output and in `--json`
+    `unresolved_blockers` (C3; the "conflict file" sub-case of the plan's
+    negative-fixture acceptance criteria, distinct from the protected-path
+    sub-case covered by scenario_blocked_normalize).
+    """
+    target = root / "conflict-existing"
+    init_repo(target)
+    write(target / "README.md", "# Conflict Repo\n")
+    root_content = "root copy: should be moved by normalize\n"
+    dest_content = "pre-existing, inconsistent content at the destination\n"
+    dest_rel = "lab/code/imported/conflict-existing/data.txt"
+    write(target / "data.txt", root_content)
+    write(target / dest_rel, dest_content)
+    run(["git", "add", "."], target)
+    run(["git", "commit", "-m", "initial"], target)
+
+    adopt_cmd = [
+        sys.executable,
+        str(ADOPTER),
+        str(target),
+        "--phase",
+        "all",
+        "--project-name",
+        "conflict-existing",
+    ]
+    adopt_proc = run_allow_fail(adopt_cmd, REPO)
+    if adopt_proc.returncode == 0:
+        print("blocked-conflict: expected non-zero exit from adopt-existing-repo.py")
+        print(adopt_proc.stdout)
+        print(adopt_proc.stderr)
+        raise SystemExit(1)
+    blocker = f"destination exists: {dest_rel}"
+    if blocker not in adopt_proc.stderr:
+        print(f"blocked-conflict: expected {blocker!r} to be readable in stderr")
+        print(adopt_proc.stderr)
+        raise SystemExit(1)
+    # The adopter must have stopped without destroying either side of the
+    # conflict: the root copy stays in place, the destination keeps its bytes.
+    if (target / "data.txt").read_text(encoding="utf-8") != root_content:
+        print("blocked-conflict: root data.txt was moved/modified despite the blocker")
+        raise SystemExit(1)
+    if (target / dest_rel).read_text(encoding="utf-8") != dest_content:
+        print("blocked-conflict: destination file content changed despite the blocker")
+        raise SystemExit(1)
+
+    integrity_proc = run_allow_fail([sys.executable, str(INTEGRITY), str(target)], REPO)
+    if integrity_proc.returncode == 0:
+        print("blocked-conflict: expected non-zero exit from check-adoption-integrity.py")
+        print(integrity_proc.stdout)
+        raise SystemExit(1)
+    if f"BLOCKED {blocker}" not in integrity_proc.stdout:
+        print(f"blocked-conflict: expected 'BLOCKED {blocker}' in check-adoption-integrity output")
+        print(integrity_proc.stdout)
+        raise SystemExit(1)
+
+    integrity_json_proc = run_allow_fail(
+        [sys.executable, str(INTEGRITY), str(target), "--json"], REPO
+    )
+    if integrity_json_proc.returncode == 0:
+        print("blocked-conflict: expected non-zero exit from check-adoption-integrity.py --json")
+        raise SystemExit(1)
+    data = json.loads(integrity_json_proc.stdout)
+    if data.get("ok"):
+        print("blocked-conflict: expected ok=false in --json output")
+        raise SystemExit(1)
+    if blocker not in data.get("unresolved_blockers", []):
+        print(f"blocked-conflict: expected {blocker!r} in unresolved_blockers, got {data}")
+        raise SystemExit(1)
+    print("[adoption-smoke] blocked-conflict OK")
+
+
 def scenario_smoke_failing_command(root: Path) -> None:
     """Native test command detected but fails -- NOT an integrity failure.
 
@@ -207,9 +288,18 @@ def scenario_smoke_failing_command(root: Path) -> None:
     target = root / "smoke-fail-existing"
     init_repo(target)
     write(target / "README.md", "# Smoke Fail Repo\n")
+    # The fixture must be a unittest.TestCase: the explicit --test-command
+    # below is `python -m unittest discover`, which does NOT collect
+    # pytest-style module-level functions. (A previous version of this
+    # fixture used a bare `def test_broken()` and unittest ran 0 tests --
+    # exit 0 on Python <= 3.11, exit 5 via NO_TESTS_RAN on >= 3.12 -- so the
+    # scenario never exercised a real detected-but-failing native test.)
     write(
         target / "tests" / "test_broken.py",
-        "def test_broken():\n    assert 1 == 2, 'intentionally broken for the smoke fixture'\n",
+        "import unittest\n\n"
+        "class BrokenTest(unittest.TestCase):\n"
+        "    def test_broken(self):\n"
+        "        self.assertEqual(1, 2, 'intentionally broken for the smoke fixture')\n",
     )
     run(["git", "add", "."], target)
     run(["git", "commit", "-m", "initial"], target)
@@ -249,6 +339,32 @@ def scenario_smoke_failing_command(root: Path) -> None:
     warnings = data.get("smoke_warnings", [])
     if not warnings or warnings[0].get("result") != "fail":
         print(f"smoke-fail: expected a non-empty fail warning, got {warnings}")
+        raise SystemExit(1)
+
+    # Guard against the fixture silently degrading into "Ran 0 tests": the
+    # `fail` must come from a native test that actually ran. Read the
+    # structured smoke exec record from the prove phase-log (single
+    # structured source of truth, same as latest_smoke_warnings()).
+    log_path = (
+        target / "lab" / "docs" / "audits" / "template-adoption" / "state" / "phase-log.jsonl"
+    )
+    prove_rows = [
+        row
+        for row in (
+            json.loads(line)
+            for line in log_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        )
+        if row.get("phase") == "prove"
+    ]
+    smoke_exec = prove_rows[-1]["details"]["smoke"]["exec"]
+    combined_output = (smoke_exec.get("stdout") or "") + (smoke_exec.get("stderr") or "")
+    if "Ran 1 test" not in combined_output or "FAILED" not in combined_output:
+        print(
+            "smoke-fail: expected the native test to actually run and fail "
+            "(unittest 'Ran 1 test' + 'FAILED'), not e.g. 'Ran 0 tests'"
+        )
+        print(combined_output)
         raise SystemExit(1)
     print("[adoption-smoke] smoke-failing-command OK")
 
@@ -309,6 +425,7 @@ def main() -> int:
         root = Path(tmp)
         scenario_happy_path(root)
         scenario_blocked_normalize(root)
+        scenario_blocked_conflict(root)
         scenario_smoke_failing_command(root)
         scenario_smoke_undetected(root)
     print("[adoption-smoke] OK")
