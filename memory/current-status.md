@@ -57,6 +57,15 @@ kind/category/blocker/target_path 都按当前树重算；
 任一 blocker 都在所有搬移前退出。adoption smoke 已从 19 扩为 21 组，加入新增 root 与伪造 control-item
 两类对抗 fixture，并保留原 19 组回归。
 
+本次本地 merge 集成 issue #15（approved source HEAD `94cb678`）：
+
+- `feat/15-outcome-aware-routing` fresh review 四项门槛已修：ledger 写入只允许 canonical
+  `.outcome-ledger/` 与字面 `/tmp`；outcome 证据按完整具体路线七维键隔离；两个 decision
+  写入口 append 前拒绝重复 ID；`--min-samples >= 1` 且零 outcome 保守回退。
+- 新增 repo 根、`.env*`、symlink/越界、跨 model/effort/policy 污染、重复 decision ID、
+  零/非法样本阈值对抗测试。定向结果：47/47 unittest 通过，outcome strict schema gate
+  0 error / 0 warning；fresh Codex reviewer verdict 为 `APPROVE`。
+
 ## Constraints
 
 - 遵守 `AGENTS.md` / `.agent/AGENTS.md` / `.agent/action-boundary.md`。

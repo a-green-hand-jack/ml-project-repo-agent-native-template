@@ -64,6 +64,12 @@ build/
 !.claude/agent-reports/README.md
 !.claude/agent-reports/.gitkeep
 
+# outcome ledger 明细是本地累积数据，不进 Git（只留说明；schema 与冻结 fixture 单独入 Git）
+# 见 plans/20260712-outcome-aware-routing.zh.md「未解决问题 2：已决策」
+.claude/skills/coding-agent-quota/.outcome-ledger/*
+!.claude/skills/coding-agent-quota/.outcome-ledger/README.md
+!.claude/skills/coding-agent-quota/.outcome-ledger/.gitkeep
+
 # 本地下载的参考文档（doctrine 快照，可选保留）
 # .reference-docs/
 
