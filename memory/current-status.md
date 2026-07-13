@@ -13,8 +13,8 @@
   默认非法 Write deny、仅显式 `DOC_LIFECYCLE_SKIP=1` allow、registry delete deny 均有顶层
   Claude Code session hook raw evidence。
   raw 转录、debug log 与 sha256 见 `lab/evals/doc-lifecycle/evidence-20260713-runtime-probes.md`。
-  当前只剩把 `3eb7b1a` raw evidence 固化到 evidence-only child 后做 fresh exact-head review；
-  未 APPROVE 前不标 verified、不合入。
+  evidence-only `9510142` fresh review 仅指出本文件旧 blocker 与 8/8 PASS 自相矛盾；该状态
+  事实已修正，下一步是对新 exact HEAD 复审。未 APPROVE 前不标 verified、不合入。
 - 权威状态注册表：`memory/doc-lifecycle.yaml`（brief/plan/review/decision 四类统一，语义见 `plans/ANATOMY.md`）。
 - 其余存量 plan 均已 `verified`，decisions 均 `approved`（详见注册表）。
 - 本节由 agent 在状态流转时更新；compact/clear 后 `context_continuity.py` 会把本文件回注新上下文。
@@ -47,11 +47,11 @@
 
 ## 未合入 blocker
 
-- #13 `02626c3`：代码/合成测试已修复，但 C1-C3/X1-X3/G1-G2 真实双 runtime smoke 全未跑；
-  `lab/evals/doc-lifecycle/runtime-smoke-checklist.md` 明确标为 merge blocker。
-- #18 `2bfef30`：final `REQUEST_CHANGES`。C1-C7/X1-X6=`unknown`、X7=`unavailable`；strict fresh
-  evidence gate exit 1。另有代码 MAJOR：evidence validator 只看 status/非空 cell，尚不能拒绝
-  placeholder 或空 raw-output 的伪 PASS。修复并取得真实证据、fresh APPROVE 前不得合入。
+- #13：C1-C3/X1-X3/G1-G2 真实 runtime evidence 已 8/8 PASS；代码 target `3eb7b1a`、
+  evidence-only target `9510142`。当前唯一门槛是状态修正后的 exact HEAD fresh APPROVE。
+- #18 `cebe427`：raw-evidence 绑定 validator 的代码 MAJOR 已修复并获 code APPROVE；仍须纳入
+  #13 hook 兼容修复，在最终 exact target 完成 C1-C7/X1-X7、`--require-fresh` exit 0 与 fresh
+  final review。未取得这些证据前不得合入。
 
 ## #16 fresh-review handoff（2026-07-13）
 
