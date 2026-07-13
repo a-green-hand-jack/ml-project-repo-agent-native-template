@@ -114,8 +114,32 @@ def check_evidence_chain() -> None:
         return
 
     grade_rank = {"log": 1, "metric": 2, "table": 3, "figure": 4, "paper-claim": 5}
-    ev_by_id = {e.get("id"): e for e in evlist if isinstance(e, dict)}
-    claim_ids = {c.get("id") for c in claims if isinstance(c, dict)}
+    ev_by_id = {}
+    for e in evlist:
+        if not isinstance(e, dict):
+            continue
+        eid = e.get("id")
+        if eid in ev_by_id:
+            errors.append(f"evidence duplicate id：{eid}")
+        else:
+            ev_by_id[eid] = e
+    claim_ids = set()
+    for c in claims:
+        if not isinstance(c, dict):
+            continue
+        cid = c.get("id")
+        if cid in claim_ids:
+            errors.append(f"claim duplicate id：{cid}")
+        claim_ids.add(cid)
+
+    def evidence_complete(e: dict) -> bool:
+        required = ("supports_claim", "grade", "command", "commit", "run_id", "config")
+        return all(
+            isinstance(e.get(field), str)
+            and bool(e[field].strip())
+            and not _is_placeholder(e[field])
+            for field in required
+        ) and e.get("grade") in grade_rank
 
     for e in evlist:
         if isinstance(e, dict) and e.get("supports_claim") not in claim_ids:
@@ -126,10 +150,22 @@ def check_evidence_chain() -> None:
             continue
         cid, status = c.get("id"), c.get("status")
         refs = c.get("evidence") or []
-        linked = [ev_by_id[r] for r in refs if r in ev_by_id]
+        linked = []
         for r in refs:
             if r not in ev_by_id:
                 errors.append(f"claim {cid} 引用未知 evidence：{r}")
+                continue
+            evidence = ev_by_id[r]
+            if not evidence_complete(evidence):
+                errors.append(f"claim {cid} 引用占位/不完整 evidence：{r}")
+                continue
+            if evidence.get("supports_claim") != cid:
+                errors.append(
+                    f"claim {cid} 引用 evidence {r}，但 supports_claim="
+                    f"{evidence.get('supports_claim')!r}（归属边不匹配）"
+                )
+                continue
+            linked.append(evidence)
         strongest = max((grade_rank.get(e.get("grade"), 0) for e in linked), default=0)
         if status in ("partial", "supported") and not linked:
             errors.append(f"overclaim：claim {cid} status={status} 但无 evidence 支撑")

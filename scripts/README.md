@@ -7,7 +7,7 @@
 python scripts/validate-governance.py        # 总门禁（harness + anatomy + provenance + 治理规则 + 证据链/overclaim）
 python scripts/check-agent-harness.py         # 结构 / 必需文件 / 根污染 / 能力索引 / settings / DESIGN 清单
 python scripts/check-anatomy-drift.py         # ANATOMY 引用与行号漂移 + 120 行硬上限
-python scripts/check-provenance-chain.py      # provenance 链 + checksum(sha256) + claim marker；--self-test 跑内嵌正负 fixture
+python scripts/check-provenance-chain.py      # provenance 链 + 安全路径 + fail-closed gate；--self-test 跑内嵌对抗 fixture
 python scripts/check-same-commit.py --staged  # same-commit rule：结构改动 <-> ANATOMY 同变更集
 python scripts/sync-codex-adapters.py --check # Codex adapters 与 .claude canonical 能力是否同步
 python scripts/adopt-existing-repo.py <repo> --phase all  # 迁移已有 repo 到 template 形态
@@ -32,7 +32,9 @@ MAJOR 跨越需 `--allow-major` 人工确认。
 run→artifact→evidence→claim→deliverable 的 provenance 链：引用完整性、run 闭环
 （`status: done` + `run_summary`）、checksum（统一 sha256，进程内 hashlib；无法校验需
 固定枚举 reason + 非占位人工理由，否则判 fail）、deliverables 的 claim marker
-（`<!-- claim: id=... -->`）。三态输出：pass / fail / unknown，unknown 不算 pass，
+（`<!-- claim: id=... -->`，核对 supports_claim 归属与行级 claim 覆盖）、安全 repo-relative
+regular-file path、dataset split membership 与 duplicate ID。active/submitted/passed 状态不接受
+placeholder；passed gate 遇 unknown 也 fail-closed。三态输出：pass / fail / unknown，unknown 不算 pass，
 `--strict` 下 unknown 也算失败。字段与枚举定义见 `.agent/artifact-policy.md`。
 
 `check-same-commit.py` 不进 `validate-governance`（它需要 diff 上下文，干净 checkout 上会 no-op）。

@@ -44,5 +44,6 @@ maintenance: |
   （`provenance_unavailable_reason` 固定枚举 + 非占位理由），不允许静默留空。
 - 悬空索引 / 未闭环 run / checksum 不匹配由 `scripts/check-provenance-chain.py` 拦截
   （由 `validate-governance.py` 拉起；checksum 统一 sha256，无法校验需固定枚举 reason +
-  非占位人工理由）。
+  非占位人工理由）；`active` 条目的 `how_to_inspect` 必填，本地 location/manifest 必须
+  是安全 repo-relative regular file（拒绝 absolute/`..`/symlink escape/目录），ID 不得重复。
 - 校验：`python scripts/validate-governance.py`。

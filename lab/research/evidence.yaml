@@ -6,7 +6,9 @@
 # 每条 evidence 必须能回答：来自哪个 command/commit/run id/config/checkpoint/data split。
 # provenance 校验（scripts/check-provenance-chain.py）：run_id 必须指向 experiment-ledger
 # 中已闭环（status=done + run_summary）的 run；metric_source / checkpoint / data_split
-# 若指向 index 条目 id（如 result-001），该条目必须存在且未 archived。
+# 若指向 index 条目 id（如 result-001），该条目必须存在且不得为 archived/unknown；data_split 的
+# split 必须实际列在 dataset-index 对应条目的 splits 中。claim 反向引用本条时，
+# supports_claim 必须与 claim id 完全一致，占位/不完整 evidence 不贡献 claim 强度。
 schema_version: 1
 
 evidence:

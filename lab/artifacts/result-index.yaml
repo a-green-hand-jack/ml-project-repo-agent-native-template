@@ -2,7 +2,8 @@
 # 只存 index，不存 bytes。status: active | superseded | archived | unknown
 #
 # provenance 字段（见 .agent/artifact-policy.md，校验：scripts/check-provenance-chain.py）：
-# - location：统一的路径/URI 字段（bytes 不进 Git；repo 外路径与外部 URI 允许）。
+# - location：外部 URI 或 repo-relative regular file；拒绝 absolute、..、resolve 越界、
+#   symlink escape 与目录/特殊文件。bytes 不进 Git。
 # - commit / config / run_id：可复现三元组，离开占位状态后必填；run_id 必须指向
 #   experiment-ledger.yaml 中 status=done 且有 run_summary 的已闭环 run。
 # - checksum + checksum_algorithm（唯一取值 sha256）：本地 bytes 可达时会真算比对。
