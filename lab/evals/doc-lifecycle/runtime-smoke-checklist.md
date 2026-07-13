@@ -5,11 +5,10 @@
 > clone 中完成；synthetic 探针仍是独立证据，不能替代本清单。详细断言、session id 与 raw log
 > 见 `evidence-20260713-runtime-probes.md`。
 
-**当前状态：continuity/context 8/8 PASS；guard 新代码目标待重跑 G1/G2。** continuity/context
-目标为 `68f1d43`，相关 hook 代码未再变化。`654af4c` 的四个独立顶层 Claude sessions 与 raw
-仍是有效历史证据，但 direct evidence HEAD `9dfc432` 的 final review 又发现 GNU `cp` 长选项
-缩写和活动 shell 展开绕过；修复改变 guard 代码后，必须形成新 exact code target 并重跑
-G1/G2（至少直接覆盖 `--t=memory` 或 `$PWD/memory`）。raw files 的 sha256 在
+**当前状态：continuity/context 8/8 PASS；guard exact-target G1/G2 4/4 PASS。** continuity/context
+目标为 `68f1d43`，相关 hook 代码未再变化。GNU `cp` 长选项缩写和活动 shell 展开修复的 exact
+code target 为 `821350a`；四个新的独立顶层 Claude sessions 已重跑 default deny、SKIP allow、
+opaque delete deny 与原始 `cp --t=$PWD/memory` deny。raw files 的 sha256 在
 `raw/SHA256SUMS`；首次 C3 消息不足尝试保留在 raw 中但不计 PASS，继续同一隔离顶层 session
 后的第二次真实 compact 才是验收证据。
 
@@ -50,8 +49,8 @@ G1/G2（至少直接覆盖 `--t=memory` 或 `$PWD/memory`）。raw files 的 sha
 | X1 | 2026-07-13 | Codex 0.144.0 / gpt-5.6-sol | `68f1d43` | PASS | `raw/13-X1-*`; fresh startup 主动读到 plan/status | Codex integration owner |
 | X2 | 2026-07-13 | Codex 0.144.0 / gpt-5.6-sol | `68f1d43` | PASS | `raw/13-X2-X3-*`; clear hook completed + continuity | Codex integration owner |
 | X3 | 2026-07-13 | Codex 0.144.0 / gpt-5.6-sol | `68f1d43` | PASS | `raw/13-X2-X3-*`; Context compacted + hook completed，无 invalid JSON | Codex integration owner |
-| G1 | 2026-07-13 | Claude Code 2.1.207 / Opus 4.8 | 新 code target 待定（历史 PASS `654af4c`） | PENDING | 修复提交后重跑 default deny + 独立 SKIP allow，raw 需绑定 exact HEAD/wrapper/env/pre/post | Codex integration owner |
-| G2 | 2026-07-13 | Claude Code 2.1.207 / Opus 4.8 | 新 code target 待定（历史 PASS `654af4c`） | PENDING | 修复提交后重跑 opaque delete + GNU cp abbreviation/expansion deny，raw 需证明 registry preserved | Codex integration owner |
+| G1 | 2026-07-13 | Claude Code 2.1.207 / Opus 4.8 | `821350a` | PASS | sessions `9144b8f...` / `1323aa3...`; exact HEAD/wrapper/env/pre/post 绑定的 default deny + 独立 SKIP allow，见 `raw/13-G1-*-821350a*` | Codex integration owner |
+| G2 | 2026-07-13 | Claude Code 2.1.207 / Opus 4.8 | `821350a` | PASS | sessions `a679a17...` / `f19c9ce...`; opaque delete 与原始 `cp --t=$PWD/memory` 均 deny，post clean 且 registry preserved，见 `raw/13-G2-*-821350a*` | Codex integration owner |
 
 结果已同步到 `evidence-20260713-runtime-probes.md`；feature 仍保持 `implementing`，直到 fresh
 exact-head review APPROVE、合入 main 与合并后验证完成，才可转 `verified`。

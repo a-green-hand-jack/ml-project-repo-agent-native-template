@@ -11,13 +11,12 @@
   target 上由独立顶层 Claude sessions 证明 default deny、显式 SKIP allow 与 registry delete
   deny。raw 转录、debug log 与 SHA256 见
   `lab/evals/doc-lifecycle/evidence-20260713-runtime-probes.md`。
-- exact evidence HEAD `9dfc432` 的独立 final review 已完成并给出 `CHANGES_REQUESTED`：GNU `cp`
-  接受 `--target-directory` 的无歧义长选项缩写（如 `--t=memory`），且 `$PWD` 等活动 shell
-  展开可让 hook 的词法目标与 Bash 实际目标分叉。当前修复已覆盖 `--t`/`--pa`/`--no-t`
-  缩写、确定性 `$PWD`/`${PWD}` 展开，并对其余无法静态核验的 cp shell 展开 fail-closed；
-  normal/`python -S` self-test 与真实 hook regression 已补缩写、展开、literal/external controls
-  并全绿。形成新 code target 后必须在该精确 target 重跑 G1/G2、提交 raw-bound evidence child、
-  全 strict gates 与独立 final review；此前保持 implementing、不得合入。
+- exact evidence HEAD `9dfc432` 的独立 final review 所报 GNU `cp` 长选项缩写与活动 shell 展开
+  MAJOR 已在 code target `821350a` 修复。normal/`python -S` self-test 与真实 hook regression 已补
+  `--t`/`--pa`/`--no-t`、`$PWD`/`${PWD}`、literal/external controls 并全绿；四个独立顶层
+  Claude sessions 又在该精确 target 完成 G1 default deny + SKIP allow、G2 opaque delete +
+  原始 `cp --t=$PWD/memory` deny，raw gzip+SHA256 已落盘。当前 direct evidence child 待提交；
+  随后须跑全 strict gates 与独立 exact-HEAD final review，APPROVE 前保持 implementing、不得合入。
 - 权威状态注册表：`memory/doc-lifecycle.yaml`（brief/plan/review/decision 四类统一，语义见 `plans/ANATOMY.md`）。
 - 其余存量 plan 均已 `verified`，decisions 均 `approved`（详见注册表）。
 - 本节由 agent 在状态流转时更新；compact/clear 后 `context_continuity.py` 会把本文件回注新上下文。
@@ -50,10 +49,9 @@
 
 ## 未合入 blocker
 
-- #13：C1-C3/X1-X3 真实 runtime evidence 有效；exact evidence HEAD `9dfc432` final review
-  因 GNU cp 长选项缩写与活动 shell 展开绕过给出 `CHANGES_REQUESTED`。修复及 normal/`python -S`
-  对抗 fixtures 已完成，仍须提交新 code target、在该精确目标重跑 G1/G2 raw-bound runtime、
-  全 strict gates 与独立 fresh `APPROVE`；未获批准前不得合入。
+- #13：C1-C3/X1-X3 真实 runtime evidence 有效；GNU cp 缩写/展开修复 code target `821350a`
+  的 G1/G2 raw-bound runtime 4/4 PASS。当前须提交 evidence-only direct child、跑全 strict gates
+  并取得独立 exact-HEAD fresh `APPROVE`；未获批准前不得合入。
 - #18 `cebe427`：raw-evidence 绑定 validator 的代码 MAJOR 已修复并获 code APPROVE；仍须纳入
   #13 hook 兼容修复，在最终 exact target 完成 C1-C7/X1-X7、`--require-fresh` exit 0 与 fresh
   final review。未取得这些证据前不得合入。

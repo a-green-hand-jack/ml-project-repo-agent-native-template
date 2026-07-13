@@ -216,13 +216,12 @@ repo 里已经有好几套相邻但不统一的"状态/审批"机制，设计新
 
 - **全部 open question 已收敛，功能实现与 C1-C3/X1-X3 runtime evidence 已完成。** 当前处于
   final-review 收口，不再等待进入实现的批准。
-- exact evidence HEAD `9dfc432` 的 final review 又发现 GNU cp 长选项缩写与活动 shell 展开
-  MAJOR；当前代码已解析 `--t`/`--pa`/`--no-t` 合法前缀、确定性 `$PWD`/`${PWD}`，并对其余
-  无法静态核验的 cp shell 展开 fail-closed，normal/`python -S` 对抗矩阵全绿。
-- 下一步固定为：提交新 exact code target，在该目标的独立 disposable clones 重跑 G1 default
-  deny + SKIP allow、G2 opaque delete + cp abbreviation/expansion deny，把 raw gzip/SHA256 纳入
-  direct evidence child，再跑全 strict gates 与独立 exact-HEAD fresh review。仅 `APPROVE` 后
-  才把本 plan 标为 verified 并本地合入。
+- exact evidence HEAD `9dfc432` 的 final review 所报 GNU cp 长选项缩写与活动 shell 展开 MAJOR
+  已在 code target `821350a` 修复；normal/`python -S` 对抗矩阵全绿，且四个独立 disposable
+  clones 的 G1 default deny + SKIP allow、G2 opaque delete + 原始 `cp --t=$PWD/memory` deny
+  已真实 PASS，raw gzip/SHA256 已纳入当前 direct evidence child。
+- 下一步固定为：提交本 evidence-only direct child，跑全 strict gates 与独立 exact-HEAD fresh
+  review。仅 `APPROVE` 后才把本 plan 标为 verified 并本地合入。
 
 ## Plan revision log
 
@@ -256,3 +255,4 @@ repo 里已经有好几套相邻但不统一的"状态/审批"机制，设计新
 - 2026-07-13 **evidence-only `83be6d5` 独立 final review：`CHANGES_REQUESTED`（2 MAJOR）**。(1) GNU `cp -t memory /tmp/doc-lifecycle.yaml` 与 `cp --target-directory=memory /tmp/doc-lifecycle.yaml` 的真实 hook 在 normal/`python -S` 均 exit 0，可覆盖 registry；guard 必须解析 target-directory 与有效目标路径并补真实 hook parity fixtures。(2) current-status 仍称 evidence child 待提交、runtime checklist 仍以 `8eea18e` 为当前 G1/G2 target，任务树全未勾选，三处与已完成实现/证据矛盾。修复后必须在精确新 code target 重跑 G1/G2、全 strict gates 与独立 final fresh review。
 - 2026-07-13 **最终 code target `654af4c` 修复 cp/durable 两项 MAJOR，G1/G2 exact-target runtime PASS**。GNU cp destination parser 覆盖 direct target、existing directory、`-t`/`--target-directory`、short option bundle 与 `--parents`，normal/`python -S` self-test、真实 hook regression 及 repo 外 controls 全绿；任务树全量勾选，current-status/checklist 与已完成证据一致。四个全新 disposable clones 的独立顶层 Claude Code 2.1.207 / Opus 4.8 sessions 分别证明 default malformed Write deny、仅进程级 `DOC_LIFECYCLE_SKIP=1` allow、opaque registry delete deny、`cp --target-directory` overwrite deny；每份 raw 内嵌 exact HEAD、wrapper 全文+SHA、环境与 pre/post facts，八份 raw/debug gzip+SHA256 纳入 direct evidence child。下一门槛仅为全 strict gates 与独立 exact-HEAD final review。
 - 2026-07-13 **evidence HEAD `9dfc432` 独立 final review：`CHANGES_REQUESTED`（1 MAJOR）**。GNU `cp` 接受 `--target-directory` 的无歧义长选项缩写（`--t` 起）且 Bash 会展开 `$PWD`，旧 parser 只认完整 option 并把 shell word 当字面路径，故 `cp --t=memory ...` 与 `cp --target-directory=$PWD/memory ...` 均可覆盖 registry 而 hook 放行。修复统一解析 `--t`/`--pa`/`--no-t` 及更长合法前缀，确定性展开 `$PWD`/`${PWD}`，对其余活动 shell 展开 fail-closed；normal/`python -S` self-test 与真实 hook regression 补 abbreviation、expansion、quoted/escaped literal、repo 外 controls。新 code target 仍须实际重跑 G1/G2、raw evidence、全 strict gates 与独立 final review。
+- 2026-07-13 **最终 code target `821350a` 的 G1/G2 exact-target runtime PASS**。四个全新 disposable clones 与独立顶层 Claude Code 2.1.207 / Opus 4.8 sessions 分别证明 malformed Write 默认 deny、仅进程级 `DOC_LIFECYCLE_SKIP=1` allow、opaque `git rm --pathspec-from-file` deny、原始 `cp --t=$PWD/memory .../doc-lifecycle.yaml` deny；每份有效 typescript 只有一个 tool call，并内嵌 exact HEAD、wrapper 全文+SHA、环境与 pre/post facts。首次 reject 因网络沙箱 `ConnectionRefused` 且零 tool call，不计 PASS但原文保留。十份 raw/debug 以 `gzip -n` 与 SHA256 纳入 direct evidence child；下一门槛仅为全 strict gates 与独立 exact-HEAD final review。
