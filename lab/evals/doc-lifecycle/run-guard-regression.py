@@ -203,6 +203,10 @@ def main() -> int:
         "# blockquoted-only status\n\n"
         "> Status: draft · 2026-07-13 · example only\n"
     )
+    missing_title_plan = "Status: draft · 2026-07-13 · issue #13\n"
+    title_after_anchor_plan = (
+        "Status: draft · 2026-07-13 · issue #13\n\n# late title\n"
+    )
     real_plus_blockquoted_anchor_plan = (
         TMP_ANCHOR_PLAN_TEXT
         + "\n> Status: draft · 2026-07-13 · blockquoted example only\n"
@@ -487,6 +491,10 @@ def main() -> int:
          {"file_path": TMP_ANCHOR_PLAN_REL, "content": fenced_only_anchor_plan}, 2, None),
         ("exact-head: blockquoted 示例不能冒充正文状态锚点", "Write",
          {"file_path": TMP_ANCHOR_PLAN_REL, "content": blockquoted_only_anchor_plan}, 2, None),
+        ("final-review: 缺一级标题的状态锚点拦", "Write",
+         {"file_path": TMP_ANCHOR_PLAN_REL, "content": missing_title_plan}, 2, None),
+        ("final-review: 标题晚于状态锚点拦", "Write",
+         {"file_path": TMP_ANCHOR_PLAN_REL, "content": title_after_anchor_plan}, 2, None),
         ("fresh-review-6a: registry approval=TODO 拦", "Write",
          {"file_path": REGISTRY, "content": placeholder_approval_registry}, 2, None),
         ("fresh-review-6b: plan section checkbox TODO 拦", "Write",
@@ -613,6 +621,8 @@ def main() -> int:
             ("重复/歧义状态锚点", TMP_ANCHOR_PLAN_REL, duplicate_anchor_plan),
             ("fenced 示例冒充状态锚点", TMP_ANCHOR_PLAN_REL, fenced_only_anchor_plan),
             ("blockquoted 示例冒充状态锚点", TMP_ANCHOR_PLAN_REL, blockquoted_only_anchor_plan),
+            ("缺一级标题的状态锚点", TMP_ANCHOR_PLAN_REL, missing_title_plan),
+            ("标题晚于状态锚点", TMP_ANCHOR_PLAN_REL, title_after_anchor_plan),
         ):
             got = run_no_site("Write", {"file_path": path, "content": content})
             ok = got == 2

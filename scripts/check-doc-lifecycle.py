@@ -418,18 +418,18 @@ def _parse_status_anchor(text: str) -> tuple[str | None, str | None]:
 
     anchor_index, line = candidates[0]
     first_nonblank = next((i for i, raw in enumerate(visible_lines) if raw.strip()), None)
-    expected_index = first_nonblank
-    if first_nonblank is not None and re.match(
+    if first_nonblank is None or not re.match(
         r"^\s*#(?:\s+|$)", visible_lines[first_nonblank]
     ):
-        expected_index = next(
-            (
-                i
-                for i in range(first_nonblank + 1, len(visible_lines))
-                if visible_lines[i].strip()
-            ),
-            None,
-        )
+        return None, "缺文档标题（第一条非空行必须是一级标题，Status 锚点紧随其后）"
+    expected_index = next(
+        (
+            i
+            for i in range(first_nonblank + 1, len(visible_lines))
+            if visible_lines[i].strip()
+        ),
+        None,
+    )
     if anchor_index != expected_index:
         return None, "状态锚点不在正文顶部（必须是标题后的第一条非空行）"
 
@@ -2583,6 +2583,16 @@ def self_test() -> int:
             "仅 blockquoted 示例",
             "# demo plan\n\n> Status: draft · 2026-07-12 · example only\n",
             "缺状态锚点",
+        ),
+        (
+            "缺标题",
+            "Status: draft · 2026-07-13 · issue #13\n",
+            "缺文档标题",
+        ),
+        (
+            "标题晚于锚点",
+            "Status: draft · 2026-07-13 · issue #13\n\n# demo plan\n",
+            "缺文档标题",
         ),
     )
     for label, malformed, needle in ambiguous_anchors:
