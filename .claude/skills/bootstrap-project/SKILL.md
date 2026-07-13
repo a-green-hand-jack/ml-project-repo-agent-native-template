@@ -31,17 +31,23 @@ CODEOWNERS owner、`PROJECT.md` 内容、要不要删无用目录的步骤（本
 
 ## 步骤
 
-1. 确认目标已是 Git repo（`.git` 存在），且不是本模板 repo 自身。
-2. 运行：
+1. 确认目标已是 Git repo（`.git` 存在）。主路径是 **self-bootstrap**：在派生 repo 内运行它
+   自己的脚本、目标就是自身（`.`）；用上游 checkout 的脚本对另一个路径运行也可以。脚本会拒绝
+   把**上游模板 repo 自身**当目标（判据：目标的 git remote 指向与 `--origin` 相同的 slug；
+   派生 repo 的 remote 是自己的新 slug、clone+reinit 没有 remote，均不受影响）。
+2. 运行（在派生出的新 repo 内）：
 
    ```bash
-   python scripts/bootstrap-project.py /path/to/new-project --origin <owner/repo>
+   python scripts/bootstrap-project.py . --origin <owner/repo>
    ```
 
    这会依次做：写/确认 `.template.toml`（origin+version 锚点）、
-   `git config core.hooksPath .githooks`、`python scripts/sync-codex-adapters.py`（写入+`--check`）、
+   `git config core.hooksPath .githooks`（目标缺 `.githooks/` 视为模板树不完整，**硬失败**、
+   非零退出，不会静默跳过）、`python scripts/sync-codex-adapters.py`（写入+`--check`）、
    `python scripts/validate-governance.py`。第二次以相同 `--origin` 重跑是幂等的
-   （`.template.toml` 状态是 `confirmed` 而不是 `created`，不会报错、不会重复写）。
+   （`.template.toml` 状态是 `confirmed` 而不是 `created`，不会报错；state/report 内容无实质
+   变化时不改写、时间戳也不变——`created_at` 表示内容最后变化时间；`state/run-log.jsonl`
+   是追加式审计日志，每次运行必追加一行，属预期行为）。
 3. 若目标已存在 `.template.toml` 且其中 origin 与传入的不一致，命令会**报错并停止**、不碰任何文件；
    确认要覆盖再显式加 `--force`。
 4. 读命令输出与 `lab/docs/audits/template-bootstrap-report.md`：

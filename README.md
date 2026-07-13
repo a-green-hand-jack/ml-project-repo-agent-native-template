@@ -54,15 +54,20 @@ cd <new-project> && rm -rf .git && git init
 
 ### 派生后的落地步骤
 
-派生出的新 repo 已经拥有完整模板目录形态（"Use this template" 本身就会复制整棵树）。剩下能
-自动化的部分收敛成一条幂等命令，用 `bootstrap-project` skill 调用：
+派生出的新 repo 已经拥有完整模板目录形态（"Use this template" 本身就会复制整棵树，包括
+`scripts/bootstrap-project.py` 自己）。剩下能自动化的部分收敛成一条幂等命令，在**新 repo 内**
+运行它自己的脚本（self-bootstrap），用 `bootstrap-project` skill 调用：
 
 ```bash
-python scripts/bootstrap-project.py /path/to/new-project --origin <owner/repo>
+cd <new-project>
+python scripts/bootstrap-project.py . --origin <owner/repo>
 ```
 
 `--origin` 必须显式传入（不推断上游 template repo slug），第二次以相同 `--origin` 重跑是幂等的
-（不重复写、不报错）。这一条命令会自动做：
+（state/report 内容不变则不改写；`state/run-log.jsonl` 是追加式审计日志，每次运行追加一行）。
+脚本会拒绝把**上游模板 repo 自身**当目标（判据：目标的 git remote 指向与 `--origin` 相同的
+slug——派生 repo 的 remote 是它自己的新 slug，clone+reinit 则没有 remote，都不会误伤）。
+这一条命令会自动做：
 
 1. 写/确认 `.template.toml`（origin + version 锚点；已存在且 origin 不一致时报错停止，需要覆盖
    显式加 `--force`）。

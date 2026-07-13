@@ -2,11 +2,16 @@
 """Bootstrap a repo freshly derived from this template ("Use this template" /
 `gh repo create --template` / clone+reinit) into a landed, self-consistent state.
 
-This script runs *from the upstream template checkout* against a target repo
-that already contains the full template tree (GitHub's "Use this template"
-copies the tree; it does not scaffold a bare directory — see
+The target already contains the full template tree (GitHub's "Use this
+template" copies the tree; it does not scaffold a bare directory — see
 `adopt-existing-repo.py` for the "existing repo with unrelated content"
 case, which is a different problem with a different safety envelope).
+The README main path is *self-bootstrap*: the derived repo runs its own
+copy of this script against itself (`python scripts/bootstrap-project.py .
+--origin <owner/repo>` inside the derived repo). Running the upstream
+checkout's copy against a separate target path also works. What is refused
+is bootstrapping the *upstream template repo itself* — see
+`refuse_upstream_template()` for the criterion.
 
 Automated substeps (see plans/20260712-bootstrap-adoption-proof.zh.md, A2):
   1. `.template.toml` generation/confirmation (origin + version anchor).
@@ -24,10 +29,20 @@ Substeps that need human information are never guessed — they are reported
 as todo/blocker items (CODEOWNERS owner, PROJECT.md, whether to delete
 unused directories, Codex trust). See `human_todo_items()`.
 
-Idempotent: re-running with the same `--origin` does not rewrite
-`.template.toml` and reports "confirmed" rather than "created"; the other
-substeps are naturally idempotent (git config re-set is a no-op, adapters
-write only on diff, governance just re-validates).
+Idempotent, with two-layer state semantics (plan A1):
+  * `state/state.json` + `template-bootstrap-report.md` are *content-stable*:
+    a confirming re-run whose outcome is substantively identical (same
+    origin/version anchor, same substep results) leaves both files
+    bit-for-bit untouched. `created_at` therefore means "when the recorded
+    content last changed", not "when the script last ran".
+  * `state/run-log.jsonl` is an *append-only audit log*: every non-dry run
+    appends exactly one row (run timestamp, per-run transition such as
+    created/confirmed, and a `content_changed` flag). Append-only growth is
+    the intended audit semantic, not an idempotency violation.
+Re-running with the same `--origin` does not rewrite `.template.toml` and
+reports "confirmed" rather than "created"; the other substeps are naturally
+idempotent (git config re-set is a no-op, adapters write only on diff,
+governance just re-validates).
 
 No third-party dependency (tomllib is stdlib on Python 3.11+, matching
 `scripts/template-sync.py`). Exit code: 0 = landed cleanly (or `--dry-run`),
@@ -91,8 +106,51 @@ def require_git_repo(target: Path) -> None:
             f"target is not a Git repo: {target} "
             "(bootstrap expects `git init`/`git clone` to already have happened)"
         )
-    if target.resolve() == TEMPLATE_ROOT.resolve():
-        raise SystemExit("refusing to bootstrap the template repo into itself")
+
+
+def _remote_slugs(target: Path) -> set[str]:
+    """<owner/repo> slugs of the target's git remotes (ssh/https forms)."""
+    proc = run(["git", "remote", "-v"], target)
+    slugs: set[str] = set()
+    if proc["returncode"] != 0:
+        return slugs
+    for line in proc["stdout"].splitlines():
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        m = re.search(r"[:/]([\w.-]+/[\w.-]+?)(?:\.git)?/?$", parts[1])
+        if m:
+            slugs.add(m.group(1))
+    return slugs
+
+
+def refuse_upstream_template(target: Path, origin: str) -> None:
+    """Refuse to bootstrap the *upstream template repo itself*.
+
+    An earlier guard rejected `target == TEMPLATE_ROOT` (the repo containing
+    this running script). That criterion was wrong: derived repos ship their
+    own copy of this script, and the README main path is self-bootstrap
+    (`python scripts/bootstrap-project.py .` inside the derived repo), where
+    target == TEMPLATE_ROOT is the normal, intended case.
+
+    What the guard must actually protect: never dirty the upstream template
+    repo by bootstrapping it into "a project derived from itself". Criterion:
+    the caller already names the upstream explicitly via `--origin`; if any
+    of the *target's own git remotes* resolves to that same <owner/repo>
+    slug, the target IS a checkout of the upstream template — refuse before
+    any mutation. Derived repos never trip this: "Use this template" /
+    `gh repo create --template` clones point at the new project's own slug,
+    and clone+reinit (`rm -rf .git && git init`) has no remotes at all.
+    (`--origin` is still never *inferred* from remotes — see 未解决问题 2;
+    remotes are only read to detect self-pollution, never to fill in origin.)
+    """
+    if origin in _remote_slugs(target):
+        raise SystemExit(
+            "refusing to bootstrap the upstream template repo into itself: "
+            f"target {target} has a git remote pointing at --origin {origin!r}. "
+            "A derived project's remote should be its own slug (or absent for "
+            "clone+reinit), not the template's."
+        )
 
 
 def validate_origin(origin: str) -> None:
@@ -170,7 +228,15 @@ def ensure_template_toml(
 def ensure_hooks_path(target: Path, dry_run: bool) -> dict[str, Any]:
     hooks_dir = target / ".githooks"
     if not hooks_dir.is_dir():
-        return {"status": "skipped", "reason": ".githooks not found in target"}
+        # Plan A2 mandates `core.hooksPath .githooks`; a template-derived
+        # repo without `.githooks/` is an incomplete tree, and silently
+        # skipping would let a broken derivation look bootstrapped. Hard
+        # failure (non-zero exit via main()'s ok-condition), never "skipped".
+        return {
+            "status": "failed",
+            "reason": ".githooks/ missing — template tree incomplete; "
+            "plan A2 requires core.hooksPath to be configured",
+        }
     if dry_run:
         return {"status": "would-set", "value": "core.hooksPath=.githooks"}
     result = run(["git", "config", "core.hooksPath", ".githooks"], target)
@@ -256,6 +322,12 @@ def human_todo_items(target: Path) -> list[dict[str, Any]]:
                 "在 Codex 里 trust 本 repo，否则 project hooks/config 不会加载"
                 "（out-of-band 前提，脚本无法代做、也无法可靠探测）"
             ),
+        },
+        {
+            "id": "reference-docs-version",
+            "path": ".reference-docs/",
+            "detected_state": "not-auto-detectable",
+            "action": "保留或更新你信奉的 doctrine 版本（来源文档 + 实现覆盖说明）",
         },
     ]
 
@@ -344,12 +416,67 @@ def write_state(target: Path, report: dict[str, Any]) -> None:
     path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def append_log(target: Path, report: dict[str, Any]) -> None:
+def read_existing_state(target: Path) -> dict[str, Any] | None:
+    path = state_root(target) / STATE_FILE
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+
+
+def _stable_form(report: dict[str, Any]) -> dict[str, Any]:
+    """Report content with per-run volatility removed, for change detection.
+
+    - `created_at` is dropped: it records when content last changed (see
+      `persist()`), so it must not itself count as a change.
+    - `.template.toml` transition verbs (created/confirmed/overwritten) all
+      collapse to "present": the *anchor facts* (origin, version) are the
+      content; which transition a particular run took is per-run audit info
+      and lives in `run-log.jsonl`, not in the stable state.
+    """
+    stable: dict[str, Any] = json.loads(json.dumps(report, sort_keys=True))
+    stable.pop("created_at", None)
+    tt = stable.get("template_toml") or {}
+    if tt.get("status") in ("created", "confirmed", "overwritten"):
+        tt["status"] = "present"
+        tt.pop("previous_origin", None)
+    return stable
+
+
+def append_log(
+    target: Path, run_time: str, report: dict[str, Any], content_changed: bool
+) -> None:
     path = state_root(target) / LOG_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
-    row = {"time": report["created_at"], "template_toml_status": report["template_toml"]["status"]}
+    row = {
+        "time": run_time,
+        "template_toml_status": report["template_toml"]["status"],
+        "content_changed": content_changed,
+    }
     with path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(row, sort_keys=True) + "\n")
+
+
+def persist(target: Path, report: dict[str, Any], run_time: str) -> bool:
+    """Two-layer persistence (see module docstring / plan A1).
+
+    state.json + report.md are content-stable: rewritten only when the
+    stable form of the outcome actually changed; a purely confirming run
+    leaves them bit-for-bit untouched (created_at keeps meaning "when the
+    recorded content last changed"). run-log.jsonl is append-only audit:
+    every non-dry run appends one row. Returns whether content changed.
+    """
+    existing = read_existing_state(target)
+    content_changed = existing is None or _stable_form(existing) != _stable_form(report)
+    if content_changed:
+        write_state(target, report)
+        write_report(target, report)
+    else:
+        report["created_at"] = existing["created_at"]
+    append_log(target, run_time, report, content_changed)
+    return content_changed
 
 
 def write_report(target: Path, report: dict[str, Any]) -> None:
@@ -373,6 +500,10 @@ def write_report(target: Path, report: dict[str, Any]) -> None:
         "- This report is generated by `scripts/bootstrap-project.py`.",
         "- Re-running with the same `--origin` is idempotent: `.template.toml` is confirmed, "
         "not rewritten; the other substeps are naturally idempotent.",
+        "- Two-layer state semantics: this report and `state/state.json` are content-stable "
+        "(a confirming run with no substantive change leaves them untouched; `created_at` is "
+        "when content last changed), while `state/run-log.jsonl` is an append-only audit log "
+        "(one row per run, by design).",
         "- Origin mismatch stops with a non-zero exit before any mutation unless `--force` is passed.",
         "",
         "## Human todo / blockers (never guessed)",
@@ -399,6 +530,7 @@ def bootstrap(args: argparse.Namespace) -> dict[str, Any]:
     target = args.target.resolve()
     require_git_repo(target)
     validate_origin(args.origin)
+    refuse_upstream_template(target, args.origin)
     version = read_own_version()
 
     # Conflict check happens first and stops everything (no side effects yet)
@@ -410,9 +542,10 @@ def bootstrap(args: argparse.Namespace) -> dict[str, Any]:
     human_todo = human_todo_items(target)
     agent_surface = agent_surface_checklist(target, hooks_path, None, sync_codex_adapters)
 
+    run_time = now_iso()
     report = {
         "schema": "template-bootstrap-report-v1",
-        "created_at": now_iso(),
+        "created_at": run_time,
         "target": str(target),
         "origin": args.origin,
         "version": version,
@@ -424,12 +557,17 @@ def bootstrap(args: argparse.Namespace) -> dict[str, Any]:
         "agent_surface": agent_surface,
     }
     if not args.dry_run:
-        write_state(target, report)
-        append_log(target, report)
-        write_report(target, report)
+        content_changed = persist(target, report, run_time)
+        print(
+            "[bootstrap] state/report: "
+            + ("written" if content_changed else "unchanged (confirming run; run-log appended)")
+        )
 
     print(f"[bootstrap] .template.toml: {template_toml['status']}")
-    print(f"[bootstrap] core.hooksPath: {hooks_path['status']}")
+    print(
+        f"[bootstrap] core.hooksPath: {hooks_path['status']}"
+        + (f" ({hooks_path['reason']})" if "reason" in hooks_path else "")
+    )
     print(f"[bootstrap] sync-codex-adapters: {sync_codex_adapters['status']}")
     print(f"[bootstrap] validate-governance: {governance['status']}")
     print(f"[bootstrap] human todo items: {len(human_todo)}")
@@ -465,7 +603,9 @@ def main(argv: list[str]) -> int:
         return 0
     ok = (
         report["template_toml"]["status"] in ("created", "confirmed", "overwritten")
-        and report["hooks_path"]["status"] in ("ok", "skipped")
+        # Plan A2: core.hooksPath is mandatory — "skipped" is not acceptable
+        # (a missing .githooks now reports "failed", see ensure_hooks_path()).
+        and report["hooks_path"]["status"] == "ok"
         and report["sync_codex_adapters"]["status"] == "ok"
         and report["governance"]["status"] == "ok"
     )
