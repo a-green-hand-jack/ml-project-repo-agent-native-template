@@ -46,3 +46,11 @@ e13f7389a3daf5a0ae81cc00db62d9b6b481be78a2cb51a27c72ae804659eef1  lab/evals/doc-
 f257475f41f8d4d333b56139a322c3d84aa0a0b193e69339b77c4f873ece5bf5  lab/evals/doc-lifecycle/raw/13-G1-skip-claude-debug-6950825.log.gz
 960b061061dc4be2b86cfc108645c3455b2bdd27838b40f5a8e4672b612c67b3  lab/evals/doc-lifecycle/raw/13-G2-delete-claude-6950825.typescript.gz
 5334df332481906add194013b8e619f292eb416d9906b6d9b8a655b0069b2c1c  lab/evals/doc-lifecycle/raw/13-G2-delete-claude-debug-6950825.log.gz
+58c2f6319c189f273fdc631ef5d40f7c3dc80e8d3a5db1cdf44c9543b42d2a7a  lab/evals/doc-lifecycle/raw/13-G1-reject-claude-b7c7c7a.typescript.gz
+22ce3fe6756f68659e5ec3a43b41a66ebaac92897f074ccfaafeeaa2b29cf5e1  lab/evals/doc-lifecycle/raw/13-G1-reject-claude-debug-b7c7c7a.log.gz
+f21e3d0ea176c5c39e7777a0dad3fcf22da27445ac07a20611a64cdfcb32fe4c  lab/evals/doc-lifecycle/raw/13-G1-skip-claude-b7c7c7a.typescript.gz
+d9247bb94fc7d588b4f02d5c270b4feba6a3f6060d001fc2ecdcaec46bc8dafc  lab/evals/doc-lifecycle/raw/13-G1-skip-claude-debug-b7c7c7a.log.gz
+68ec912b64259429b3d760fd5dad9ac518b3b59b06b6b4f054e154dc89a466ca  lab/evals/doc-lifecycle/raw/13-G1-skip-attempt-refused-claude-b7c7c7a.typescript.gz
+b4bd7275affb9442117f2f8f862786677153735991da2a59d742986d2988c8b2  lab/evals/doc-lifecycle/raw/13-G1-skip-attempt-refused-claude-debug-b7c7c7a.log.gz
+776a14ae608c8b0843f5dc4f1c270a241f0c0004a9e3a9b1822f5956c8abecca  lab/evals/doc-lifecycle/raw/13-G2-delete-claude-b7c7c7a.typescript.gz
+7522b6154d670f3293c1aab19781a7d19af0ef4a22a95bf2b06644985e2d96c1  lab/evals/doc-lifecycle/raw/13-G2-delete-claude-debug-b7c7c7a.log.gz

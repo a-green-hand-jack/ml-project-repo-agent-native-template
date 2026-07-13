@@ -18,8 +18,10 @@
   `git rm --pathspec-from-file` 不透明删除绕过、blockquoted Status 示例冒充锚点、octopus
   detached merge 冒充双亲 synthetic merge、draft 等非活跃态的 issue/branch/worktree/approval
   非标量 fail-open，以及本文仍指向已完成的 evidence-only 步骤。本轮 code target 同步修复这
-  五项并补 normal/`python -S` 对抗 fixtures；下一门槛是提交代码、在精确新 target 重跑 G1/G2、
-  全 strict gates，再提交 evidence-only direct child 并做新的独立 final review。
+  五项并补 normal/`python -S` 对抗 fixtures，code target 为 `b7c7c7a`。G1 已用同一
+  malformed-draft fixture 在两个新顶层 Claude sessions 证明默认 deny/显式 SKIP allow；G2 已用
+  实际指向注册表的 opaque `--pathspec-from-file` 在第三个 session 证明 deny，三者都绑定
+  `b7c7c7a`。下一门槛是全 strict gates、提交 evidence-only direct child 并做新的独立 final review。
 - 权威状态注册表：`memory/doc-lifecycle.yaml`（brief/plan/review/decision 四类统一，语义见 `plans/ANATOMY.md`）。
 - 其余存量 plan 均已 `verified`，decisions 均 `approved`（详见注册表）。
 - 本节由 agent 在状态流转时更新；compact/clear 后 `context_continuity.py` 会把本文件回注新上下文。
@@ -53,8 +55,8 @@
 ## 未合入 blocker
 
 - #13：C1-C3/X1-X3/G1-G2 真实 runtime evidence 已 8/8 PASS；`8b4c55b` exact HEAD final
-  review 为 `CHANGES_REQUESTED`，五个 MAJOR 正在本轮修复。必须在新 code target 重跑 G1/G2、
-  全 strict gates，提交 evidence-only child 并取得 exact HEAD fresh `APPROVE` 后才能合入。
+  review 的五个 MAJOR 已由 `b7c7c7a` 修复，G1/G2 已绑定该 target 重跑。仍须全 strict gates、
+  evidence-only child 与 exact HEAD fresh `APPROVE`，否则不得合入。
 - #18 `cebe427`：raw-evidence 绑定 validator 的代码 MAJOR 已修复并获 code APPROVE；仍须纳入
   #13 hook 兼容修复，在最终 exact target 完成 C1-C7/X1-X7、`--require-fresh` exit 0 与 fresh
   final review。未取得这些证据前不得合入。
