@@ -8,7 +8,7 @@
 - 当前活跃 plan：`plans/20260712-plan-lifecycle-state.zh.md`（issue #13）· status: **implementing** ·
   branch `feat/13-plan-lifecycle-state`（worktree `.claude/worktrees/13-plan-lifecycle-state`）。
 - 真实 runtime 验收已 8/8 PASS：C1-C3/X1-X3 的 continuity/context 目标为 `68f1d43`；
-  PyYAML duplicate-root 修复后的 guard G1/G2 已在精确代码 `de9aa2e` 的三个新
+  final-review 三项修复后的 guard G1/G2 已在精确代码 `6950825` 的三个新
   disposable clones 中重跑，
   默认非法 Write deny、仅显式 `DOC_LIFECYCLE_SKIP=1` allow、registry delete deny 均有顶层
   Claude Code session hook raw evidence。
@@ -17,8 +17,10 @@
   证据，但发现三个 MAJOR：detached exact clone 的 branch/worktree 绑定失败、本文旧段仍称
   runtime smoke 缺失、状态锚点不要求顶部且不唯一。本轮修复已加入 detached exact + 双亲
   synthetic merge + remote 分叉对抗 fixtures、唯一顶部锚点/fenced 示例对抗 fixtures，并删除
-  下方旧状态矛盾；下一门槛是提交新 code target、重跑 exact-target G1/G2 与全 strict gates，
-  再创建 evidence-only direct child 做独立 final review。
+  下方旧状态矛盾。新 code target `6950825` 的 G1 默认 deny + 独立 SKIP allow、G2 registry
+  delete deny 已由三个顶层 Claude session 真实重跑，reject/delete clones clean、skip 产物只在
+  disposable clone；下一门槛是提交 raw gzip+SHA evidence-only direct child、重跑全 strict gates
+  并做独立 exact HEAD final review。
 - 权威状态注册表：`memory/doc-lifecycle.yaml`（brief/plan/review/decision 四类统一，语义见 `plans/ANATOMY.md`）。
 - 其余存量 plan 均已 `verified`，decisions 均 `approved`（详见注册表）。
 - 本节由 agent 在状态流转时更新；compact/clear 后 `context_continuity.py` 会把本文件回注新上下文。
@@ -51,9 +53,9 @@
 
 ## 未合入 blocker
 
-- #13：C1-C3/X1-X3/G1-G2 真实 runtime evidence 已 8/8 PASS；`54822ff` final review 的唯一
-  MAJOR 已由 `de9aa2e` 修复，双模式对抗 fixture、strict gates 与 exact-target G1/G2 均通过。
-  当前仅剩 evidence-only direct child 与 exact HEAD fresh APPROVE。
+- #13：C1-C3/X1-X3/G1-G2 真实 runtime evidence 已 8/8 PASS；`d57957c` final review 的三个
+  MAJOR 已由 `6950825` 修复，detached/anchor 双模式对抗 fixtures 与 exact-target G1/G2 均通过。
+  当前仅剩 evidence-only direct child 的全 strict gates 与 exact HEAD fresh APPROVE。
 - #18 `cebe427`：raw-evidence 绑定 validator 的代码 MAJOR 已修复并获 code APPROVE；仍须纳入
   #13 hook 兼容修复，在最终 exact target 完成 C1-C7/X1-X7、`--require-fresh` exit 0 与 fresh
   final review。未取得这些证据前不得合入。
