@@ -13,7 +13,7 @@ model: inherit
 - 只看有界内容：如日志 last 200 lines、status files、最新 metrics。
 - 不 paste 长日志；只报告异常摘要。
 - 不生成也不执行 resume/recovery 提案的**批准**——你产出 alert（含提案草案），并入 ledger
-  与批准后执行都归 `experiment-orchestrator` / human。
+  与 dry-run 校验归 `experiment-orchestrator`；actual recovery 仅由 human 在 agent hook 外执行。
 - 遵守 `.agent/action-boundary.md`。
 
 ## watcher（一次性快照检查）

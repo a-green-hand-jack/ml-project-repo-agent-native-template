@@ -10,7 +10,7 @@
 1. 给 experiment card / ledger / run summary 定义结构化状态机（`planned → approved → running → done|failed|superseded`）与必填引用字段，非法状态转换与缺字段能被脚本拦截，而不只是靠人读文档自觉遵守。
 2. 定义 launch registry / adapter contract：一层抽象把「本地 fake job」与「可选的 Slurm / RunAI 等后端」统一成同一套 launch/status/kill/restart 描述，adapter 缺失时优雅 fallback，不引入硬依赖；**adapter 本身不代替 human 按下启动键**。scheduler adapter 的具体做法先经任务 C3a 调研 `Zhangyanbo/hpc-skills` 后再定（直接安装 vs 参考自研）。
 3. 建一个 bounded（有界、不无限追加、不常驻失控）watcher，检查日志尾部、metric、checkpoint 新鲜度、资源、config drift、failure signal，输出结构化 alert。
-4. 定义 stale run 判定与 resume/recovery 提案格式：watcher 生成「建议 + 待批准的确切命令」；human 在 `.agent/human-gates.md` 流程下对某条具体提案给出明确批准后，`experiment-orchestrator` 可半自动执行该条已批准的 resume/recovery 动作（本 issue 范围内仅限 fake/local job，不触达真实 GPU/Slurm/RunAI）——agent 不自主判断"是否要恢复"，只执行 human 已圈定的那一条（2026-07-12 human 拍板，见「未解决问题」4）。
+4. 定义 stale run 判定与 resume/recovery 提案格式：watcher 生成「建议 + 待批准的确切命令」；`experiment-orchestrator` 只能 dry-run 校验 exact command/run/workdir，actual recovery 因缺外部可信 provenance 与原子 consumer 而 fail-closed，由 human 在 agent hook 外亲自执行。
 5. 把状态机与 `memory/current-status.md`、`lab/artifacts/*-index.yaml`、evidence promotion 打通，使「run 完成 → summary → artifact → ledger」闭环可自动核对。
 
 > **双 runtime 对等要求（本轮二审补充）**：这个控制面会被 Claude Code 和 Codex 两侧 agent 都用来发起/监控实验。issue 里点名的 `experiment-orchestrator` 是 Claude 专属 subagent，但 Codex 侧通过 `.codex/agents/*.toml`（由 `scripts/sync-codex-adapters.py` 从 `.claude/agents/*.md` 生成）拿到等价角色。因此控制面的**触发路径必须是 runtime-neutral 的**——以 CLI 脚本 + repo 内文件（YAML 状态）+ validator 为主干，而不是绑死在 Claude 专属的 hook 事件、slash command 或 statusline 上。任何只有 Claude 侧能走通、Codex 侧走不通的机制，都要么补上 Codex 对等路径，要么标成 open question，不能默认。
@@ -18,7 +18,7 @@
 ## 非目标
 
 - **不实现任何具体 ML / 量化 / 科学训练器逻辑**：本 issue 只做控制面（schema、校验、adapter contract、watcher、alert/resume 流程），不碰 `lab/code/` 下具体训练脚本或领域 pipeline。
-- **不真实启动 / kill / restart 长训练或远端作业**，包括在测试与 smoke 环节。所有验证只能用 fake/local job（例如 `sleep` + 写 status 文件模拟的进程），不得触达真实 GPU/Slurm/RunAI 队列。**（对齐本轮决策 4）**human 批准后 `experiment-orchestrator` 可半自动执行的 resume/recovery，同样只限于此 fake/local 范围，不构成对本条非目标的例外。
+- **不真实启动 / kill / restart 长训练或远端作业**，包括在测试与 smoke 环节。所有验证只能用脚本内置 fake/local fixture，不得触达真实 GPU/Slurm/RunAI 队列；测试 ledger 与 canonical ledger 都不得触发 actual recovery。
 - **不给 scheduler adapter 引入硬依赖**：不安装 Slurm/RunAI 官方 SDK 或增加新的 Python 依赖；adapter 通过检测可执行文件是否存在 + 生成命令文本草案的方式工作，缺失时清晰 fallback 到「仅本地 / 仅提案」模式。
 - **不做告警通知渠道集成**（Slack/邮件/webhook 等）：alert 先落地为 repo 内文件（人可读的 alert/state 记录），不接外部通知系统。
 - **不新建 Web UI / dashboard**：控制面先是 CLI + 文件 + validator 脚本的形态，与现有 `scripts/validate-governance.py` 风格一致。
@@ -40,7 +40,7 @@
 - `.agent/templates/experiment-card.md`、`.agent/templates/run-summary.md`
 - `.agent/human-gates.md`（如状态机新增门禁点，需要补充说明）
 - `lab/infra/launch/`（adapter 草案脚本/文档，仍不代替人执行启动）
-- `.claude/agents/experiment-orchestrator.md`、`.claude/agents/experiment-monitor.md`（**已决策（2026-07-12 human 拍板）：扩展这两个既有 agent 的职责边界，不新增 agent 文件**——bounded watcher/alert 归入 `experiment-monitor`（保持严格只读、无 Edit/Write）；resume/recovery 提案与「human 批准后半自动执行」归入 `experiment-orchestrator`（已有 Write/Edit/Bash 与「未经批准不得 launch/kill/restart，只能产出待批准提案」边界，本轮只是把「批准后可执行」的既有模式显式扩展到 resume/recovery 场景））
+- `.claude/agents/experiment-orchestrator.md`、`.claude/agents/experiment-monitor.md`：bounded watcher/alert 归只读 monitor；提案合并与 `apply-recovery --dry-run` 校验归 orchestrator，不新增 agent，actual execution 不在 agent 权限内。
 - `.claude/skills/experiment-workflow/SKILL.md`
 - **`.codex/agents/*.toml`、`.agents/skills/experiment-workflow/SKILL.md`（Codex 侧生成产物）**：这些不是手改目标，而是**改完上面 canonical 后必须跑 `python scripts/sync-codex-adapters.py` 重新生成、并与 canonical 同 commit 提交**。`check-agent-harness.py` 会跑 `sync-codex-adapters.py --check`，不同步会直接 FAIL。**已决策**：本 issue 不新增 agent 文件（扩展既有两个 agent，见上一条），因此预期不会新生成 `.codex/agents/<new-name>.toml`；若 `experiment-orchestrator.md`/`experiment-monitor.md` 的 `tools`/`description` 有调整，仍需 sync 后确认对应的 `.codex/agents/experiment-orchestrator.toml`、`.codex/agents/experiment-monitor.toml` 同步更新并同 commit 提交。
 - `scripts/validate-experiment-state.py`（**已决策（2026-07-12 human 拍板）**：新建独立脚本，不整合进 `validate-governance.py` 现有函数体，仿 `scripts/check-same-commit.py` 先例，由 `validate-governance.py` 通过 `run_subcheck` 拉起——与 #17/#18 已定的独立脚本政策一致）
@@ -89,7 +89,7 @@
   - [x] F. alert → stale run → resume/recovery（human gate）
     - [x] F1. 定义 stale run 判定规则（如：超过预期 runtime 若干倍、或心跳/metric 长时间无更新）
     - [x] F2. **已决策（2026-07-12 human 拍板）**：alert 记录并入 `lab/research/experiment-ledger.yaml` 对应实验条目的新增字段（如 `alerts: [...]`，含时间戳、异常类型、证据引用），不新开独立文件（不建 `experiment-alerts.yaml`，不用 `human/inbox` 风格条目）；不接外部通知系统。
-    - [x] F3. 定义 resume/recovery 提案格式：动作类型（重跑/从 checkpoint 续跑/放弃标记 failed）+ 确切命令 + 影响半径 + 期望批准范围。**已决策（2026-07-12 human 拍板）**：human 对某条具体提案给出明确批准后，`experiment-orchestrator` 可半自动执行该条已批准的动作（本 issue 范围内仅限 fake/local job，不触达真实 GPU/Slurm/RunAI）；这不是让 agent 自主判断"要不要恢复"，而是执行 human 已圈定的那一条具体动作。批准记录格式对齐 `.agent/human-gates.md` 现有约定：在 ledger `alerts`/相应字段或 run summary 中记录 `approved_by`、`approved_at`、`approved_action`（具体到提案 ID 或确切命令），使批准范围可审计、不可被误用为"永久授权"。与 `.agent/action-boundary.md` 的对齐：该硬边界禁止在没有明确要求时启动/kill/restart 长训练或远端作业；本处"半自动执行"正是硬边界允许的"明确要求"情形——一次性、针对具体提案的 human 批准，不构成对边界的放宽，也不授予 agent 自主启停真实作业的权限。
+    - [x] F3. 定义 resume/recovery 提案格式：动作 + exact command + 同 run 的安全 workdir + 影响半径；approved_* 仅作审计。`apply-recovery --dry-run` 校验受信解释器/canonical script/run/workdir/pending 状态，actual execution fail-closed；human 在 agent hook 外亲自执行。
   - [x] G. 与 memory / artifact index / evidence 打通
     - [x] G1. run 完成（`done`）后的闭环校验：ledger status=done ⇒ run_summary 文件存在 ⇒ 对应 artifact index（`lab/artifacts/*-index.yaml`）有条目 ⇒ 缺任一环节时报告缺口而非静默
     - [x] G2. 明确控制面状态与 `memory/current-status.md` 的联动方式（如：activate run 列表、stale run 提醒是否写入 current-status）
@@ -107,13 +107,13 @@
 - **控制面走 runtime-neutral 主干（二审新增）**：状态机、校验、adapter contract、watcher、alert/resume 都以 CLI 脚本 + repo 内 YAML 文件 + validator 实现，Claude 与 Codex 调用同一入口。Claude 专属的 subagent/skill/hook 只是这套 CLI/文件的**调用者与包装**，不是唯一入口——保证 Codex 侧经 `.codex/agents/*.toml` 拿到的等价角色能走同一条路。
 - **Codex adapter 同步是硬步骤（二审新增）**：任何 canonical agent/skill 改动都要跑 `sync-codex-adapters.py` 并同 commit 提交生成物；`check-agent-harness.py` 会 gate 这一点。权限规则（settings.json / execpolicy）不在 sync 范围，需两侧手工对齐。
 - **新增 launch 入口必须先补双侧显式门禁（Codex 真实二审确认）**：本轮 `codex execpolicy check` 证明 `kill 123`、`sbatch train.sh`、`runai submit ...` 都返回 `prompt`；但示例 `python scripts/launch-experiment.py ...` 与 `bash lab/infra/launch/run-local.sh ...` 均为 `matchedRules: []`。共享 `pre_tool_guard.py` 也没有 launch/kill 检查。因此不能用「控制面只生成草案」替代机器门禁：一旦选定可执行入口，先把精确命令前缀加入 `.claude/settings.json` 的 `ask` 与 `.codex/rules/default.rules` 的 `prompt`，再允许 fake smoke。
-- **recovery 提案生成与批准后执行合并进 `experiment-orchestrator`（2026-07-12 human 拍板：不拆新 agent，取代此前"recovery-advisor 拆分且保持只读"的二审设想）**：resume/recovery 提案的生成，以及 human 批准后的半自动执行，都在既有 `experiment-orchestrator`（已是 workspace-write，已有"未经批准不得 launch/kill/restart，只能产出待批准提案"的边界）内完成，不再需要一个独立、权限更低的 recovery-advisor 子角色来隔离风险面；`experiment-monitor` 仍严格只读，只负责 watcher/alert 侦测，不生成也不执行 resume 提案——二者按"侦测 vs 提案+执行"清楚切分职责。
+- **recovery 提案与 dry-run 校验合并进 `experiment-orchestrator`**：不拆新 agent；monitor 严格只读，orchestrator 合并 alert 并做 fail-closed 校验。原“批准后半自动 actual execution”决策被 fresh review 安全约束取代。
 - **launch 权限规则改动已获 human 授权（2026-07-12 human 亲自拍板）**：针对上面「新增 launch 入口必须先补双侧显式门禁」的需求——原先这是一条待批的 open item（Forbidden paths 里标注为「需在计划里单独列出并等待 human 批准」）——human 现已明确同意：本 issue 范围内可以新增/调整 launch 相关的权限规则（Claude 侧 `.claude/settings.json` 的 `ask` 门禁 + Codex 侧 `.codex/rules/default.rules` 的 execpolicy `prompt` 规则），不需要在实现阶段再单独申请一次批准。限定：改动范围仅限 launch 命令识别相关的最小必要规则，不做无关的权限面调整；实际改权限文件时仍按 repo 正常流程走 PR review，这不代表可以绕开审查。已同步更新 Forbidden paths 与任务 H3。
 - **本轮（2026-07-12）human 逐条拍板收敛剩余 5 个 open question（选择题形式）**：
   1. scheduler adapter：先调研 `Zhangyanbo/hpc-skills`（https://github.com/Zhangyanbo/hpc-skills），据其结论决定"直接安装/引入"还是"参考自研"（新增前置任务 C3a）。
   2. watcher 形态：**一次性快照检查**，不做带轮询的后台常驻进程（任务 E2/E3）。
   3. alert 存储：**并入 `lab/research/experiment-ledger.yaml` 字段**，不新开独立文件（任务 F2）。
-  4. resume/recovery 边界：**human 批准后 `experiment-orchestrator` 可半自动执行该条已批准的具体动作**，不止步于生成命令草案；仍与 `.agent/action-boundary.md` 硬边界对齐——半自动执行仅限已获明确批准的单条动作，agent 不自主判断是否恢复（任务 F3）。
+  4. resume/recovery 边界：approved_* 是审计线索而非 capability；agent 只做 dry-run 校验，actual execution 永不由 repo-local 字段解锁（fresh review 修订，任务 F3）。
   5. agent 组织：**扩展现有 `experiment-orchestrator`/`experiment-monitor`**，不拆新 agent（Allowed paths、任务 E3）。
 - **本轮（2026-07-12）human 续拍板收敛剩余 2 个 open question**：
   6. `run-000` 占位条目：**同步升级为新 schema 的真实样例**（不只更新模板/文档），顺带给新 schema 留一个可参考的活样例，成本低、避免实现完后没人知道新字段怎么填（新增任务 A2a）。
@@ -124,8 +124,8 @@
 1. ~~scheduler adapter 范围~~ **已决策（2026-07-12 human 拍板）**：不预先争论"要不要做两个具体 adapter 草案"，而是先调研外部项目 `Zhangyanbo/hpc-skills`（https://github.com/Zhangyanbo/hpc-skills），由调研结论决定"直接安装/引入其作为 scheduler adapter 基础"还是"只参考其设计自研"；已新增前置任务 C3a，C3 的具体范围依赖该调研结果，不在本轮 plan 阶段展开。
 2. ~~watcher 运行形态~~ **已决策（2026-07-12 human 拍板）**：watcher 是**一次性快照检查**（人/agent 手动触发一次，检查完退出），不是带轮询的后台常驻进程；issue 里的"后台告警"若需要 cron/CI 之类的重复调用机制，属于后续 issue 范围，本 issue 只交付「可被重复调用的一次性检查」这个原语。任务 E2/E3 已按此改写。
 3. ~~alert 存储位置与格式~~ **已决策（2026-07-12 human 拍板）**：并入 `lab/research/experiment-ledger.yaml` 对应实验条目的字段（不新开独立文件）。任务 F2 已按此改写；具体字段 schema（如 `alerts: [{type, ts, evidence}]`）留给实现阶段细化。
-4. ~~resume/recovery 动作集合~~ **已决策（2026-07-12 human 拍板）**：不止步于"生成命令草案"——human 对某条具体提案明确批准后，`experiment-orchestrator` 可半自动执行该条已批准动作（仅限 fake/local 范围）；批准记录为**一次性、针对具体提案**（含 `approved_by`/`approved_at`/`approved_action`），不是本 session 级或持久级的泛授权，与 `.agent/human-gates.md`「明确批准」的既有精神一致，也不违反 `.agent/action-boundary.md` 的硬边界。任务 F3 已按此改写。
-5. ~~agent 组织方式~~ **已决策（2026-07-12 human 拍板）**：扩展现有 `experiment-orchestrator`/`experiment-monitor`，不拆新 agent。watcher/alert 侦测归入只读的 `experiment-monitor`；resume 提案生成 + 批准后半自动执行归入已有 workspace-write 边界的 `experiment-orchestrator`。Allowed paths、任务 E3、当前决策已按此改写。
+4. ~~resume/recovery 动作集合~~ **fresh review 修订**：原半自动执行决定因信任合同不足无法安全实现。approved_* 仅审计；缺外部可信 provenance + 原子 consumer 时 actual recovery fail-closed，human 在 agent hook 外执行。
+5. ~~agent 组织方式~~ **已决策并安全收窄**：不拆新 agent。monitor 负责只读侦测；orchestrator 只负责提案合并与 dry-run 校验，不执行恢复。
 6. ~~现有 `run-000` 占位条目~~ **已决策（2026-07-12 human 拍板）**：同步把 `lab/research/experiment-ledger.yaml` 里的 `run-000` 占位条目升级为新 schema 的真实样例（不是只更新模板/文档、留待第一个真实实验时再落地）。理由：成本低，且给新 schema 留一个可参考的活样例，避免实现完后没人知道新字段该怎么填。新增任务 A2a。
 7. ~~校验脚本落点~~ **已决策（2026-07-12 human 拍板）**：新建独立脚本 `scripts/validate-experiment-state.py`，不整合进 `scripts/validate-governance.py` 现有函数体，仿 `scripts/check-same-commit.py` 先例，由 `validate-governance.py` 通过 `run_subcheck` 拉起。理由：human 已确认这类问题统一按"独立脚本"政策执行，与 #17/#18 已定模式一致；同时要求同 commit 在 `scripts/ANATOMY.md` 登记该脚本，避免遗漏。任务 B2、Allowed paths 已按此改写。
 8. **双 runtime 的完整业务 smoke 仍待实现后验证**：本轮已经在真实 Codex session 里验证现有 policy，而不是继续保留“缺 Codex 一手证据”的泛问：`kill/sbatch/runai` 均命中 `prompt`，两个假设的 fake launch 入口均未命中规则。由于控制面脚本、registry 与 fake adapter 尚未实现，现在无法诚实地跑「审批→监控→告警→停止→恢复」端到端 smoke。实现后应对同一 CLI/文件流程跑一次业务 smoke，并分别对 Claude/Codex 做权限层定向测试；不需要仅为 runtime 名称重复两套完全相同的业务测试。
@@ -146,18 +146,18 @@
 
 - 状态机 + 必填字段 + alert 审计 + done 闭环：`scripts/validate-experiment-state.py`（`status_history` 逐步校验使快照式检查也能拦非法转换；PyYAML 可选，内置受限 block-style 解析器回退，`--self-test` 内嵌 fixture 两条解析路径均过）；由 `validate-governance.py` `run_subcheck` 拉起。
 - launch registry / adapter contract：`lab/infra/launch/registry.yaml`（单一真源）+ `expctl.py detect/plan`（草案不执行、缺 CLI 清晰降级 local-only）+ `fake_job.py`（local-fake 后端，支持 NaN/stall 注入）。
-- 门禁三层同 commit 对齐：共享 `pre_tool_guard.py` 薄接线（importlib 加载 `launch_gate.py`，`CLAUDE_ALLOW_LAUNCH=1`/`CODEX_ALLOW_LAUNCH=1` 单次放行，与 push-main 同构）+ `.claude/settings.json` ask + `.codex/rules/default.rules` prompt（`codex execpolicy check` 实测 gated 入口全 `prompt`、只读入口不匹配）。hook synthetic 回归 23/23（旧行为零回归）。
-- watcher/alert/resume：`expctl.py watch`（一次性快照、有界 tail、exit 3 = abnormal、输出可直接并入 ledger `alerts` 的结构化条目+提案）；`expctl.py apply-recovery`（核对 approved_by/approved_at/approved_action 与 proposal.command 逐字一致、仅限 local-fake，缺失/不匹配/越界一律拒绝 exit 2）。
+- 门禁三层同 commit 对齐：共享 hook 对 registered launch、caller allow env、env split 与 shell eval 命中即拒；`.claude/settings.json` ask + `.codex/rules/default.rules` prompt 是额外提示，不是 override。
+- watcher/alert/resume：`expctl.py watch` 输出绑定 workdir 的结构化提案；`apply-recovery` 仅 dry-run 校验，canonical 与测试 ledger 的 actual execution 均 fail-closed。
 - run-000 已升级为 approved 态活样例；agent（monitor/orchestrator）与 skill 扩展后 `sync-codex-adapters.py` 重生成（monitor 保持 `read-only`）。
-- D1–D3 全流程 smoke 已走通（全部 fake/local）：草案→模拟批准启动→healthy 快照→stall 注入→alert（exit 3）→未批准拒绝（exit 2）→批准后半自动 restart→恢复 running→批准 kill→ledger running→failed 合法转换过校验。
+- D1–D3 的旧 actual restart/kill smoke 不再作为安全验收；fresh review 以脚本内置 fake fixture + 对抗拒绝测试取代，测试 ledger 不产生恢复副作用。
 
 ## 验证标准
 
 - 状态转换：`planned→approved→running→done/failed/superseded` 的合法转换可通过校验脚本验证；非法转换（如跳过 approved、done 后又转回 running）被脚本明确拒绝并给出可读报错。
 - 必填字段：缺 commit / config / data split / budget / success metric 中任一项的实验卡片/ledger 条目不能进入 `approved` 状态，校验脚本报出缺失字段清单。
-- 全流程 smoke（仅 fake/local job）：能走通「card 齐备 → 校验通过 → 模拟 human 批准 → local adapter 生成并执行 fake 启动 → watcher 对 fake job 做一次快照检查、检出一次人为制造的异常 → alert 写入 `experiment-ledger.yaml` 对应字段 → 模拟 human 对该条 alert 的 resume 提案给出明确批准 → `experiment-orchestrator` 半自动执行该条已批准动作 → 状态收敛到 done/failed」，全程不触达真实 GPU/远端队列。
+- 安全 smoke（仅脚本内置 fake fixture）：watcher 能检出异常并生成绑定 run/workdir 的 alert；伪批准、跨 run/workdir、受保护路径、非受信解释器、resolved/consumed/non-pending、测试或 canonical actual apply 全部在副作用前拒绝。
 - watcher bounded 性质：可展示/断言其读取日志有行数上限；每次调用是**一次性快照检查**（检查完即退出，不常驻、不做后台轮询）；不产生无限增长的输出；也不在未经批准时执行 kill/restart（可通过代码审查 + 测试用例证明其只读特性，与 `experiment-monitor.md` 现有边界一致）。
-- resume/recovery 半自动执行审计：给定一条已批准的 resume 提案（含 `approved_by`/`approved_at`/`approved_action`），`experiment-orchestrator` 实际执行的动作应与提案完全匹配（同一 fake job、同一命令）；批准字段缺失或与执行动作不匹配时，应拒绝执行并报错，而非静默跳过检查。
+- resume/recovery fail-closed 审计：`--dry-run` 只校验不消费不执行；不带 dry-run 永拒且状态文件/ledger 不变，重复或并发调用没有可重放的 effect。
 - 闭环检查：给定一个状态为 `done` 的 fake 实验，能检测出 run summary / artifact index / ledger 是否三方一致，缺失任一环节时给出明确报告而非静默通过。
 - scheduler adapter fallback：在未安装/检测不到 Slurm、RunAI 等 CLI 的环境下（本仓库当前环境即是），adapter 层能优雅降级为 local-only 模式，不报错、不阻断其余流程、不引入新的 Python 依赖。
 - 运行 `python scripts/validate-governance.py`（以及新增的针对性校验脚本/测试）全部通过，并在报告中给出确切命令与输出。
@@ -167,7 +167,7 @@
 
 ## 下一步
 
-- 未解决问题 1-7 已由 human 于 2026-07-12 逐条拍板收敛（scheduler adapter 调研路径、watcher 一次性快照形态、alert 并入 ledger 字段、resume 半自动执行边界、agent 组织不拆分、`run-000` 升级为新 schema 样例、校验脚本独立落点），对应任务树、Allowed paths、验证标准已同步改写。未解决问题 8、9 本质是「实现阶段才能验证的事项」（需要控制面脚本/registry/fake adapter 实际存在、需要真实拉起 custom agent 才能测），不是需要 human 现在拍板的分歧点，不算 blocking open question——留在文件里作为实现完成前必须补的验收动作。截至本轮，**本文件没有剩余需要 human 现在拍板的 open question**；若无进一步批注，可视为计划收敛，等待 human 明确批准后进入实现阶段。
+- 未解决问题 1-7 已收敛；其中 resume 边界经 fresh review 从半自动执行收窄为 dry-run 校验 + actual fail-closed。当前实现与验证以本修订后的任务 F3 / 验证标准为准。
 - 收到批注后 Read diff + `git status`，收敛计划为 v2，若涉及范围变化同步更新 Allowed/Forbidden paths 与任务树。
 - 计划收敛且 human 明确批准后，再进入实现阶段（不在本轮 plan 文档任务中开始写代码）。
 
@@ -180,3 +180,11 @@
 - 2026-07-12 human 亲自逐条拍板（选择题形式）：scheduler adapter 先调研 `Zhangyanbo/hpc-skills`（新增前置任务 C3a）、watcher 定为一次性快照检查（非常驻轮询）、alert 记录并入 `experiment-ledger.yaml` 字段（不新开文件）、resume/recovery 在 human 批准后 `experiment-orchestrator` 可半自动执行已批准的具体动作（与 `.agent/action-boundary.md` 对齐，非自主判断）、新能力扩展现有 `experiment-orchestrator`/`experiment-monitor`（不拆新 agent）。未解决问题 1-5 相应标记为已决策，任务树/Allowed paths/验证标准同步改写。
 - 2026-07-12 human 续拍板剩余 2 条 open question：(1) `run-000` 占位条目同步升级为新 schema 真实样例，不只更新模板/文档（新增任务 A2a）；(2) 校验脚本落点按"独立脚本"政策执行，新建 `scripts/validate-experiment-state.py`（仿 `scripts/check-same-commit.py` 先例，由 `validate-governance.py` 通过 `run_subcheck` 拉起），不整合进 `validate-governance.py` 现有函数体，对齐 #17/#18 已定模式。未解决问题 6、7 已标记为已决策；任务 A2/A2a、B2、Allowed paths（含 `scripts/ANATOMY.md` 登记要求）同步改写。核实结果：未解决问题 8、9 本质是实现阶段才能验证的事项（依赖控制面脚本/registry/fake adapter 实际存在、依赖真实拉起 custom agent 才能测得 sandbox 行为），不构成需要 human 现在拍板的分歧点，不算 blocking open question；截至本次修订，本文件**没有**剩余需要 human 现在拍板的 open question。
 - 2026-07-13 实现落地（干将·改·实验面）：按已收敛计划完成 A/B/C/D/E/F/G/H 全任务树；C3a 调研实核 `Zhangyanbo/hpc-skills` 并定为「参考自研」（结论与理由见「实现记录」）；D1–D3 fake/local 全流程 smoke、hook synthetic 回归 23/23、双侧 execpolicy/ask 对齐实测、validate-governance 全绿。open question 8 的业务 smoke 已在实现期补上（CLI/文件流程一次 + 两侧权限层定向测试）；open question 9 的「真实拉起 custom agent 验证 read-only sandbox」仍留给 PR review 后的实机验证（配置生成侧已确认 monitor adapter 保持 `sandbox_mode = "read-only"`）。
+- 2026-07-13 fresh review 安全修订（取代上述“env 放行/半自动 actual recovery”实现结论）：
+  caller-set `CLAUDE_ALLOW_LAUNCH` / `CODEX_ALLOW_LAUNCH` 不再是任何形式的批准；hook 递归检查
+  `env -S` / `env --split-string` 与 shell `-c/-lc` 内层命令，所有 launch/kill/restart 入口
+  命中即拒。repo-local ledger 无法提供可信 human provenance 与原子一次性消费，因此
+  `apply-recovery` actual execution fail-closed，只保留 `--dry-run` 校验；`/tmp` 测试 ledger
+  只能 dry-run、不得产生副作用。fake adapter 严格绑定受信 Python、canonical script、同一
+  run-id、字面 `/tmp/<run-id>` workdir、status.run_id/workdir 与确切 worker argv。原验证标准中
+  “agent 半自动执行恢复”由“对抗测试证明拒绝实际执行 + human 在 agent hook 外亲自执行”取代。

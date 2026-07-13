@@ -27,26 +27,30 @@
 
 - 地板：共享 `pre_tool_guard.py` hook（经 `lab/infra/launch/launch_gate.py`）拦截命中前缀
   的命令，匹配 wrapper-robust（`env python -u …`、`nohup sbatch` 等包装绕不过；即使
-  bypass/自主窗口下仍生效）。env 放行 `CLAUDE_ALLOW_LAUNCH=1` / `CODEX_ALLOW_LAUNCH=1`
-  与 push-main 的 `*_ALLOW_PUSH_MAIN` 同构，且要**诚实界定**：它是 advisory 级——作用于
-  所加的那条命令，export 到进程环境则整个 session 持续生效，agent 技术上可自行设置，
-  所以它不构成 human 签名；真正不可绕的确认是下面的 permission 层。
-- permission 层（真正的 gate）：`.claude/settings.json` 的 `ask` 与
+  bypass/自主窗口下仍生效）。`env -S`、`env --split-string`、`bash|sh|zsh|dash -c/-lc`
+  属调用者可编程的动态执行面，在 agent hook 内整体 fail-closed。
+  `CLAUDE_ALLOW_LAUNCH=1` / `CODEX_ALLOW_LAUNCH=1` 是调用者可写输入，**永不放行**；
+  human 必须在 agent hook 外亲自运行审阅过的命令。
+- permission 层（额外提示，不是 override）：`.claude/settings.json` 的 `ask` 与
   `.codex/rules/default.rules` 的 `prompt`，与 registry 手工双写、同 commit 对齐。静态
-  模式覆盖 canonical 直写形态 + 有限 wrapper 变体；覆盖不到的包装形态由 hook 地板兜。
+  模式覆盖 canonical 直写形态 + 有限 wrapper / shell-eval 变体；无论 human 是否在
+  permission prompt 点确认，agent 命令仍受 hook 地板拒绝。
 - 新增任何 launch 入口（含薄 wrapper）必须同 commit 登记进 registry 并补两侧规则，
   否则等于绕过门禁。
 
-resume/recovery 的批准是**一次性、针对具体提案**的：human 在 ledger 对应 alert 条目里落
-`approved_by` / `approved_at` / `approved_action`（与 `proposal.command` 逐字一致）后，
-`experiment-orchestrator` 才可经 `python lab/infra/launch/expctl.py apply-recovery` 执行
-该条动作（当前仅限 fake/local job：脚本 resolve 后必须等于 repo 内 canonical
-`fake_job.py`，且命令 `--run-id` 与 alert 所属 run 精确一致）；批准不自动延伸到其他提案
-或下一个上下文。信任模型要诚实：ledger 里的三字段批准记录是**可审计**、不是**防伪造**
-——repo 内任何进程都能写这份文件。防线是组合的：`apply-recovery` 只认 canonical ledger
-路径（临时目录测试 ledger 显式标 TEST MODE）、ledger 变更走 git commit（可追溯归因、
-validator 校验）、执行入口本身被 permission 层 ask/prompt 门禁。三字段 ≠ human 签名，
-它是审计线索。
+resume/recovery 的 `approved_by` / `approved_at` / `approved_action` 只是**审计记录**，不是
+可执行 capability：repo-local YAML 可由调用者伪造，当前又没有外部可信 human provenance
+verifier，也没有「先原子消费、再执行、崩溃后状态可恢复」的 consumer。因此：
+
+- `expctl.py apply-recovery` 只支持 `--dry-run` 校验，actual execution 一律 fail-closed；
+- `/tmp` 测试 ledger 仅可配合 `--dry-run`，永不产生 launch/kill/restart 副作用；
+- 校验会把 proposal 绑定到同一 run 的字面 `/tmp/.../<run-id>` workdir、受信 Python 与 repo 内
+  canonical `fake_job.py`，并在执行前拒绝 resolved/consumed/non-pending 记录；
+- alert 必须带 `approval_provenance: null`、consume/execution/resolved 状态字段；非 null
+  provenance 在没有 verifier 时反而是错误，不能靠自称 human 获得信任。
+
+human 若决定恢复，应在 agent hook 外亲自执行审阅过的确切命令并更新审计记录。未来只有在
+外部可信 provenance + 原子一次性 consumer 合同落地后，才能重新开放半自动 actual recovery。
 
 ## 门禁形态
 

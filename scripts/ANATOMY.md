@@ -31,7 +31,7 @@ Codex adapter 同步脚本把 `.claude/` canonical 能力生成到 `.codex/` 与
 | `check-agent-harness.py` | 结构/必需文件/根污染/四件套/能力索引/settings/DESIGN 清单 校验 | `.agent/repo-editing-guardrails.md` · `repo-documentation-topology.md` |
 | `check-anatomy-drift.py` | ANATOMY related_files 与 line citation 漂移 + 120 行硬上限 | `.agent/anatomy-protocol.md` |
 | `validate-governance.py` | 聚合上两者与实验状态检查 + gitignore/YAML/tracked-bytes + 证据链一致性(overclaim 拦截) | `.agent/action-boundary.md` · `artifact-policy.md` · `principles.md` |
-| `validate-experiment-state.py` | 实验状态机（planned→approved→running→done/failed→superseded，经 status_history 逐步校验）+ approved 必填字段 + alert 批准审计 + done 闭环（summary/artifact index）。PyYAML 可选（内置受限 block-style 解析器回退）；`--self-test` 内嵌 fixture | `plans/20260712-experiment-control-plane.zh.md` · `.agent/human-gates.md` |
+| `validate-experiment-state.py` | 实验状态机（planned→approved→running→done/failed→superseded，经 status_history 逐步校验）+ approved 必填字段 + alert command/workdir、批准审计与 provenance/consume/execution/resolved 不变量 + done 闭环。PyYAML 可选（内置受限 block-style 解析器回退）；`--self-test` 内嵌对抗 fixture | `plans/20260712-experiment-control-plane.zh.md` · `.agent/human-gates.md` |
 | `check-same-commit.py` | same-commit rule：结构改动(A/D/R)未同变更集更新对应 ANATOMY → 拦。diff 驱动，不进 governance；由 `.githooks/pre-commit` + CI 调用 | `.agent/anatomy-protocol.md` |
 | `adopt-existing-repo.py` | 分 phase 迁移已有 Git repo：discover/baseline/scaffold/normalize/prove | `plans/20260709-adopt-existing-repo.zh.md` · `.claude/skills/adopt-existing-repo/SKILL.md` |
 | `check-adoption-integrity.py` | 读取 adoption baseline，按 hash 证明原 tracked bytes 仍存在 | `.claude/skills/adopt-existing-repo/SKILL.md` |

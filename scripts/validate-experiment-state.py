@@ -8,9 +8,10 @@
 2. 必填字段：进入 `approved`（及之后任何状态）前，commit / config / data_split /
    expected_runtime（budget）/ success_metric 必须非空且非 `<...>` 占位；
    同时 approved_by / approved_at 必须落记录。
-3. alert 审计：`alerts[]` 条目若带任何批准字段，approved_by / approved_at /
-   approved_action 三者必须齐备，且 approved_action 与 proposal.command 完全一致
-   （防「批 A 执 B」）。
+3. alert 审计：提案必须绑定 command + workdir；若带任何批准字段，approved_by /
+   approved_at / approved_action 三者必须齐备且逐字匹配 proposal.command。恢复消费状态
+   必须满足 pending/executing/succeeded/failed 的字段不变量；当前 repo-local provenance
+   不受信，因此 approval_provenance 只能为 null，actual recovery fail-closed。
 4. 闭环（status=done）：run_summary 字段非占位且文件存在，且 lab/artifacts/*-index.yaml
    有引用该 run id 的条目；缺任一环节报告缺口而非静默。
 
@@ -40,6 +41,7 @@ ALLOWED_TRANSITIONS = {
 # 进入 approved（含之后状态）必须齐备的字段（任务 B1；expected_runtime 即 budget）。
 APPROVAL_REQUIRED_FIELDS = ("commit", "config", "data_split", "expected_runtime", "success_metric")
 PROMOTE_VALUES = ("no", "unclear", "yes")
+RECOVERY_EXECUTION_STATUSES = ("pending", "executing", "succeeded", "failed")
 
 
 # ------------------------------------------------- 受限 YAML 解析（无 PyYAML 回退） ----
@@ -230,23 +232,40 @@ def _check_alerts(exp: dict, errors: list[str]) -> None:
     if not isinstance(alerts, list):
         errors.append(f"{eid}: alerts 应为列表")
         return
+    seen_alert_ids: set[str] = set()
     for idx, a in enumerate(alerts):
         if not isinstance(a, dict):
             errors.append(f"{eid}: alerts[{idx}] 应为 mapping")
             continue
-        aid = a.get("id") or f"alerts[{idx}]"
+        aid = a.get("id")
+        if not isinstance(aid, str) or _is_placeholder(aid):
+            errors.append(f"{eid}: alerts[{idx}] 缺合法 id 字段")
+            aid = f"alerts[{idx}]"
+        elif aid in seen_alert_ids:
+            errors.append(f"{eid}: alert id 重复：{aid}")
+        else:
+            seen_alert_ids.add(aid)
         for f in ("type", "at"):
-            if _is_placeholder(a.get(f)):
+            if not isinstance(a.get(f), str) or _is_placeholder(a.get(f)):
                 errors.append(f"{eid}: {aid} 缺 {f} 字段")
+        proposal = a.get("proposal")
+        if not isinstance(proposal, dict):
+            errors.append(f"{eid}: {aid} proposal 应为 mapping")
+        else:
+            for f in ("action", "command", "workdir", "radius"):
+                if not isinstance(proposal.get(f), str) or _is_placeholder(proposal.get(f)):
+                    errors.append(f"{eid}: {aid} proposal 缺 {f} 字段")
         approval = {f: a.get(f) for f in ("approved_by", "approved_at", "approved_action")}
         present = [f for f, v in approval.items() if not _is_placeholder(v)]
+        for field in present:
+            if not isinstance(approval[field], str):
+                errors.append(f"{eid}: {aid} {field} 必须是非空字符串")
         if present and len(present) < 3:
             missing = [f for f in approval if f not in present]
             errors.append(
                 f"{eid}: {aid} 批准记录不完整（有 {', '.join(present)} 但缺 {', '.join(missing)}）"
                 "——批准必须同时落 approved_by/approved_at/approved_action"
             )
-        proposal = a.get("proposal")
         if len(present) == 3 and isinstance(proposal, dict):
             cmd = proposal.get("command")
             if not _is_placeholder(cmd) and approval["approved_action"] != cmd:
@@ -254,6 +273,58 @@ def _check_alerts(exp: dict, errors: list[str]) -> None:
                     f"{eid}: {aid} approved_action 与 proposal.command 不一致"
                     "（批准的动作必须与提案确切命令逐字匹配）"
                 )
+
+        # repo-local YAML 字段可被任意进程伪造；在接入外部可信证明前，非空 provenance
+        # 必须被拒绝，不能让审计元数据伪装成可执行 capability。
+        if "approval_provenance" not in a:
+            errors.append(f"{eid}: {aid} 缺 approval_provenance 字段（当前应为 null）")
+        elif a.get("approval_provenance") is not None:
+            errors.append(
+                f"{eid}: {aid} approval_provenance 非 null，但当前无受信 provenance verifier；"
+                "不得把 repo-local 声明当 human capability"
+            )
+
+        for f in ("consumed_at", "consumed_by", "execution_status", "execution_exit_code", "resolved"):
+            if f not in a:
+                errors.append(f"{eid}: {aid} 缺恢复状态字段 {f}")
+        execution_status = a.get("execution_status")
+        if execution_status not in RECOVERY_EXECUTION_STATUSES:
+            errors.append(
+                f"{eid}: {aid} execution_status 非法：{execution_status!r}"
+                f"（应为 {'/'.join(RECOVERY_EXECUTION_STATUSES)}）"
+            )
+            continue
+        consumed_at = a.get("consumed_at")
+        consumed_by = a.get("consumed_by")
+        for field, value in (("consumed_at", consumed_at), ("consumed_by", consumed_by)):
+            if value is not None and (not isinstance(value, str) or _is_placeholder(value)):
+                errors.append(f"{eid}: {aid} {field} 必须为 null 或非空字符串")
+        consumed = not _is_placeholder(consumed_at) and not _is_placeholder(consumed_by)
+        if _is_placeholder(consumed_at) != _is_placeholder(consumed_by):
+            errors.append(f"{eid}: {aid} consumed_at / consumed_by 必须同时为空或同时落值")
+        if not isinstance(a.get("resolved"), bool):
+            errors.append(f"{eid}: {aid} resolved 必须是 boolean")
+        exit_code = a.get("execution_exit_code")
+        if execution_status == "pending":
+            if consumed:
+                errors.append(f"{eid}: {aid} pending 状态不得已有 consume 记录")
+            if exit_code is not None or a.get("resolved") is not False:
+                errors.append(f"{eid}: {aid} pending 必须 exit_code=null 且 resolved=false")
+        elif execution_status == "executing":
+            if not consumed:
+                errors.append(f"{eid}: {aid} executing 必须已有原子 consume 记录")
+            if exit_code is not None or a.get("resolved") is not False:
+                errors.append(f"{eid}: {aid} executing 必须 exit_code=null 且 resolved=false")
+        elif execution_status == "succeeded":
+            if not consumed:
+                errors.append(f"{eid}: {aid} succeeded 必须保留 consume 记录")
+            if type(exit_code) is not int or exit_code != 0 or a.get("resolved") is not True:
+                errors.append(f"{eid}: {aid} succeeded 必须 exit_code=0 且 resolved=true")
+        elif execution_status == "failed":
+            if not consumed:
+                errors.append(f"{eid}: {aid} failed 必须保留 consume 记录")
+            if type(exit_code) is not int or exit_code == 0 or a.get("resolved") is not False:
+                errors.append(f"{eid}: {aid} failed 必须 exit_code=非零整数 且 resolved=false")
 
 
 def _artifact_index_run_ids(root: Path, warnings: list[str]) -> set[str]:
@@ -373,11 +444,18 @@ experiments:
         evidence: "metrics.jsonl 停更 120s"
         proposal:
           action: restart
-          command: "python lab/infra/launch/fake_job.py restart --run-id run-ok"
+          command: "python lab/infra/launch/fake_job.py restart --run-id run-ok --workdir /tmp/run-ok"
+          workdir: "/tmp/run-ok"
           radius: "fake/local only"
         approved_by: "human-a"
         approved_at: "2026-07-03"
-        approved_action: "python lab/infra/launch/fake_job.py restart --run-id run-ok"
+        approved_action: "python lab/infra/launch/fake_job.py restart --run-id run-ok --workdir /tmp/run-ok"
+        approval_provenance: null
+        consumed_at: null
+        consumed_by: null
+        execution_status: pending
+        execution_exit_code: null
+        resolved: false
     promote: no
 """
 
@@ -481,6 +559,34 @@ experiments:
           command: "python lab/infra/launch/fake_job.py restart --run-id run-bad-approval"
         approved_by: "h"
         approved_action: "python lab/infra/launch/fake_job.py restart --run-id run-bad-approval"
+      - id: alert-z
+        type: stall
+        at: "2026-07-05"
+        proposal:
+          action: restart
+          command: "python lab/infra/launch/fake_job.py restart --run-id run-bad-approval --workdir /tmp/run-bad-approval"
+          workdir: "/tmp/run-bad-approval"
+          radius: "fake/local only"
+        approval_provenance: "self-asserted-human"
+        consumed_at: "2026-07-05"
+        consumed_by: null
+        execution_status: executing
+        execution_exit_code: null
+        resolved: false
+      - id: alert-z
+        type: stall
+        at: "2026-07-06"
+        proposal:
+          action: restart
+          command: "python lab/infra/launch/fake_job.py restart --run-id run-bad-approval --workdir /tmp/run-bad-approval"
+          workdir: "/tmp/run-bad-approval"
+          radius: "fake/local only"
+        approval_provenance: null
+        consumed_at: null
+        consumed_by: null
+        execution_status: pending
+        execution_exit_code: null
+        resolved: false
 """
 
 
@@ -534,6 +640,9 @@ def _self_test() -> int:
         expect("run-open-closure" in text and "artifact" in text, "闭环缺 artifact index 报错")
         expect("run-bad-approval" in text and "不一致" in text, "批 A 执 B 报错")
         expect("run-bad-approval" in text and "approved_at" in text, "批准记录不完整报错")
+        expect("run-bad-approval" in text and "provenance verifier" in text, "伪造 provenance 报错")
+        expect("run-bad-approval" in text and "consumed_at / consumed_by" in text, "半消费状态报错")
+        expect("run-bad-approval" in text and "alert id 重复" in text, "重复 alert id 报错")
     finally:
         shutil.rmtree(root, ignore_errors=True)
 

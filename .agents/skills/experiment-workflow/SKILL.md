@@ -1,13 +1,13 @@
 ---
 name: experiment-workflow
-description: 当要跑一个实验或复现一篇 paper 时，用来写 experiment card、登记状态机 ledger、准备（但不擅自运行）launch 命令、只读监控与 alert、批准后恢复、写 run summary 并把达标结果收进 evidence。
+description: 当要跑一个实验或复现一篇 paper 时，用来写 experiment card、登记状态机 ledger、准备（但不擅自运行）launch 命令、只读监控与 alert、校验并交接 human 恢复提案、写 run summary 并把达标结果收进 evidence。
 ---
 
 > Codex adapter: generated from `.claude/skills/experiment-workflow/SKILL.md`. Do not edit this copy by hand; run `python scripts/sync-codex-adapters.py`.
 
 # experiment-workflow
 
-实验的全生命周期：先立卡登记（状态机 ledger），human 批准进 approved，再准备 launch 命令交人类运行，用只读 watcher 看 bounded 快照，异常走 alert → 批准 → 恢复，跑完写 run summary，达到证据门槛才进 evidence / 论文。paper 复现同样适用。
+实验的全生命周期：先立卡登记（状态机 ledger），human 批准进 approved，再准备 launch 命令交人类运行，用只读 watcher 看 bounded 快照，异常走 alert → fail-closed 校验 → human 在 agent 外恢复，跑完写 run summary，达到证据门槛才进 evidence / 论文。paper 复现同样适用。
 
 ## 适用边界
 
@@ -50,8 +50,9 @@ description: 当要跑一个实验或复现一篇 paper 时，用来写 experime
    `python lab/infra/launch/expctl.py watch --run-id <id> --workdir <dir>`（bounded，不常驻），
    不改运行中的 job。
 6. 异常路径：watcher 的结构化 alerts 由 experiment-orchestrator 并入 ledger `alerts` 字段；
-   human 批准某条提案（approved_by/approved_at/approved_action）后，orchestrator 用
-   `expctl.py apply-recovery` 半自动执行该条动作（当前仅限 fake/local job）。
+   approved_by/approved_at/approved_action 只作审计。orchestrator 用
+   `expctl.py apply-recovery --dry-run` 校验同 run/workdir 的 fake/local 提案，再交 human
+   在 agent hook 外亲自执行；repo-local provenance 不受信，actual apply-recovery fail-closed。
 7. 跑完写 run summary（`.agent/templates/run-summary.md`）；状态转 done/failed；
    产出物交 artifact-indexing 登记（done 的闭环由 validate-experiment-state 校验）。
 8. 达到证据门槛才收进 `evidence/` 或论文；未达标只记结论不夸大。

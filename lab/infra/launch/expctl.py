@@ -10,16 +10,16 @@
                   checkpoint 新鲜度/config drift/failure signals。检查完即退出，不常驻
                   不轮询。输出结构化 alert（可直接并入 ledger alerts 字段），附带
                   resume/recovery 提案草案。只读，不写任何文件。
-- apply-recovery  半自动执行 ledger 里**已获 human 批准**的一条 resume/recovery 提案：
+- apply-recovery  校验 ledger 里一条 resume/recovery 提案与批准审计字段。当前实际执行
+                  **fail-closed**：repo-local approved_by/at/action 可被调用者伪造，现有合同
+                  没有可信 human provenance + 原子一次性消费能力，因此不产生副作用；
+                  `--dry-run` 仅做完整校验。临时测试 ledger 强制只能 dry-run/self-test。
+                  若未来接入外部可信签名与原子 consumer，仍须满足：
                   要求 approved_by/approved_at/approved_action 齐备且 approved_action 与
                   proposal.command 逐字一致；命令脚本 resolve 后必须等于 repo 内 canonical
                   fake_job.py、动作限 launch/kill/restart、--run-id 与 alert 所属 run 精确
                   一致（run-a 的批准不能执行 run-b）——真实后端命令一律拒绝。ledger 只认
-                  canonical 路径（临时目录下的测试 ledger 例外，显式标记 TEST MODE）。
-                  批准缺失/不匹配时拒绝执行并报错，不静默跳过。本子命令是 launch registry
-                  登记的 human-gate 入口。信任模型（诚实界定）：文件级批准记录是可审计、
-                  不是防伪造——防线 = ledger 变更走 git commit（可追溯）+ 本命令的调用
-                  本身被 permission 层 ask/prompt 门禁（见 .agent/human-gates.md）。
+                  canonical 路径；执行前拒绝 resolved/consumed/non-pending 状态。
 
 YAML 解析复用 scripts/validate-experiment-state.py 的 load_yaml（PyYAML 优先 + 受限
 解析器回退），经 importlib 加载，避免两份解析逻辑漂移（同 check-adoption-integrity 先例）。
@@ -44,6 +44,10 @@ _HERE = Path(__file__).resolve().parent
 REPO_ROOT = _HERE.parent.parent.parent
 REGISTRY = _HERE / "registry.yaml"
 LEDGER = REPO_ROOT / "lab" / "research" / "experiment-ledger.yaml"
+LITERAL_TMP = Path("/tmp")
+TRUSTED_PYTHON = Path(sys.executable).resolve()
+RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+SAFE_WORKDIR_RE = re.compile(r"^/tmp/[A-Za-z0-9._/-]+$")
 
 DEFAULT_LOG_TAIL = 200
 DEFAULT_HEARTBEAT_TIMEOUT = 120.0
@@ -119,6 +123,32 @@ def _render(template: str, variables: dict[str, str]) -> str:
     return re.sub(r"\{(\w+)\}", sub, template)
 
 
+def _first_symlink(path: Path) -> Path | None:
+    current = Path(path.anchor)
+    for part in path.parts[1:]:
+        current /= part
+        if current.is_symlink():
+            return current
+    return None
+
+
+def _safe_fake_workdir(workdir: Path | str, run_id: str) -> tuple[Path | None, str | None]:
+    if not RUN_ID_RE.fullmatch(run_id):
+        return None, f"非法 run-id {run_id!r}"
+    candidate = Path(os.path.abspath(Path(workdir).expanduser()))
+    if candidate.name != run_id:
+        return None, f"workdir 末级 {candidate.name!r} 必须与 run-id {run_id!r} 一致"
+    symlink = _first_symlink(candidate)
+    if symlink is not None:
+        return None, f"workdir 含 symlink component：{symlink}"
+    resolved = candidate.resolve()
+    if LITERAL_TMP not in candidate.parents or LITERAL_TMP not in resolved.parents:
+        return None, f"workdir 必须在字面 /tmp 内且不得越界/落入 repo 受保护路径：{workdir}"
+    if not SAFE_WORKDIR_RE.fullmatch(str(candidate)):
+        return None, f"workdir 含不允许的字符（仅限 /tmp 下 ASCII path chars）：{workdir}"
+    return resolved, None
+
+
 def cmd_plan(args: argparse.Namespace) -> int:
     registry = _load_registry(Path(args.registry) if args.registry else None)
     adapters = {a.get("id"): a for a in registry.get("adapters") or []}
@@ -146,6 +176,15 @@ def cmd_plan(args: argparse.Namespace) -> int:
     for kv in args.var or []:
         k, _, v = kv.partition("=")
         variables[k] = v
+    if backend == "local-fake":
+        if variables.get("run_id") != args.run_id:
+            print("[expctl] 拒绝 local-fake 草案：--var 不得改写 run_id", file=sys.stderr)
+            return 2
+        safe_workdir, reason = _safe_fake_workdir(variables["workdir"], args.run_id)
+        if reason:
+            print(f"[expctl] 拒绝 local-fake 草案：{reason}", file=sys.stderr)
+            return 2
+        variables["workdir"] = str(safe_workdir)
     command = _render(template, variables)
     unresolved = re.findall(r"\{(\w+)\}", command)
     print("command_draft:")
@@ -239,7 +278,11 @@ def _pid_alive(pid: int) -> bool:
 
 
 def cmd_watch(args: argparse.Namespace) -> int:
-    workdir = Path(args.workdir)
+    workdir, workdir_reason = _safe_fake_workdir(args.workdir, args.run_id)
+    if workdir_reason:
+        print(f"[expctl] 拒绝 watch：{workdir_reason}", file=sys.stderr)
+        return 2
+    assert workdir is not None
     status_f = workdir / "status.json"
     checks: list[tuple[str, bool, str]] = []
     alerts: list[dict] = []
@@ -259,6 +302,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
             "proposal": {
                 "action": action,
                 "command": cmd,
+                "workdir": str(workdir),
                 "radius": "fake/local job only; no real compute touched",
             },
         })
@@ -268,6 +312,16 @@ def cmd_watch(args: argparse.Namespace) -> int:
         state = "unknown"
     else:
         status = json.loads(status_f.read_text(encoding="utf-8"))
+        if not isinstance(status, dict):
+            print(f"[expctl] 拒绝 watch：{status_f} 不是 JSON object", file=sys.stderr)
+            return 2
+        if status.get("run_id") != args.run_id or status.get("workdir") != str(workdir):
+            print(
+                f"[expctl] 拒绝 watch：status 未绑定请求的 run/workdir "
+                f"(run_id={status.get('run_id')!r}, workdir={status.get('workdir')!r})",
+                file=sys.stderr,
+            )
+            return 2
         state = status.get("state", "unknown")
         pid = int(status.get("pid", -1))
         alive = _pid_alive(pid)
@@ -329,7 +383,11 @@ def cmd_watch(args: argparse.Namespace) -> int:
                 now_sha = hashlib.sha256(cfg.read_bytes()).hexdigest()
                 checks.append(("config", now_sha == cfg_sha, f"{cfg_path} sha256 match={now_sha == cfg_sha}"))
                 if now_sha != cfg_sha:
-                    alert("config-mismatch", f"config drift：{cfg_path} 内容与 launch 时 sha256 不一致", action="kill")
+                    alert(
+                        "config-mismatch",
+                        f"config drift：{cfg_path} 内容与 launch 时 sha256 不一致",
+                        action="kill",
+                    )
 
         # failure signals（有界日志尾部扫描；pattern 集 = 内置 + card failure_signals）
         tail_lines = _tail(workdir / "job.log", args.log_tail)
@@ -365,17 +423,23 @@ def cmd_watch(args: argparse.Namespace) -> int:
         print("      proposal:")
         print(f"        action: {a['proposal']['action']}")
         print(f'        command: "{a["proposal"]["command"]}"')
+        print(f'        workdir: "{a["proposal"]["workdir"]}"')
         print(f'        radius: "{a["proposal"]["radius"]}"')
         print("      approved_by: null")
         print("      approved_at: null")
         print("      approved_action: null")
+        print("      approval_provenance: null")
+        print("      consumed_at: null")
+        print("      consumed_by: null")
+        print("      execution_status: pending")
+        print("      execution_exit_code: null")
         print("      resolved: false")
     if alerts:
         print(
             "# 下一步：experiment-orchestrator 把上述 alerts 并入 "
             "lab/research/experiment-ledger.yaml 对应条目的 alerts 字段；"
-            "human 批准某条提案后（填 approved_by/approved_at/approved_action），"
-            "经 `expctl.py apply-recovery` 半自动执行。"
+            "approved_* 仅作审计；`expctl.py apply-recovery --dry-run` 可校验，"
+            "actual recovery fail-closed，由 human 在 agent hook 外亲自执行。"
         )
     return 3 if alerts else 0
 
@@ -391,49 +455,51 @@ FAKE_JOB_CANONICAL = (_HERE / "fake_job.py").resolve()
 
 
 def _resolve_ledger(arg: str | None) -> tuple[Path | None, bool, str | None]:
-    """approval 只认 canonical ledger；--ledger 覆盖仅允许临时目录下的测试 ledger。
-
-    返回 (path, test_mode, reject_reason)。信任模型（诚实界定，见 .agent/human-gates.md）：
-    ledger 里的三字段批准记录是**可审计**不是**防伪造**——repo 内谁都能写文件；真正的
-    防线是 ledger 变更走 git commit（可追溯归因）+ apply-recovery 本身是 permission 层
-    gated 入口（ask/prompt）。锁死路径是为了让「批准记录」至少来自那份被 git 跟踪、
-    被 validator 校验的 canonical 文件，而不是任意自造输入（如 /dev/stdin）。
-    """
-    if not arg:
-        return LEDGER, False, None
-    p = Path(arg)
+    """Only the lexical canonical path or a literal-/tmp test file is accepted."""
+    p = LEDGER if not arg else Path(os.path.abspath(Path(arg).expanduser()))
+    symlink = _first_symlink(p)
+    if symlink is not None:
+        return None, False, f"--ledger 含 symlink component：{symlink}"
     try:
         rp = p.resolve()
     except OSError as e:
         return None, False, f"--ledger 无法解析：{e}"
-    if rp == LEDGER.resolve():
+    if p == LEDGER.resolve() and rp == LEDGER.resolve():
         return rp, False, None
-    tmp_root = Path(tempfile.gettempdir()).resolve()
-    if tmp_root == rp or tmp_root in rp.parents:
+    if LITERAL_TMP in p.parents and LITERAL_TMP in rp.parents:
         return rp, True, None  # 测试 ledger：允许但显式标记 TEST MODE
     return None, False, (
-        f"--ledger 只接受 canonical 路径 {LEDGER}（或 {tmp_root} 下的测试 ledger，"
-        "带 TEST MODE 标记）。批准记录必须来自 git 跟踪的 canonical ledger，"
+        f"--ledger 只接受 canonical 路径 {LEDGER}（或字面 /tmp 下的测试 ledger，"
+        "且测试 ledger 只能 dry-run/self-test）。批准记录必须来自 canonical ledger，"
         "不接受任意文件/流（如 /dev/stdin）自造批准。"
     )
 
 
-def _approved_command_reason(command: str, run_id: str) -> str | None:
+def _approved_command_reason(
+    command: str, run_id: str, proposal_workdir: object, proposal_action: object
+) -> str | None:
     """核对已批准命令确实是「同一个 fake job」的 local-fake 动作。
 
     - 脚本路径 resolve 后必须**等于** repo 内 canonical fake_job.py 的绝对路径
       （不是字符串后缀匹配——/tmp/evil/lab/infra/launch/fake_job.py 会被拒）。
-    - 命令的 --run-id 必须与 alert 所属 run 精确一致（run-a 的批准不能执行 run-b）。
+    - 解释器 resolve 后必须等于当前受信 `sys.executable`，不接受 PATH 劫持/任意 wrapper。
+    - 命令的 --run-id 必须与 alert 所属 run 精确一致。
+    - --workdir 必须与 proposal.workdir 一致、位于字面 /tmp、末级等于 run-id，且无 symlink。
     返回 None = 通过；str = 拒绝理由。
     """
     try:
         tokens = shlex.split(command)
     except ValueError:
         return "命令无法解析（引号不闭合？）"
-    if len(tokens) < 3:
+    if len(tokens) < 7:
         return "命令过短，不是合法的 fake_job.py 调用"
-    if os.path.basename(tokens[0]) not in ("python", "python3"):
-        return f"入口 {tokens[0]} 不是 python/python3 直接调用"
+    interpreter = Path(tokens[0]) if "/" in tokens[0] else Path(shutil.which(tokens[0]) or tokens[0])
+    try:
+        interpreter = interpreter.resolve(strict=True)
+    except OSError as exc:
+        return f"解释器无法解析为真实路径：{tokens[0]}（{exc}）"
+    if interpreter != TRUSTED_PYTHON:
+        return f"解释器 {interpreter} 不是当前受信 Python {TRUSTED_PYTHON}"
     script = Path(tokens[1])
     if not script.is_absolute():
         script = REPO_ROOT / script  # 执行时 cwd=REPO_ROOT，与执行语义一致
@@ -448,18 +514,40 @@ def _approved_command_reason(command: str, run_id: str) -> str | None:
         )
     if tokens[2] not in ("launch", "kill", "restart"):
         return f"动作 {tokens[2]} 不在允许集 launch/kill/restart"
-    cmd_run_id = None
-    for i, t in enumerate(tokens):
-        if t == "--run-id" and i + 1 < len(tokens):
-            cmd_run_id = tokens[i + 1]
-        elif t.startswith("--run-id="):
-            cmd_run_id = t.split("=", 1)[1]
+    if proposal_action != tokens[2]:
+        return f"proposal.action={proposal_action!r} 与命令动作 {tokens[2]!r} 不一致"
+    values: dict[str, str] = {}
+    i = 3
+    while i < len(tokens):
+        token = tokens[i]
+        if token not in ("--run-id", "--workdir") or i + 1 >= len(tokens):
+            return f"命令含未批准/残缺参数 {token!r}；只允许 --run-id 与 --workdir"
+        if token in values:
+            return f"命令重复参数 {token}"
+        values[token] = tokens[i + 1]
+        i += 2
+    cmd_run_id = values.get("--run-id")
     if cmd_run_id is None:
         return "命令缺 --run-id，无法核对是否针对同一 run"
     if cmd_run_id != run_id:
         return (
             f"命令的 --run-id {cmd_run_id} 与 alert 所属 run {run_id} 不一致"
             "（run-a 的批准不能执行 run-b）"
+        )
+    cmd_workdir = values.get("--workdir")
+    if cmd_workdir is None:
+        return "命令缺 --workdir，无法绑定安全 workdir"
+    safe_workdir, reason = _safe_fake_workdir(cmd_workdir, run_id)
+    if reason:
+        return reason
+    if not isinstance(proposal_workdir, str) or not proposal_workdir:
+        return "proposal 缺 workdir，批准未绑定 workdir"
+    proposal_resolved, reason = _safe_fake_workdir(proposal_workdir, run_id)
+    if reason:
+        return f"proposal.workdir 不安全：{reason}"
+    if safe_workdir != proposal_resolved:
+        return (
+            f"命令 workdir {safe_workdir} 与 proposal.workdir {proposal_resolved} 不一致"
         )
     return None
 
@@ -470,36 +558,109 @@ def cmd_apply_recovery(args: argparse.Namespace) -> int:
         print(f"[expctl] 拒绝：{reject}", file=sys.stderr)
         return 2
     if test_mode:
+        if not args.dry_run:
+            print(
+                "[expctl] 拒绝：/tmp TEST MODE ledger 只能 --dry-run/self-test，"
+                "绝不允许产生 launch/kill/restart 副作用。",
+                file=sys.stderr,
+            )
+            return 2
         print(f"[expctl] TEST MODE：使用临时目录下的非 canonical ledger（{ledger_path}）——"
-              "仅供测试，正式批准记录必须落在 lab/research/experiment-ledger.yaml。")
+              "仅校验，不消费、不执行。")
     try:
         data = _load_yaml_file(ledger_path)
     except Exception as e:  # noqa: BLE001
         print(f"[expctl] ledger 解析失败：{e}", file=sys.stderr)
         return 1
-    exps = {e.get("id"): e for e in (data or {}).get("experiments") or [] if isinstance(e, dict)}
-    exp = exps.get(args.run_id)
-    if exp is None:
+    if not isinstance(data, dict) or not isinstance(data.get("experiments"), list):
+        print("[expctl] 拒绝：ledger experiments 必须是列表", file=sys.stderr)
+        return 2
+    exp_matches = [
+        exp for exp in data["experiments"]
+        if isinstance(exp, dict) and exp.get("id") == args.run_id
+    ]
+    if not exp_matches:
         print(f"[expctl] 拒绝：ledger 无实验 {args.run_id}", file=sys.stderr)
         return 2
-    alerts = {a.get("id"): a for a in exp.get("alerts") or [] if isinstance(a, dict)}
-    a = alerts.get(args.alert_id)
-    if a is None:
+    if len(exp_matches) != 1:
+        print(f"[expctl] 拒绝：ledger 实验 id {args.run_id} 重复，身份不唯一", file=sys.stderr)
+        return 2
+    exp = exp_matches[0]
+    raw_alerts = exp.get("alerts")
+    if not isinstance(raw_alerts, list):
+        print(f"[expctl] 拒绝：实验 {args.run_id} alerts 必须是列表", file=sys.stderr)
+        return 2
+    alert_matches = [
+        alert for alert in raw_alerts
+        if isinstance(alert, dict) and alert.get("id") == args.alert_id
+    ]
+    if not alert_matches:
         print(f"[expctl] 拒绝：实验 {args.run_id} 无 alert {args.alert_id}", file=sys.stderr)
         return 2
+    if len(alert_matches) != 1:
+        print(f"[expctl] 拒绝：alert id {args.alert_id} 重复，提案身份不唯一", file=sys.stderr)
+        return 2
+    a = alert_matches[0]
 
-    missing = [f for f in ("approved_by", "approved_at", "approved_action") if _is_placeholder(a.get(f))]
-    if missing:
+    state_fields = (
+        "approval_provenance", "consumed_at", "consumed_by",
+        "execution_status", "execution_exit_code", "resolved",
+    )
+    missing_state = [field for field in state_fields if field not in a]
+    if missing_state:
         print(
-            f"[expctl] 拒绝执行：alert {args.alert_id} 缺批准字段 {', '.join(missing)}。"
-            "resume/recovery 是 human gate：先由 human 在 ledger 里落一次性批准记录"
-            "（见 .agent/human-gates.md），再执行。",
+            f"[expctl] 拒绝执行：alert {args.alert_id} 缺恢复状态字段 "
+            f"{', '.join(missing_state)}。",
             file=sys.stderr,
         )
         return 2
-    proposal = a.get("proposal") or {}
+    if a.get("approval_provenance") is not None:
+        print(
+            f"[expctl] 拒绝执行：alert {args.alert_id} 声称非空 approval_provenance，"
+            "但当前没有外部可信 verifier；repo-local 声明不能成为 capability。",
+            file=sys.stderr,
+        )
+        return 2
+    if a.get("resolved") is not False or a.get("consumed_at") is not None or a.get("consumed_by") is not None:
+        print(
+            f"[expctl] 拒绝执行：alert {args.alert_id} 已 resolved/consumed；"
+            "一次性批准不得重放。",
+            file=sys.stderr,
+        )
+        return 2
+    execution_status = a.get("execution_status")
+    if execution_status != "pending":
+        print(
+            f"[expctl] 拒绝执行：alert {args.alert_id} execution_status={execution_status!r}，"
+            "只有 pending 可进入消费；executing/succeeded/failed 均不可重放。",
+            file=sys.stderr,
+        )
+        return 2
+    if a.get("execution_exit_code") is not None:
+        print(
+            f"[expctl] 拒绝执行：alert {args.alert_id} pending 状态必须 execution_exit_code=null。",
+            file=sys.stderr,
+        )
+        return 2
+
+    missing = [
+        field for field in ("approved_by", "approved_at", "approved_action")
+        if not isinstance(a.get(field), str) or _is_placeholder(a.get(field))
+    ]
+    if missing:
+        print(
+            f"[expctl] 拒绝执行：alert {args.alert_id} 缺批准字段 {', '.join(missing)}。"
+            "approved_* 仅是审计记录；补齐后也只能 --dry-run 校验，actual execution fail-closed"
+            "（见 .agent/human-gates.md）。",
+            file=sys.stderr,
+        )
+        return 2
+    proposal = a.get("proposal")
+    if not isinstance(proposal, dict):
+        print(f"[expctl] 拒绝执行：alert {args.alert_id} 的 proposal 不是 mapping", file=sys.stderr)
+        return 2
     command = proposal.get("command")
-    if _is_placeholder(command):
+    if not isinstance(command, str) or _is_placeholder(command):
         print(f"[expctl] 拒绝执行：alert {args.alert_id} 的 proposal 缺确切命令", file=sys.stderr)
         return 2
     if a.get("approved_action") != command:
@@ -509,25 +670,31 @@ def cmd_apply_recovery(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
-    cmd_reason = _approved_command_reason(command, args.run_id)
+    cmd_reason = _approved_command_reason(
+        command, args.run_id, proposal.get("workdir"), proposal.get("action")
+    )
     if cmd_reason:
         print(
             f"[expctl] 拒绝执行：已批准命令超出 local-fake 范围或指向不同 run：{cmd_reason}"
-            "（本 issue 的半自动执行仅限 repo 内 fake_job.py 对同一 run 的动作，"
+            "（本 issue 的 dry-run 校验仅接受 repo 内 fake_job.py 对同一 run 的动作，"
             "见 plan 非目标与 .agent/action-boundary.md）。",
             file=sys.stderr,
         )
         return 2
 
     print(f"[expctl] 批准记录核对通过（approved_by={a['approved_by']} approved_at={a['approved_at']}）")
-    print(f"[expctl] 执行已批准动作：{command}")
+    print(f"[expctl] 已批准动作（仅校验）：{command}")
     if args.dry_run:
-        print("[expctl] --dry-run：不实际执行")
+        print("[expctl] --dry-run：不消费、不执行")
         return 0
-    result = subprocess.run(shlex.split(command), cwd=str(REPO_ROOT))  # noqa: S603
-    print(f"[expctl] 执行完成，exit={result.returncode}。"
-          "后续：orchestrator 更新 ledger（alert resolved / status_history）与 memory/current-status.md。")
-    return 0 if result.returncode == 0 else 1
+    print(
+        "[expctl] 拒绝执行：repo-local approved_* 字段可被调用者伪造，当前合同没有"
+        "外部可信 human provenance，也没有可在执行前原子消费的一次性 capability。"
+        "为防并发重放/执行后崩溃导致状态含混，actual apply-recovery 已 fail-closed。"
+        "接入可信签名 + 原子 consumer 前只能 --dry-run；human 可在 agent hook 外亲自执行。",
+        file=sys.stderr,
+    )
+    return 2
 
 
 # ------------------------------------------------------------------ self-test ----
@@ -560,15 +727,18 @@ def _self_test() -> int:  # noqa: PLR0915
     if shutil.which("runai") is None:
         r = run(["plan", "--action", "launch", "--run-id", "t-plan", "--backend", "runai"])
         expect(r.returncode == 0, f"plan 降级应 exit 0：{r.stderr}")
-        expect("降级到 local-fake" in r.stdout and "fake_job.py launch" in r.stdout, "plan 应降级并渲染草案")
+        expect(
+            "降级到 local-fake" in r.stdout and "fake_job.py launch" in r.stdout,
+            "plan 应降级并渲染草案",
+        )
     r = run(["plan", "--action", "kill", "--run-id", "t-plan"])
     expect("命令草案，不会被执行" in r.stdout, "plan 应声明不执行")
 
-    root = Path(tempfile.mkdtemp(prefix="expctl-selftest-"))
+    root = Path(tempfile.mkdtemp(prefix="expctl-selftest-", dir="/tmp"))
     fake_job = str(_HERE / "fake_job.py")
     try:
         # 3. watch：健康 running job → ok；stall 注入 → abnormal + 提案
-        w = root / "healthy"
+        w = root / "t-w"
         subprocess.run(  # noqa: S603
             [sys.executable, fake_job, "launch", "--run-id", "t-w", "--workdir", str(w),
              "--duration", "8", "--interval", "0.2"], capture_output=True, check=True)
@@ -596,7 +766,7 @@ def _self_test() -> int:  # noqa: PLR0915
         r = run(["watch", "--run-id", "t-w", "--workdir", str(w), "--heartbeat-timeout", "5"])
         expect("回退内置" in r.stdout or "builtin" in r.stdout, "缺 card signals 应注明回退内置")
 
-        w2 = root / "stalled"
+        w2 = root / "t-s"
         subprocess.run(  # noqa: S603
             [sys.executable, fake_job, "launch", "--run-id", "t-s", "--workdir", str(w2),
              "--duration", "12", "--interval", "0.2", "--stall-after", "3"],
@@ -605,7 +775,10 @@ def _self_test() -> int:  # noqa: PLR0915
         r = run(["watch", "--run-id", "t-s", "--workdir", str(w2), "--heartbeat-timeout", "2"])
         expect(r.returncode == 3, f"stall 应 exit 3：exit={r.returncode}\n{r.stdout}")
         expect("metric-stall" in r.stdout and "proposal:" in r.stdout, "stall 应产出 alert+提案")
-        expect("stale-checkpoint" in r.stdout, "checkpoint 停更应产出 stale-checkpoint alert（而非只记 ok:false）")
+        expect(
+            "stale-checkpoint" in r.stdout,
+            "checkpoint 停更应产出 stale-checkpoint alert（而非只记 ok:false）",
+        )
         expect(f"--run-id t-s" in r.stdout, "提案命令应指向同一 run")
 
         # 4. watch bounded：日志行数上限生效（scanned 行数 ≤ bound）
@@ -614,13 +787,16 @@ def _self_test() -> int:  # noqa: PLR0915
         m = re.search(r"scanned last (\d+) lines \(bound=2\)", r2.stdout)
         expect(m is not None and int(m.group(1)) <= 2, f"log tail 应有界：\n{r2.stdout}")
 
-        # 5. apply-recovery：批准缺失 → 拒绝(2)；批 A 执 B → 拒绝(2)；非 local → 拒绝(2)；
-        #    伪 ledger 路径 → 拒绝(2)；run-id 不匹配 → 拒绝(2)；假路径 fake_job → 拒绝(2)；
-        #    齐备且匹配 → 执行成功(0) 且 job 恢复 running
+        # 5. apply-recovery 只做安全校验：/tmp actual 永拒，dry-run 覆盖批准、路径、
+        #    run/workdir/interpreter、resolved/consumed 对抗场景，不产生恢复副作用。
         cmd_restart = f"python lab/infra/launch/fake_job.py restart --run-id t-s --workdir {w2}"
         ledger = root / "ledger.yaml"
 
-        def write_ledger(alert_extra: str, command: str = cmd_restart) -> None:
+        def write_ledger(
+            alert_extra: str,
+            command: str = cmd_restart,
+            proposal_action: str = "restart",
+        ) -> None:
             ledger.write_text(
                 "experiments:\n"
                 "  - id: t-s\n"
@@ -630,9 +806,16 @@ def _self_test() -> int:  # noqa: PLR0915
                 "        type: metric-stall\n"
                 '        at: "2026-07-13"\n'
                 "        proposal:\n"
-                "          action: restart\n"
+                f"          action: {proposal_action}\n"
                 f'          command: "{command}"\n'
+                f'          workdir: "{w2}"\n'
                 '          radius: "fake/local only"\n'
+                + "        approval_provenance: null\n"
+                + "        consumed_at: null\n"
+                + "        consumed_by: null\n"
+                + "        execution_status: pending\n"
+                + "        execution_exit_code: null\n"
+                + "        resolved: false\n"
                 + alert_extra,
                 encoding="utf-8",
             )
@@ -642,42 +825,124 @@ def _self_test() -> int:  # noqa: PLR0915
                     f'        approved_action: "{command}"\n')
 
         write_ledger("")  # 无批准
-        r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s", "--alert-id", "alert-1"])
+        r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s",
+                 "--alert-id", "alert-1", "--dry-run"])
         expect(r.returncode == 2 and "缺批准字段" in r.stderr, "无批准应拒绝")
 
         write_ledger('        approved_by: "h"\n        approved_at: "2026-07-13"\n'
                      '        approved_action: "some other command"\n')
-        r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s", "--alert-id", "alert-1"])
+        r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s",
+                 "--alert-id", "alert-1", "--dry-run"])
         expect(r.returncode == 2 and "不一致" in r.stderr, "批 A 执 B 应拒绝")
 
         cmd_sbatch = "sbatch real.sh"
         write_ledger(approved(cmd_sbatch), command=cmd_sbatch)
-        r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s", "--alert-id", "alert-1"])
+        r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s",
+                 "--alert-id", "alert-1", "--dry-run"])
         expect(r.returncode == 2 and "local-fake" in r.stderr, "真实后端命令应拒绝")
 
         # 伪 ledger（BLOCKER-2）：canonical / 临时目录之外的 --ledger 一律拒绝
         r = run(["apply-recovery", "--ledger", str(REPO_ROOT / "README.md"),
-                 "--run-id", "t-s", "--alert-id", "alert-1"])
+                 "--run-id", "t-s", "--alert-id", "alert-1", "--dry-run"])
         expect(r.returncode == 2 and "canonical" in r.stderr, "非 canonical 且非临时目录的 ledger 应拒绝")
 
         # run-id 不匹配（BLOCKER-3）：run-a 的批准不能执行 run-b
         cmd_other = f"python lab/infra/launch/fake_job.py restart --run-id t-other --workdir {w2}"
         write_ledger(approved(cmd_other), command=cmd_other)
-        r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s", "--alert-id", "alert-1"])
+        r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s",
+                 "--alert-id", "alert-1", "--dry-run"])
         expect(r.returncode == 2 and "不能执行 run-b" in r.stderr, "批准命令指向其他 run 应拒绝")
 
         # 假路径 fake_job（BLOCKER-3）：路径 resolve 必须等于 repo 内 canonical fake_job.py
         cmd_evil = f"python /tmp/evil/lab/infra/launch/fake_job.py restart --run-id t-s --workdir {w2}"
         write_ledger(approved(cmd_evil), command=cmd_evil)
-        r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s", "--alert-id", "alert-1"])
+        r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s",
+                 "--alert-id", "alert-1", "--dry-run"])
         expect(r.returncode == 2 and "canonical" in r.stderr, "非 repo 内 fake_job.py 应拒绝")
 
+        # workdir 必须绑定同 run，且只能是字面 /tmp 安全 leaf。
+        cmd_cross_workdir = (
+            "python lab/infra/launch/fake_job.py restart --run-id t-s "
+            f"--workdir {root / 't-other'}"
+        )
+        write_ledger(approved(cmd_cross_workdir), command=cmd_cross_workdir)
+        r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s",
+                 "--alert-id", "alert-1", "--dry-run"])
+        expect(r.returncode == 2 and "workdir" in r.stderr, "跨 run workdir 应拒绝")
+
+        cmd_protected = (
+            "python lab/infra/launch/fake_job.py restart --run-id t-s "
+            f"--workdir {REPO_ROOT / 'lab/runs/t-s'}"
+        )
+        write_ledger(approved(cmd_protected), command=cmd_protected)
+        r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s",
+                 "--alert-id", "alert-1", "--dry-run"])
+        expect(r.returncode == 2 and "字面 /tmp" in r.stderr, "protected/repo workdir 应拒绝")
+
+        cmd_untrusted_python = cmd_restart.replace("python ", "/bin/false ", 1)
+        write_ledger(approved(cmd_untrusted_python), command=cmd_untrusted_python)
+        r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s",
+                 "--alert-id", "alert-1", "--dry-run"])
+        expect(r.returncode == 2 and "受信 Python" in r.stderr, "非受信解释器应拒绝")
+
+        write_ledger(approved(), proposal_action="kill")
+        r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s",
+                 "--alert-id", "alert-1", "--dry-run"])
+        expect(r.returncode == 2 and "proposal.action" in r.stderr, "proposal action/command 不一致应拒绝")
+
+        write_ledger(approved() + '        approval_provenance: "self-asserted-human"\n')
+        r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s",
+                 "--alert-id", "alert-1", "--dry-run"])
+        expect(r.returncode == 2 and "provenance" in r.stderr, "repo-local 自称 provenance 应拒绝")
+
+        # resolved / consumed / non-pending 均在执行前拒绝，不能重放。
+        write_ledger(approved() + "        consumed_at: \"2026-07-13\"\n")
+        r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s",
+                 "--alert-id", "alert-1", "--dry-run"])
+        expect(r.returncode == 2 and "resolved/consumed" in r.stderr, "consumed approval 应拒绝")
+
+        write_ledger(approved() + "        resolved: true\n")
+        r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s",
+                 "--alert-id", "alert-1", "--dry-run"])
+        expect(r.returncode == 2 and "resolved/consumed" in r.stderr, "resolved approval 应拒绝")
+
+        write_ledger(approved() + '        execution_status: "executing"\n')
+        r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s",
+                 "--alert-id", "alert-1", "--dry-run"])
+        expect(r.returncode == 2 and "只有 pending" in r.stderr, "non-pending approval 应拒绝")
+
+        # 完整批准在 TEST MODE 仅 dry-run 可通过；不带 dry-run 永拒且不执行。
         write_ledger(approved())
-        r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s", "--alert-id", "alert-1"])
-        expect(r.returncode == 0, f"齐备批准应执行成功：{r.stderr}")
+        r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s",
+                 "--alert-id", "alert-1", "--dry-run"])
+        expect(r.returncode == 0, f"齐备批准 dry-run 应校验成功：{r.stderr}")
         expect("TEST MODE" in r.stdout, "非 canonical 测试 ledger 应显式标记 TEST MODE")
-        status = json.loads((w2 / "status.json").read_text(encoding="utf-8"))
-        expect(status.get("state") == "running", "restart 后应回到 running")
+        expect("不消费、不执行" in r.stdout, "dry-run 必须明确无消费/执行")
+        before = (w2 / "status.json").read_bytes()
+        r = run(["apply-recovery", "--ledger", str(ledger), "--run-id", "t-s",
+                 "--alert-id", "alert-1"])
+        expect(r.returncode == 2 and "只能 --dry-run" in r.stderr, "/tmp actual apply 必须拒绝")
+        expect((w2 / "status.json").read_bytes() == before, "拒绝 actual apply 后状态不得变化")
+
+        # 将同一 fixture 暂时视作 canonical，只验证最终 actual 分支也 fail-closed。
+        # 这不改 repo ledger，也不执行 command；用于证明拒绝不只依赖 TEST MODE。
+        import contextlib
+        import io
+
+        canonical_before = (w2 / "status.json").read_bytes()
+        old_ledger = globals()["LEDGER"]
+        globals()["LEDGER"] = ledger
+        try:
+            out, err = io.StringIO(), io.StringIO()
+            ns = argparse.Namespace(ledger=None, run_id="t-s", alert_id="alert-1", dry_run=False)
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                rc = cmd_apply_recovery(ns)
+            expect(rc == 2 and "actual apply-recovery 已 fail-closed" in err.getvalue(),
+                   "canonical actual apply 也必须因缺可信 capability 拒绝")
+        finally:
+            globals()["LEDGER"] = old_ledger
+        expect((w2 / "status.json").read_bytes() == canonical_before,
+               "canonical fail-closed 后状态不得变化")
 
         # 清场
         subprocess.run([sys.executable, fake_job, "kill", "--run-id", "t-s", "--workdir", str(w2)],  # noqa: S603
@@ -721,7 +986,10 @@ def main(argv: list[str]) -> int:
     p.add_argument("--ledger", default=None,
                    help="读取该 run 的 failure_signals（默认 canonical ledger；只读）")
 
-    p = sub.add_parser("apply-recovery", help="执行 ledger 里一条已获 human 批准的提案（human gate 入口）")
+    p = sub.add_parser(
+        "apply-recovery",
+        help="校验 ledger 恢复提案；actual execution fail-closed，仅支持 --dry-run",
+    )
     p.add_argument("--run-id", required=True)
     p.add_argument("--alert-id", required=True)
     p.add_argument("--ledger", default=None,

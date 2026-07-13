@@ -70,7 +70,7 @@ prefix_rule(
 prefix_rule(
     pattern = [["python", "python3"], "lab/infra/launch/expctl.py", "apply-recovery"],
     decision = "prompt",
-    justification = "Registered launch-registry entry: executes a human-approved recovery action; approval record is verified but the invocation itself stays gated.",
+    justification = "Registered launch-registry entry: recovery validation is gated and actual execution is fail-closed until trusted provenance plus atomic consumption exist.",
 )
 
 # Wrapper 变体加宽（issue #16 Codex 初审 BLOCKER-1）：静态前缀只能覆盖有限包装形态
@@ -116,6 +116,51 @@ prefix_rule(
     pattern = ["env", ["python", "python3"], "-u", "lab/infra/launch/expctl.py", "apply-recovery"],
     decision = "prompt",
     justification = "env + python -u variant of a launch-registry entry: still a human gate.",
+)
+
+# Caller-controlled env assignments are never human approval. These broad
+# wrapper/eval rules keep nested launch attempts at the Codex prompt layer;
+# the shared hook additionally parses their inner command and denies it.
+prefix_rule(
+    pattern = [["env", "/usr/bin/env"]],
+    decision = "prompt",
+    justification = "env can add caller-controlled assignments or hide dynamic command parsing; the hook remains the non-overridable launch floor.",
+)
+
+prefix_rule(
+    pattern = [["env", "/usr/bin/env"], ["-S", "--split-string"]],
+    decision = "prompt",
+    justification = "env split-string can hide a launch command; caller-controlled environment is not approval.",
+)
+
+prefix_rule(
+    pattern = [["env", "/usr/bin/env"], ["CLAUDE_ALLOW_LAUNCH=1", "CODEX_ALLOW_LAUNCH=1"]],
+    decision = "prompt",
+    justification = "CLAUDE/CODEX_ALLOW_LAUNCH are caller-forgeable and never bypass the launch gate.",
+)
+
+prefix_rule(
+    pattern = [["CLAUDE_ALLOW_LAUNCH=1", "CODEX_ALLOW_LAUNCH=1"]],
+    decision = "prompt",
+    justification = "Direct caller-controlled launch env assignments are not human approval and never bypass the hook.",
+)
+
+prefix_rule(
+    pattern = [["bash", "/bin/bash", "sh", "/bin/sh", "zsh", "/bin/zsh", "dash", "/bin/dash"], ["-c", "-lc"]],
+    decision = "prompt",
+    justification = "Shell eval can hide a launch command; the shared hook fails this dynamic surface closed.",
+)
+
+prefix_rule(
+    pattern = [["nohup", "nice", "setsid", "stdbuf", "timeout", "command", "exec", "ionice"], ["bash", "/bin/bash", "sh", "/bin/sh", "zsh", "/bin/zsh", "dash", "/bin/dash"]],
+    decision = "prompt",
+    justification = "A wrapped shell evaluator is still a dynamic execution surface; the hook fails it closed.",
+)
+
+prefix_rule(
+    pattern = [["python", "python3"], "-c"],
+    decision = "prompt",
+    justification = "Dynamic Python evaluation can create compute side effects and needs human review.",
 )
 
 prefix_rule(

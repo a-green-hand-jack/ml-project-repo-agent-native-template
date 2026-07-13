@@ -11,13 +11,17 @@
 - 提权与远程执行：`sudo`、`curl|sh`、`wget|sh`。
 - `pip install`（含 `python -m pip install`）：用 `uv add`。
 - push 到 `main`/`master`：除非命令带 `CLAUDE_ALLOW_PUSH_MAIN=1` 或 `CODEX_ALLOW_PUSH_MAIN=1`（human 单次放行）。
+- agent 内启动/kill/restart 训练或作业：launch hook 永久拒绝；调用者自设的
+  `CLAUDE_ALLOW_LAUNCH` / `CODEX_ALLOW_LAUNCH` 不构成批准。human 如需执行，必须在
+  agent hook 外亲自运行已审阅命令。
 - 派发无边界的 `general-purpose` 大 agent。
 
 ## 需问（ask，先说明意图与影响，等确认）
 
 - 有损/改历史 git：`git checkout`、`git switch`、`git reset`、`git clean`、`git rebase`、`git merge`、`git branch -d/-D`、`git worktree remove`。
 - 依赖变更：`uv add`、`uv sync`、`uv remove`。
-- 计算副作用：`kill`、`sbatch`、`runai`、启动/重启训练。
+- 计算副作用提案：`kill`、`sbatch`、`runai`、启动/重启训练的命令只能准备并交 human；
+  permission ask/prompt 是额外提示，不会越过上述 hook 地板。
 - 协作副作用：`gh pr create`、`gh pr merge`、release、改远端基础设施。
 - 促销结果：把普通结果 promote 成 paper claim。
 

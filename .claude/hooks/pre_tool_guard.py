@@ -9,8 +9,8 @@
 设计要点：用 shlex 做**真正的命令解析**（不是子串正则），因此
 - 引号里的字面量（commit message、echo "..."）不会被误当成命令拦（消除误伤）；
 - 引号里的真实路径/分支（rm -rf "lab/data"、git push origin "main"）仍能识别（不漏）。
-本 hook 是"防误操作"护栏，非对抗性沙箱：不为"把危险命令藏进 python -c / 命令替换"负责
-（这类代码执行本就被 allow 的 pytest/uv run 信任，数据安全最终靠 gitignore + 备份）。
+本 hook 是"防误操作"护栏，非通用对抗性沙箱；但 launch registry 的已知入口命中即拒，
+`env -S` 与 shell `-c` 这类调用者可编程动态面整体 fail-closed，caller env 不能放行。
 
 协议：Claude Code / Codex 通过 stdin 传 JSON（tool_name / tool_input）；exit 2 = 阻止，
 exit 0 = 放行。解析失败保守放行。无第三方依赖。push 到受保护分支需
@@ -211,12 +211,17 @@ def _launch_gate_reason(raw_cmd: str) -> str | None:
     """launch registry 门禁（薄接线）：判定逻辑与单一真源在 lab/infra/launch/。
 
     launch/kill/restart 类命令（lab/infra/launch/registry.yaml 的 gated_prefixes）是
-    human gate；`CLAUDE_ALLOW_LAUNCH=1` / `CODEX_ALLOW_LAUNCH=1` 为 advisory 放行
-    （作用于所加命令/进程环境，与 push-main 地板同构；不可绕的确认在 permission 层
-    ask/prompt）。判定脚本缺失或异常时保守放行——本地板其余红线不受影响。
+    human gate；调用者可写的 `CLAUDE_ALLOW_LAUNCH` / `CODEX_ALLOW_LAUNCH` 不构成
+    human approval，也不放行。判定脚本缺失/异常时，含已知 launch 入口的命令 fail-closed。
     """
     gate = REPO_ROOT / "lab" / "infra" / "launch" / "launch_gate.py"
     if not gate.is_file():
+        if re.search(
+            r"\b(?:sbatch|scancel|srun|runai)\b|fake_job\.py|"
+            r"expctl\.py\s+apply-recovery",
+            raw_cmd,
+        ):
+            return "launch gate 缺失，已对已知 launch 入口 fail-closed"
         return None
     try:
         import importlib.util
@@ -226,7 +231,13 @@ def _launch_gate_reason(raw_cmd: str) -> str | None:
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         return mod.gate_reason(raw_cmd)
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        if re.search(
+            r"\b(?:sbatch|scancel|srun|runai)\b|fake_job\.py|"
+            r"expctl\.py\s+apply-recovery",
+            raw_cmd,
+        ):
+            return f"launch gate 不可用，已 fail-closed：{type(exc).__name__}"
         return None
 
 
