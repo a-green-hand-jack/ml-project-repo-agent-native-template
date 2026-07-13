@@ -1,7 +1,7 @@
 # 真实 runtime 证据 - 2026-07-13（issue #13 doc-lifecycle）
 
 > continuity / context hook 目标 commit：`68f1d43fdc6a1767fb890ab67d482bd414f9c64a`；
-> fresh review 后改动的 guard 目标 commit：`06c98f267d0296bd2881b32c3bb39ad8ba301735`。
+> 集成 main 并修复 final review 后的 guard exact target：`183a7fa5f8cf98e7a788859e1af55b3d64d6979f`。
 > 所有 session 都在 `/tmp/issue-13-18-fresh.UBWQdD/` 下的隔离 HOME 与 disposable clone 中启动；未修改真实
 > 用户 trust 配置。原始转录与 debug log 以无时间戳 gzip 落在 `raw/`，完整性见
 > `raw/SHA256SUMS`；`gzip -cd <file>.gz` 可直接核验原文。
@@ -16,15 +16,16 @@
 | X1 | Codex 0.144.0 · gpt-5.6-sol | `019f5b9c-ff75-7251-81bd-404c69bd5345` | PASS：fresh startup 无 continuity；agent 按入口纪律报告 #13 plan、`implementing` 与目标 commit | `raw/13-X1-codex-fresh-68f1d43.typescript.gz` |
 | X2 | Codex 0.144.0 · gpt-5.6-sol | interactive TUI | PASS：`/clear` 后出现 `SessionStart hook (completed)` 与 `[continuity] clear 后回注` | `raw/13-X2-X3-codex-tui-68f1d43.typescript.gz` |
 | X3 | Codex 0.144.0 · gpt-5.6-sol | interactive TUI | PASS：`Context compacted` 后出现 `SessionStart hook (completed)` 与 `[continuity] compact 后回注`；无 invalid hook JSON / hook failed | 同 X2 |
-| G1 | Claude Code 2.1.207 · Opus 4.8 | reject `3ec54ae4-f9b9-42f9-8262-5800e6307690`; skip `1b258bf8-41c0-46f9-899d-566c004b3b59` | PASS（目标 `06c98f2`）：默认 fresh session 的真实 Write 被 `doc-lifecycle:` 拒绝且文件未创建；独立 fresh session 仅设置 `DOC_LIFECYCLE_SKIP=1` 后同一无效 Write 成功 | `raw/13-G1-reject-claude-06c98f2.typescript.gz`, `raw/13-G1-reject-claude-debug-06c98f2.log.gz`, `raw/13-G1-skip-claude-06c98f2.typescript.gz`, `raw/13-G1-skip-claude-debug-06c98f2.log.gz` |
-| G2 | Claude Code 2.1.207 · Opus 4.8 | `d6a2d20f-81e1-413e-b526-56733786f6e1` | PASS（目标 `06c98f2`）：真实 Bash `env -C memory rm doc-lifecycle.yaml` 被 `doc-lifecycle: 禁止删除/移走` 拒绝；独立 disposable clone 中注册表仍存在 | `raw/13-G2-delete-claude-06c98f2.typescript.gz` + `raw/13-G2-delete-claude-debug-06c98f2.log.gz` |
+| G1 | Claude Code 2.1.207 · Opus 4.8 | reject `37417165-e3d0-4bca-ae68-d272a8d447a5`; skip `83c7e12a-51ed-40c5-be89-81e627ca79ca` | PASS（目标 `183a7fa`）：默认 fresh session 的真实 Write 被 `doc-lifecycle:` 拒绝且 clone 保持 clean；独立 fresh session 仅设置 `DOC_LIFECYCLE_SKIP=1` 后同一无效 Write 成功 | `raw/13-G1-reject-claude-183a7fa.typescript.gz`, `raw/13-G1-reject-claude-debug-183a7fa.log.gz`, `raw/13-G1-skip-claude-183a7fa.typescript.gz`, `raw/13-G1-skip-claude-debug-183a7fa.log.gz` |
+| G2 | Claude Code 2.1.207 · Opus 4.8 | `4271ae46-6acd-4644-b61d-ea9375d6b0c6` | PASS（目标 `183a7fa`）：真实 Bash `env -C memory rm doc-lifecycle.yaml` 被 `doc-lifecycle: 禁止删除/移走` 拒绝；独立 disposable clone 保持 clean、注册表仍存在 | `raw/13-G2-delete-claude-183a7fa.typescript.gz` + `raw/13-G2-delete-claude-debug-183a7fa.log.gz` |
 
 ## 隔离与真实性边界
 
 - Claude probe 使用临时 `HOME` / `CLAUDE_CONFIG_DIR`；Codex probe 使用临时 `CODEX_HOME`。
 - C1-C3 与 X1-X3 都由独立顶层 CLI session 产生，不是 hook 脚本直接 stdin 模拟；其协议代码从
-  `68f1d43` 到 `06c98f2` 未变化。G1/G2 因 guard 代码在 fresh review 后变化，已在 `06c98f2`
-  的新 disposable clones 中重跑。
+  `68f1d43` 到 `183a7fa` 未变化；`.claude/settings.json` 的差异只增加 #16 Bash permission
+  规则，未改变 SessionStart matcher。G1/G2 因 guard 代码经 main 集成变化，已在 `183a7fa`
+  的三个新 disposable clones 中重跑。
 - G1/G2 使用 `--dangerously-skip-permissions` 只绕过 Claude 的交互权限提示，使 repo
   `PreToolUse` hook 成为实际裁决面；默认 G1 与 G2 仍由该 hook 拒绝。
 - `DOC_LIFECYCLE_SKIP=1` 只存在于 G1 allow half 的单个 fresh process；未写入任何用户配置。
