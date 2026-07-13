@@ -5,10 +5,29 @@
 
 ## 当前 objective
 
-把模板从 Claude-Code-native 扩展为 Claude Code + Codex 都可直接使用的 agent-native 模板。
-最新一轮新增 `coding-agent-quota` repo-local skill，用本地 usage snapshot 读取 Codex /
-Claude Code 当前窗口与周额度，并把 `subagent-routing` / `subagent-router-agent` 升级为
-配额感知的 provider/model 路由；验证已通过。
+按 fresh review 与依赖顺序完成本地 issue 集成。issue #16 已在 exact source HEAD
+`ecf0c80aa17bfa3aad6948f3d36ba49233c02cd6` 获得 fresh Codex `APPROVE`，当前正在合入本地
+`main` 并做冲突后验证；随后合入已 APPROVE 的 issue #17。issue #13/#18 不伪造缺失的
+fresh-session/隔离环境证据，保留可复现 blocker。
+
+## #16 fresh-review handoff（2026-07-13）
+
+- launch hook 命中即拒，`CLAUDE_ALLOW_LAUNCH` / `CODEX_ALLOW_LAUNCH` 永不放行；覆盖
+  `env -S`、shell/python `-c`、内部 `.`/`..`、`python -m`、`_worker`、带 operand 的
+  `timeout --signal TERM 60` 与 `env -u FOO`。
+- agent 使用 `expctl validate-recovery` 只读校验；`/tmp` 与 canonical ledger 的 actual
+  `apply-recovery` 都因无可信 provenance/原子消费 fail-closed。
+- alert schema 新增 proposal.workdir、approval_provenance、consume/execution/resolved 状态；
+  当前 provenance 必须为 null，非 null 自称批准由 validator 拒绝。
+- `fake_job.py` 仅接受无 symlink 的字面 `/tmp/.../<run-id>`，核对受信解释器/status/worker argv，
+  以 control lock 串行控制动作，并用 pidfd 避免 PID reuse signal。
+- status=done 的 `run_summary` 必须位于 `lab/code/experiments/`，且是 repo-relative、无
+  traversal/symlink 的 regular file。
+- 不运行真实训练/scheduler；验证只使用脚本内置 fake/local self-test。
+- fresh validation：launch gate 66/66、fake job 12/12，`expctl` 与 experiment-state self-test
+  均在 `python`/`python -S`/`python3`/`python3 -S` 四模式通过；experiment-state strict、adapter
+  sync、harness strict、anatomy、governance strict、same-commit/diff/pycompile 全绿。planner/watch/
+  recovery command 使用运行中 `expctl` 的 canonical `sys.executable`，不同 Python 安装不能串用。
 
 本地 `main` 已集成 issue #14 多 agent 控制面第一版——
 `.agent/multi-agent-control-plane.md` doctrine、`scripts/agent-{state,status,mailbox}.py` +

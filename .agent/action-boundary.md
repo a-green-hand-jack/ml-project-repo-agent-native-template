@@ -11,13 +11,20 @@
 - 提权与远程执行：`sudo`、`curl|sh`、`wget|sh`。
 - `pip install`（含 `python -m pip install`）：用 `uv add`。
 - push 到 `main`/`master`：除非命令带 `CLAUDE_ALLOW_PUSH_MAIN=1` 或 `CODEX_ALLOW_PUSH_MAIN=1`（human 单次放行）。
+- agent 内启动/kill/restart 训练或作业：launch hook 永久拒绝；调用者自设的
+  `CLAUDE_ALLOW_LAUNCH` / `CODEX_ALLOW_LAUNCH` 不构成批准。human 如需执行，必须在
+  agent hook 外亲自运行已审阅命令。
+- 调用者可编程的动态命令面：shell `-c/-lc`、`env -S/--split-string`、`python -c`（含
+  attached argv token `-c<command>`）；
+  它们可隐藏任意 scheduler/worker 启动，hook 无法把字符串内容当通用 sandbox 安全执行。
 - 派发无边界的 `general-purpose` 大 agent。
 
 ## 需问（ask，先说明意图与影响，等确认）
 
 - 有损/改历史 git：`git checkout`、`git switch`、`git reset`、`git clean`、`git rebase`、`git merge`、`git branch -d/-D`、`git worktree remove`。
 - 依赖变更：`uv add`、`uv sync`、`uv remove`。
-- 计算副作用：`kill`、`sbatch`、`runai`、启动/重启训练。
+- 计算副作用提案：`kill`、`sbatch`、`runai`、启动/重启训练的命令只能准备并交 human；
+  permission ask/prompt 是额外提示，不会越过上述 hook 地板。
 - 协作副作用：`gh pr create`、`gh pr merge`、release、改远端基础设施。
 - 促销结果：把普通结果 promote 成 paper claim。
 
@@ -26,7 +33,7 @@
 - 只读 shell：`ls`/`cat`/`head`/`tail`/`find`/`grep`/`rg`/`wc`/`jq`/`stat`/`tree`/`diff` 等。
 - 只读 git：`status`/`diff`/`log`/`show`/`branch`(列)/`remote -v`/`rev-parse`/`ls-files`/`blame`/`fetch` 等。
 - 低风险 git（可逆）：`git add`、`git commit`、`git stash`、`git push` 到 **topic/实验分支**（非 `main`/`master`）。
-- 开发：`pytest`/`ruff`/`mypy`/`pyright`、`uv run *`、`python -c`/`python -m pytest|ruff|mypy`、`mkdir`/`touch`。
+- 开发：`pytest`/`ruff`/`mypy`/`pyright`、`uv run *`、`python -m pytest|ruff|mypy`、`mkdir`/`touch`。
 - 清理：`rm -rf` 缓存/构建目录（`__pycache__`/`.pytest_cache`/`.ruff_cache`/`.mypy_cache`/`build`/`dist`）。
 - 文件编辑：`Edit`/`Write`（受保护路径除外，被 deny + hook 挡）。
 - 跑 repo validator：`python scripts/*.py`。
