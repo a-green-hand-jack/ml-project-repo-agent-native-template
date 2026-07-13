@@ -15,7 +15,8 @@
    外部 URI / 不可达路径只要求记录完备；无法校验必须给固定枚举 reason +
    非占位 justification，枚举外或占位理由判 FAIL（不是 unknown）。
 4. evidence → artifact index 交叉引用（metric_source 等指向 index 条目时必须存在
-   且未 archived）；evidence.run_id 的 run 必须闭环。
+   且未 archived）；evidence.run_id 的 run 必须闭环；claim/evidence 归属边
+   必须双向完整，不允许完整 evidence 只声明 supports_claim 却未被 claim 列出。
 5. deliverables/index.md → claims.yaml 引用存在；「evidence 齐全」列与 claims 实际
    evidence 一致；submitted/published 状态要求「齐全=是」；「齐全=是」的非 draft
    条目还必须「正文含 claim marker」或「登记人工 review 证据（行内引用
@@ -26,9 +27,10 @@
 7. release gate 结构化检查（structured_checks，只覆盖可客观机械验证的 kind）：
    结果仅作建议信号（ADVISE），gate_status 翻转仍是 human 动作；唯一会 FAIL 的
    情形是 gate_status=passed 却有结构化检查不满足（不该放行）。语义收紧：
-   artifact-exists 除条目存在外还查 repo 内 location 文件真实存在（外部/不可达
-   location 查 checksum/manifest 记录完备）；checksum-verified 只在真算 sha256
-   比对通过时满足，waived（豁免）/ recorded-unverified（登记未校验）≠ verified。
+   artifact-exists 除条目存在外还要求 artifact status=active，并查 repo 内
+   location 文件真实存在（外部/不可达 location 查 checksum/manifest 记录完备）；
+   checksum-verified 同样只接受 active artifact，且只在真算 sha256 比对通过时
+   满足，waived（豁免）/ recorded-unverified（登记未校验）≠ verified。
 
 覆盖范围：同一套逻辑经 INDEX_SPECS / COVERED_INDEX_TYPES 白名单扩展——Phase A 为
 最短闭环（result-index → evidence → claims → deliverables），Phase B 已扩展到全部
@@ -840,8 +842,9 @@ def check_evidence(root: Path, runs: dict, rep: Report) -> tuple[dict, set[str]]
 def check_claim_evidence_edges(
     claims_by_id: dict, evidence_by_id: dict, valid_evidence_ids: set[str], rep: Report,
 ) -> dict[str, list[str]]:
-    """Validate claim→evidence ownership and return only eligible owned edges."""
+    """Validate bidirectional claim↔evidence ownership and return eligible edges."""
     owned: dict[str, list[str]] = {}
+    declared: dict[str, set[str]] = {}
     for evidence_id in sorted(valid_evidence_ids):
         owner = evidence_by_id[evidence_id].get("supports_claim")
         if owner not in claims_by_id:
@@ -881,10 +884,18 @@ def check_claim_evidence_edges(
                 )
                 continue
             eligible.append(evidence_id)
+        declared[cid] = seen_refs
         owned[cid] = eligible
         if claim.get("status") in {"partial", "supported"} and not eligible:
             rep.fail(
                 f"claim {cid}：status={claim.get('status')} 但没有有效且 supports_claim 归属匹配的 evidence"
+            )
+    for evidence_id in sorted(valid_evidence_ids):
+        owner = evidence_by_id[evidence_id].get("supports_claim")
+        if owner in claims_by_id and evidence_id not in declared.get(owner, set()):
+            rep.fail(
+                f"evidence {evidence_id}：supports_claim={owner!r} 但未列入"
+                f" claim {owner} 的 evidence 列表（归属边必须双向完整）"
             )
     return owned
 
@@ -1029,7 +1040,7 @@ def check_deliverables_index(
 
 def check_claim_markers(
     root: Path, claim_ids: set, evidence_by_id: dict,
-    valid_evidence_ids: set[str], rep: Report,
+    valid_evidence_ids: set[str], claim_evidence: dict[str, list[str]], rep: Report,
 ) -> None:
     deliv = root / "deliverables"
     if not deliv.is_dir():
@@ -1063,8 +1074,13 @@ def check_claim_markers(
                         f"{ident}：evidence={ev} 的 supports_claim="
                         f"{evidence.get('supports_claim')!r}，不属于 marker claim {cid}"
                     )
+                elif ev not in claim_evidence.get(cid, []):
+                    rep.fail(
+                        f"{ident}：evidence={ev} 虽声明 supports_claim={cid!r}，"
+                        f"但未列入 claim {cid} 的 evidence 列表，不是合格声明边"
+                    )
                 else:
-                    rep.ok(f"{ident}：evidence={ev} 存在且 supports_claim 归属匹配")
+                    rep.ok(f"{ident}：evidence={ev} 存在且双向声明边归属匹配")
     if n_markers == 0:
         rep.ok(
             "claim marker：deliverables 下暂无 marker（无 marker 的活跃交付物由"
@@ -1077,6 +1093,17 @@ def check_claim_markers(
 # 校验结果仅作建议信号，gate_status 翻转仍是 human 动作——validator 只拦
 # 「gate_status=passed 却有结构化检查不满足」这种不该放行的情况）
 # ---------------------------------------------------------------------------
+
+def _artifact_gate_lifecycle_eligibility(itype: str, aid: str, entry: dict):
+    """Release-gate artifact checks only accept the current active artifact."""
+    status = entry.get("status")
+    if status != "active":
+        return False, (
+            f"{itype}-index 条目 {aid} 的 lifecycle status={status!r}；"
+            "release gate artifact 检查只接受 status='active'"
+        )
+    return True, f"{itype}-index 条目 {aid} 的 lifecycle status='active'"
+
 
 def _checksum_verification_state(root: Path, entry: dict, location: str) -> str:
     """区分 checksum 的三种「记录完备」状态（前提：_check_entry_checksum 无 FAIL）：
@@ -1129,6 +1156,11 @@ def _eval_structured_check(
                 entry = _index_ids(root, itype)[0].get(target)
                 if entry is None:
                     return False, f"{itype}-index 无条目 {target}"
+                eligible, lifecycle_detail = _artifact_gate_lifecycle_eligibility(
+                    itype, target, entry
+                )
+                if not eligible:
+                    return False, lifecycle_detail
                 location = entry.get("location")
                 if not _filled(location):
                     return False, (
@@ -1176,6 +1208,11 @@ def _eval_structured_check(
                 entry = _index_ids(root, itype)[0].get(aid)
                 if entry is None:
                     return False, f"{itype}-index 无条目 {aid}"
+                eligible, lifecycle_detail = _artifact_gate_lifecycle_eligibility(
+                    itype, aid, entry
+                )
+                if not eligible:
+                    return False, lifecycle_detail
                 location = entry.get("location") or ""
                 sub = Report()
                 _check_entry_checksum(root, entry, aid, location, sub)
@@ -1299,7 +1336,9 @@ def run_checks(root: Path, rep: Report) -> None:
         claims_by_id, evidence_by_id, valid_evidence_ids, rep
     )
     check_deliverables_index(root, claims_by_id, claim_evidence, rep)
-    check_claim_markers(root, claim_ids, evidence_by_id, valid_evidence_ids, rep)
+    check_claim_markers(
+        root, claim_ids, evidence_by_id, valid_evidence_ids, claim_evidence, rep
+    )
     check_release_gates_structured(
         root, runs, claims_by_id, evidence_by_id, claim_evidence, rep
     )
@@ -1368,6 +1407,20 @@ evidence:
     supports_claim: claim-001
     grade: metric
     command: uv run python eval.py
+    commit: abc1234
+    run_id: run-001
+    config: lab/code/configs/exp1.yaml
+    data_split: dataset-001/test
+    metric_source: result-001
+    verified_by_fresh_reviewer: false
+    updated: "2026-07-12"
+"""
+
+_ORPHAN_EVIDENCE_ENTRY = """\
+  - id: ev-002
+    supports_claim: claim-001
+    grade: metric
+    command: uv run python eval.py --second
     commit: abc1234
     run_id: run-001
     config: lab/code/configs/exp1.yaml
@@ -1915,6 +1968,22 @@ def _self_test() -> int:
     _run_case("negative-evidence-supports-wrong-claim", wrong_evidence_owner,
               ["supports_claim='claim-999'", "归属边不匹配"], False, failures)
 
+    # 完整 evidence 不能只声明 supports_claim；owner claim 也必须列出它。
+    def orphan_complete_evidence(root: Path, digest: str) -> None:
+        _write(root, "lab/research/evidence.yaml",
+               _GOOD_EVIDENCE + _ORPHAN_EVIDENCE_ENTRY)
+    _run_case("negative-orphan-complete-evidence", orphan_complete_evidence,
+              ["evidence ev-002", "归属边必须双向完整"], False, failures)
+
+    # marker 不得引用仅有 supports_claim、但未进入 claim.evidence 的孤边。
+    def marker_cites_orphan_evidence(root: Path, digest: str) -> None:
+        orphan_complete_evidence(root, digest)
+        _write(root, "deliverables/paper/README.md",
+               _GOOD_PAPER.replace("evidence=ev-001", "evidence=ev-002"))
+    _run_case("negative-marker-cites-orphan-evidence", marker_cites_orphan_evidence,
+              ["claim marker", "但未列入 claim claim-001 的 evidence 列表"],
+              False, failures)
+
     def marker_misses_row_claim(root: Path, digest: str) -> None:
         _write(root, "lab/research/claims.yaml",
                _GOOD_CLAIMS.replace(
@@ -1949,6 +2018,57 @@ def _self_test() -> int:
                ))
     _run_case("negative-marker-does-not-cover-row-claims", marker_misses_row_claim,
               ["marker 未覆盖该行 claim", "claim-002"], False, failures)
+
+    # gate 的两种 artifact 检查共用 active-only 生命周期资格。
+    def passed_gate_unknown_external_artifact(root: Path, digest: str) -> None:
+        result_index = _result_index(digest).replace(
+            "    status: active\n"
+            "    checksum_unavailable_reason: external-uri-no-checksum\n",
+            "    status: unknown\n"
+            "    checksum_unavailable_reason: external-uri-no-checksum\n",
+        )
+        _write(root, "lab/artifacts/result-index.yaml", result_index)
+        _write(root, "lab/research/release-gates.yaml",
+               _GOOD_GATES.replace("gate_status: open", "gate_status: passed"))
+    _run_case("negative-passed-gate-unknown-external-artifact",
+              passed_gate_unknown_external_artifact,
+              ["result-002", "lifecycle status='unknown'", "不该放行"],
+              False, failures)
+
+    def passed_gate_unknown_local_artifact(root: Path, digest: str) -> None:
+        _write(root, "lab/artifacts/result-index.yaml",
+               _result_index(digest, status="unknown"))
+        _write(root, "lab/research/evidence.yaml",
+               _GOOD_EVIDENCE.replace("    metric_source: result-001\n", ""))
+        _write(root, "lab/research/release-gates.yaml",
+               _GOOD_GATES.replace("gate_status: open", "gate_status: passed"))
+    _run_case("negative-passed-gate-unknown-local-artifact",
+              passed_gate_unknown_local_artifact,
+              ["kind=checksum-verified", "kind=artifact-exists",
+               "lifecycle status='unknown'", "不该放行"], False, failures)
+
+    def passed_gate_archived_artifact(root: Path, digest: str) -> None:
+        _write(root, "lab/artifacts/result-index.yaml",
+               _result_index(digest, status="archived"))
+        _write(root, "lab/research/evidence.yaml",
+               _GOOD_EVIDENCE.replace("    metric_source: result-001\n", ""))
+        _write(root, "lab/research/release-gates.yaml",
+               _GOOD_GATES.replace("gate_status: open", "gate_status: passed"))
+    _run_case("negative-passed-gate-archived-artifact", passed_gate_archived_artifact,
+              ["kind=checksum-verified", "kind=artifact-exists",
+               "lifecycle status='archived'", "不该放行"], False, failures)
+
+    def passed_gate_superseded_artifact(root: Path, digest: str) -> None:
+        _write(root, "lab/artifacts/result-index.yaml",
+               _result_index(digest, status="superseded"))
+        _write(root, "lab/research/evidence.yaml",
+               _GOOD_EVIDENCE.replace("    metric_source: result-001\n", ""))
+        _write(root, "lab/research/release-gates.yaml",
+               _GOOD_GATES.replace("gate_status: open", "gate_status: passed"))
+    _run_case("negative-passed-gate-superseded-artifact",
+              passed_gate_superseded_artifact,
+              ["lifecycle status='superseded'", "只接受 status='active'", "不该放行"],
+              False, failures)
 
     # passed gate 遇到 artifact-exists unknown 必须 fail-closed，不能仅 ADVISE。
     def passed_gate_external_unknown(root: Path, digest: str) -> None:

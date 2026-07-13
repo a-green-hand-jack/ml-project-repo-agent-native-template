@@ -30,7 +30,7 @@ Codex adapter 同步脚本把 `.claude/` canonical 能力生成到 `.codex/` 与
 | --- | --- | --- |
 | `check-agent-harness.py` | 结构/必需文件/根污染/四件套/能力索引/settings/DESIGN 清单 校验 | `.agent/repo-editing-guardrails.md` · `repo-documentation-topology.md` |
 | `check-anatomy-drift.py` | ANATOMY related_files 与 line citation 漂移 + 120 行硬上限 | `.agent/anatomy-protocol.md` |
-| `check-provenance-chain.py` | provenance 链：run→artifact→evidence→claim→deliverable；完整 supports_claim 边、行级 marker 覆盖、run 闭环、checksum（sha256）、安全 repo-relative regular-file path、dataset split、ID 唯一性；active/submitted/passed 状态 fail-closed，`--self-test` 跑内嵌对抗 fixture | `.agent/artifact-policy.md` |
+| `check-provenance-chain.py` | provenance 链：run→artifact→evidence→claim→deliverable；双向 claim/evidence 归属边、行级 marker 覆盖、run 闭环、checksum（sha256）、active-only gate artifact、安全 repo-relative regular-file path、dataset split、ID 唯一性；active/submitted/passed 状态 fail-closed，`--self-test` 跑内嵌对抗 fixture | `.agent/artifact-policy.md` |
 | `validate-governance.py` | 聚合上三者 + gitignore/YAML/tracked-bytes + 证据链一致性(overclaim 拦截) | `.agent/action-boundary.md` · `artifact-policy.md` · `principles.md` |
 | `check-same-commit.py` | same-commit rule：结构改动(A/D/R)未同变更集更新对应 ANATOMY → 拦。diff 驱动，不进 governance；由 `.githooks/pre-commit` + CI 调用 | `.agent/anatomy-protocol.md` |
 | `adopt-existing-repo.py` | 分 phase 迁移已有 Git repo：discover/baseline/scaffold/normalize/prove | `plans/20260709-adopt-existing-repo.zh.md` · `.claude/skills/adopt-existing-repo/SKILL.md` |

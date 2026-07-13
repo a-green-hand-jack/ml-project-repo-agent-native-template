@@ -42,7 +42,8 @@ deliverables/index.md              对外交付物
   条目必须存在且状态不得为 `archived` / `unknown`；`data_split` 必须是
   `<dataset-id>/<split>`，且 split
   实际列在 dataset 条目的 `splits` 中。claim 引用 evidence 时还必须核对
-  `evidence.supports_claim == claim.id`；占位/不完整 evidence 不参与 claim 强度计算。
+  `evidence.supports_claim == claim.id`，且边必须双向声明：每条完整 evidence 都必须出现在
+  owner claim 的 `evidence` 列表中；占位/不完整 evidence 不参与 claim 强度计算。
 - deliverables 正文的 claim marker：`<!-- claim: id=<claim-id> evidence=<ev-id>,... -->`
   （只覆盖 Markdown；非 Markdown 交付物走 `human/reviews/results/` 人工 review 兜底）。
   「evidence 齐全=是」的非 draft 交付物必须二选一：正文 marker 覆盖索引该行列出的
@@ -54,7 +55,9 @@ deliverables/index.md              对外交付物
   `evidence-grade-min`）；价值判断类留自然语言 + human 审批。校验结果仅建议信号，
   `gate_status` 翻转仍是 human 动作；`passed` 遇到不满足、unknown 或 placeholder 均
   fail-closed，不得降为 ADVISE。
-  语义：`artifact-exists` 除 index 条目存在外还查 repo 内 `location` 文件真实存在
+  语义：`artifact-exists` / `checksum-verified` 引用 index 条目时只接受当前
+  `status: active` 的 artifact；`superseded` / `archived` / `unknown` 均不具备 release-gate
+  生命周期资格。`artifact-exists` 除 index 条目存在外还查 repo 内 `location` 文件真实存在
   （外部/不可达 location 查 checksum/manifest 记录完备）；`checksum-verified` 只在
   validator 真算 sha256 比对通过时满足——checksum 豁免（waived）与登记未校验
   （recorded-unverified）**≠ verified**，豁免不是校验。

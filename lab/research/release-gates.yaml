@@ -7,10 +7,10 @@
 # 由 scripts/check-provenance-chain.py 校验。kind 枚举（只收机械可验证类，价值判断类
 # requirement 继续留自然语言 + human 审批，不强行伪结构化）：
 #   - artifact-exists      target: <index 条目 id 或 repo 相对路径>
-#                          （条目存在还不够：repo 内 location 须为安全 regular file；外部
+#                          （index 条目必须 status=active；repo 内 location 须为安全 regular file；外部
 #                          location 须 checksum/manifest 记录完备）
 #   - checksum-verified    artifact: <index 条目 id>
-#                          （只在真算 sha256 比对通过时满足；checksum 豁免 waived /
+#                          （条目必须 status=active，且只在真算 sha256 比对通过时满足；checksum 豁免 waived /
 #                          登记未校验 recorded-unverified ≠ verified，豁免不是校验）
 #   - run-closed           run: <run-id>（experiment-ledger 中 status=done + run_summary）
 #   - regression-status    regression: <reg-id>  expect: pass

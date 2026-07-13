@@ -49,9 +49,10 @@ maintenance: |
   （整数，字段结构不兼容变更时递增）。`release-gates.yaml` 的 `structured_checks` 只
   结构化可机械验证的 kind（artifact-exists / checksum-verified / run-closed /
   regression-status / evidence-grade-min），结果仅建议信号，`gate_status` 翻转仍是
-  human 动作；artifact-exists 查 location 文件/manifest 记录真实存在，
-  checksum-verified 只认真算 sha256 比对通过（waived ≠ verified）；passed gate 的
-  placeholder/unknown 一律 fail-closed。claim→evidence 还核对 `supports_claim` 归属，
+  human 动作；artifact-exists / checksum-verified 引用 index 时只接受 active artifact，
+  前者查 location 文件/manifest 记录真实存在，后者只认真算 sha256 比对通过
+  （waived ≠ verified）；passed gate 的 placeholder/unknown 一律 fail-closed。
+  claim↔evidence 还核对双向完整的 `supports_claim` / `claim.evidence[]` 归属，
   只有完整且归属匹配的 evidence 才贡献强度；evidence 引用的 artifact
   不得是 archived/unknown，dataset split 必须已登记；deliverable marker 必须覆盖索引该行全部 claim。
   字段与枚举定义见
