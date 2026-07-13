@@ -12,7 +12,8 @@
 #   id / path / kind(brief|plan|review|decision) / status
 #   issue / branch / worktree —— 执行关联坐标。活跃 plan（approved/implementing）的 issue
 #     必须是非占位 `#N` 或 GitHub issue URL，branch 必须是现存 Git ref；implementing 的
-#     worktree 必须是 `git worktree list` 中绑定该 branch 的真实条目。verified 是历史态，
+#     worktree 必须是 `git worktree list` 中绑定该 branch 的真实条目；`.` 表示按 branch
+#     自动发现 checkout，适用于 linked worktree 与独立 clone。verified 是历史态，
 #     合并后允许 branch/worktree 被清理，历史事实由 approval 的 commit/PR/test 引用承担。
 #   approval —— human gate 证据引用（approved/implementing/verified 必填、非占位）
 #   upstream / downstream —— 注册表内其他条目 id（必须真实存在；上游被标 superseded
@@ -125,7 +126,7 @@ docs:
     status: implementing
     issue: "#13"
     branch: feat/13-plan-lifecycle-state
-    worktree: .claude/worktrees/13-plan-lifecycle-state
+    worktree: .
     approval: "human 逐条拍板（plan doc「当前决策」1–11，Plan revision log 2026-07-12 末三条）"
     upstream: []
     downstream: []

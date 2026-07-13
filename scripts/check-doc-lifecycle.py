@@ -13,7 +13,8 @@
 2. path 指向真实存在的文件；upstream/downstream/superseded_by 指向注册表内真实条目（悬空即错）。
 3. approved/implementing/verified 必须有非占位 approval 证据引用。
 4. 活跃 plan（approved/implementing）的 issue 必须是非占位规范坐标、branch 必须是现存
-   Git ref；implementing 的 worktree 必须是 `git worktree list` 中绑定同一 branch 的真实条目。
+   Git ref；implementing 的 worktree 必须是 `git worktree list` 中绑定同一 branch 的真实条目，
+   其中 `.` 表示按 branch 自动发现 checkout，显式路径仍精确匹配。
    issue 是远端实体，离线 validator 只锁定 `#N`/GitHub issue URL，不发网络请求。
 5. plan 类在 approved/implementing 态必须有非空、非占位的
    「## Allowed paths」「## Forbidden paths」「## 验证标准」段（verified/superseded 是历史态，不追溯）。
@@ -230,6 +231,7 @@ def _parse_restricted(text: str):
     cur: dict | None = None
     cur_list: str | None = None
     in_docs = False
+    docs_inline = False
     for lineno, raw in enumerate(text.splitlines(), 1):
         raw = _strip_yaml_inline_comment(raw)
         if not raw.strip() or raw.lstrip().startswith("#"):
@@ -237,8 +239,28 @@ def _parse_restricted(text: str):
         indent = len(raw) - len(raw.lstrip(" "))
         s = raw.strip()
         if indent == 0:
-            in_docs = s.split(":", 1)[0].strip() == "docs"
+            key, sep, value = s.partition(":")
+            if key.strip() == "docs":
+                if not sep:
+                    errors.append(f"注册表第 {lineno} 行：docs 顶层字段缺少冒号")
+                    in_docs, docs_inline = False, False
+                elif value.strip():
+                    parsed = _scalar(value.strip())
+                    if parsed not in (None, []):
+                        errors.append(
+                            f"注册表第 {lineno} 行：受限格式的 docs 仅允许块列表或空行内列表"
+                        )
+                    in_docs, docs_inline = False, True
+                else:
+                    in_docs, docs_inline = True, False
+            else:
+                in_docs, docs_inline = False, False
             cur, cur_list = None, None
+            continue
+        if docs_inline:
+            errors.append(
+                f"注册表第 {lineno} 行：docs 已使用行内值，不能继续包含缩进条目"
+            )
             continue
         if not in_docs:
             continue
@@ -490,10 +512,17 @@ def _worktree_candidates(repo: Path, raw: str) -> set[Path]:
 
 
 def _worktree_matches(repo: Path, raw: str, branch: str) -> bool:
-    candidates = _worktree_candidates(repo, raw)
     expected_branch = branch if branch.startswith("refs/") else f"refs/heads/{branch}"
-    return any(path in candidates and actual_branch == expected_branch
-               for path, actual_branch in _worktree_records(repo))
+    records = _worktree_records(repo)
+    # `worktree: .` is portable: discover the checkout bound to the declared branch.
+    # An explicit path remains strict and must match that exact registered worktree.
+    if raw.strip() == ".":
+        return any(actual_branch == expected_branch for _, actual_branch in records)
+    candidates = _worktree_candidates(repo, raw)
+    return any(
+        path in candidates and actual_branch == expected_branch
+        for path, actual_branch in records
+    )
 
 
 def _active_plan_association_errors(e: dict, repo: Path) -> list[str]:
@@ -2328,6 +2357,24 @@ def self_test() -> int:
             f"受限 parser 保留 quoted null {quoted_null}",
             isinstance(_scalar(quoted_null), str),
         )
+
+    malformed_docs_inline = "docs: []\n  - id: hidden\n    path: plans/demo.zh.md\n"
+    restricted_entries, restricted_errors = _parse_restricted(malformed_docs_inline)
+    check(
+        "受限 parser 拒绝 docs 行内值后的缩进条目",
+        restricted_entries == []
+        and any("不能继续包含缩进条目" in e for e in restricted_errors),
+    )
+    td, root = fresh({"plans/demo.zh.md": _OK_PLAN, REGISTRY_REL: _OK_REGISTRY})
+    check(
+        "hook 拦 docs 行内值后的隐藏 registry 条目",
+        pretooluse_reason(
+            "Write",
+            {"file_path": str(root / REGISTRY_REL), "content": malformed_docs_inline},
+            root,
+        ) is not None,
+    )
+    td.cleanup()
 
     malformed_fields = (
         ("id-list", "id: plan-demo", "id: [plan-demo]", "id 应为非空字符串"),

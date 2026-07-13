@@ -51,8 +51,10 @@ draft → in-review → approved → implementing → verified
 human 显式绕过 hook：`DOC_LIFECYCLE_SKIP=1`（validator 仍会事后校验）。
 批注收敛辅助只是格式约定：`[OK]` / `[改]` / `[?]` 可选前缀 + 模式匹配，不做语义分类。
 活跃 plan 的 issue 远端存在性不触发网络请求：validator 要求非占位规范 `#N`/GitHub issue URL；
-branch 与 implementing worktree 则分别按本地 Git ref、`git worktree list` 真实核验。verified 是历史态，
-允许合并后清理临时 branch/worktree，历史事实由 approval 中的 commit/PR/test 引用承担。
+branch 与 implementing worktree 则分别按本地 Git ref、`git worktree list` 真实核验。`worktree: .`
+按声明 branch 自动发现真实 checkout，避免 linked worktree 与独立 clone 的安装路径漂移；显式路径仍
+必须精确匹配。verified 是历史态，允许合并后清理临时 branch/worktree，历史事实由 approval 中的
+commit/PR/test 引用承担。
 
 ## fresh session 状态感知（a+b 叠加）
 
