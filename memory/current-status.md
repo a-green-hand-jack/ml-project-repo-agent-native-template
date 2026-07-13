@@ -8,13 +8,13 @@
 - 当前活跃 plan：`plans/20260712-plan-lifecycle-state.zh.md`（issue #13）· status: **implementing** ·
   branch `feat/13-plan-lifecycle-state`（worktree `.claude/worktrees/13-plan-lifecycle-state`）。
 - 真实 runtime 验收已 8/8 PASS：C1-C3/X1-X3 的 continuity/context 目标为 `68f1d43`；
-  exact-head review 两条 MAJOR 修复后的 guard G1/G2 已在精确代码 `3eb7b1a` 的三个新
+  exact-head review 全部 parser/绑定修复后的 guard G1/G2 已在精确代码 `492e042` 的三个新
   disposable clones 中重跑，
   默认非法 Write deny、仅显式 `DOC_LIFECYCLE_SKIP=1` allow、registry delete deny 均有顶层
   Claude Code session hook raw evidence。
   raw 转录、debug log 与 sha256 见 `lab/evals/doc-lifecycle/evidence-20260713-runtime-probes.md`。
-  evidence-only `9510142` fresh review 仅指出本文件旧 blocker 与 8/8 PASS 自相矛盾；该状态
-  事实已修正，下一步是对新 exact HEAD 复审。未 APPROVE 前不标 verified、不合入。
+  当前 evidence-only child 直接绑定代码 parent `492e042`；下一步是对该 exact HEAD 独立复审。
+  未 APPROVE 前不标 verified、不合入。
 - 权威状态注册表：`memory/doc-lifecycle.yaml`（brief/plan/review/decision 四类统一，语义见 `plans/ANATOMY.md`）。
 - 其余存量 plan 均已 `verified`，decisions 均 `approved`（详见注册表）。
 - 本节由 agent 在状态流转时更新；compact/clear 后 `context_continuity.py` 会把本文件回注新上下文。
@@ -47,8 +47,9 @@
 
 ## 未合入 blocker
 
-- #13：C1-C3/X1-X3/G1-G2 真实 runtime evidence 已 8/8 PASS；代码 target `3eb7b1a`、
-  evidence-only target `9510142`。当前唯一门槛是状态修正后的 exact HEAD fresh APPROVE。
+- #13：C1-C3/X1-X3/G1-G2 真实 runtime evidence 已 8/8 PASS；最终代码 parent `492e042`，
+  当前 evidence-only child 将绑定本轮精确 G1/G2 raw evidence。当前唯一门槛是 exact HEAD fresh
+  APPROVE。
 - #18 `cebe427`：raw-evidence 绑定 validator 的代码 MAJOR 已修复并获 code APPROVE；仍须纳入
   #13 hook 兼容修复，在最终 exact target 完成 C1-C7/X1-X7、`--require-fresh` exit 0 与 fresh
   final review。未取得这些证据前不得合入。
