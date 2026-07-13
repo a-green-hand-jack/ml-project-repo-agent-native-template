@@ -60,6 +60,13 @@ def _round(value: Any) -> Any:
     return round(value, 4) if isinstance(value, float) else value
 
 
+def positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be >= 1")
+    return parsed
+
+
 def catalog_route(catalog: dict[str, Any], provider: str, role: str, tier: int) -> dict[str, str]:
     """Model + provider-native effort from the frozen catalog (not model_for())."""
     entry = catalog["providers"][provider]
@@ -97,6 +104,8 @@ def build_recommendation(
     min_samples: int,
     ledger_error: str | None = None,
 ) -> dict[str, Any]:
+    if min_samples < 1:
+        raise ValueError("min_samples must be >= 1")
     providers = quota.get("providers", {})
     preferences = quota.get("paseo_preferences") or {"status": "missing", "providers": {}}
     baseline = raq.route_recommendation(
@@ -131,19 +140,47 @@ def build_recommendation(
             "falling back to quota-only recommendation"
         )
 
-    # 2) outcome evidence gate, isolated per task identity: samples are
-    # aggregated on the full role + task_class + routing_tier segment, and
-    # EVERY candidate needs >= min_samples observed outcomes in that segment
-    # (tier-3 or other-task data must not steer a tier-2 decision).
-    segment = f"role={role} task_class={task_class} tier={tier}"
-    stats = ol.provider_stats(records, role=role, task_class=task_class, routing_tier=tier)
+    # 2) outcome evidence gate. Evidence is keyed by the full concrete route:
+    # provider + model + effort + role + task_class + tier + policy_version.
+    # A result from one Codex model/effort (or old policy) cannot steer another.
+    segment = (
+        f"role={role} task_class={task_class} tier={tier} "
+        f"policy={catalog['policy_version']}"
+    )
+    route_stats = ol.route_stats(
+        records,
+        role=role,
+        task_class=task_class,
+        routing_tier=tier,
+        policy_version=catalog["policy_version"],
+    )
+    candidate_routes: dict[str, dict[str, str]] = {
+        name: catalog_route(catalog, name, role, tier) for name in PROVIDER_ORDER
+    }
+    identities = {
+        name: (
+            name,
+            route["model"],
+            route["effort"],
+            role,
+            task_class,
+            tier,
+            catalog["policy_version"],
+        )
+        for name, route in candidate_routes.items()
+    }
+    stats = {name: route_stats.get(identity) for name, identity in identities.items()}
     thin = {name: (stats.get(name) or {}).get("observed", 0) for name in PROVIDER_ORDER
             if (stats.get(name) or {}).get("observed", 0) < min_samples}
     if not degraded and thin:
         degraded = True
         degraded_reason = (
             f"insufficient outcome evidence for segment {segment}: "
-            + ", ".join(f"{name} observed={n}" for name, n in sorted(thin.items()))
+            + ", ".join(
+                f"{name}/{candidate_routes[name]['model']}@{candidate_routes[name]['effort']} "
+                f"observed={n}"
+                for name, n in sorted(thin.items())
+            )
             + f" < min_samples={min_samples}; falling back to quota-only recommendation"
         )
 
@@ -188,7 +225,7 @@ def build_recommendation(
     else:
         signals.append(f"degraded: {degraded_reason}")
 
-    route = catalog_route(catalog, chosen, role, tier)
+    route = candidate_routes[chosen]
     decided_at = _iso(now)
     decision_id = ol.make_decision_id({
         "decided_at": decided_at, "role": role, "routing_tier": tier,
@@ -202,8 +239,15 @@ def build_recommendation(
     candidates = []
     for index, name in enumerate(PROVIDER_ORDER):
         s = stats.get(name) or {}
+        candidate_route = candidate_routes[name]
         candidates.append({
             "provider": name,
+            "model": candidate_route["model"],
+            "effort": candidate_route["effort"],
+            "role": role,
+            "task_class": task_class,
+            "routing_tier": tier,
+            "policy_version": catalog["policy_version"],
             "current_remaining_percent": raq.cap_remaining(providers.get(name, {}), "current"),
             "weekly_remaining_percent": raq.cap_remaining(providers.get(name, {}), "weekly"),
             "expected_quota_cost_percent": s.get("expected_quota_cost_percent"),
@@ -293,14 +337,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--task-class", default="unspecified")
     parser.add_argument("--now", help="ISO time for deterministic replay; default wall clock")
     parser.add_argument("--max-age-minutes", type=int, default=120)
-    parser.add_argument("--min-samples", type=int, default=3)
+    parser.add_argument("--min-samples", type=positive_int, default=3)
     parser.add_argument("--record", action="store_true",
                         help="append the decision to --record-ledger (default real ledger)")
     parser.add_argument("--record-ledger", default=str(ol.DEFAULT_LEDGER_FILE))
-    parser.add_argument("--allow-test-dir", default=None,
-                        help="TEST-ONLY: extra directory allowed for ledger writes "
-                             "(explicit by design — never derived from TMPDIR/env; "
-                             "protected paths stay rejected regardless)")
     args = parser.parse_args(argv)
 
     now = ol.parse_iso(args.now) if args.now else dt.datetime.now(dt.timezone.utc)
@@ -334,9 +374,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.record:
         try:
-            record_ledger = ol.resolve_write_path(
-                args.record_ledger, allow_test_dir=args.allow_test_dir
-            )
+            record_ledger = ol.resolve_write_path(args.record_ledger)
         except ol.LedgerWriteError as exc:
             print(f"ERROR record: {exc}", file=sys.stderr)
             return 2
@@ -365,11 +403,17 @@ def main(argv: list[str] | None = None) -> int:
             "outcome_status": "pending",
         }
         errs = ol.validate_decision(decision, catalog)
+        if not errs:
+            errs.extend(
+                ol.decision_id_write_errors(
+                    record_ledger, decision["decision_id"], catalog
+                )
+            )
         if errs:
             for err in errs:
                 print(f"ERROR record: {err}", file=sys.stderr)
             return 1
-        ol.append_record(decision, record_ledger, allow_test_dir=args.allow_test_dir)
+        ol.append_record(decision, record_ledger)
 
     output = {
         "generated_at": _iso(now),

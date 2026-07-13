@@ -97,20 +97,21 @@ Rules:
   parse/schema-invalid ledger sets `degraded: true` with a reason and falls back to the
   quota-only recommendation (invalid records are discarded, never fed into routing stats).
   Never dress missing/expired data up as precise numbers.
-- Task-identity isolation: outcome evidence is aggregated per `role + task_class +
-  routing_tier` segment, and EVERY candidate provider needs >= `--min-samples` observed
-  outcomes in that exact segment; otherwise the layer degrades to quota-only (tier-3 or
-  other-task samples never steer a tier-2 decision).
+- Concrete-route isolation: outcome evidence is aggregated by `provider + model + effort +
+  role + task_class + routing_tier + policy_version`. EVERY exact candidate route needs >=
+  `--min-samples` observed outcomes (`--min-samples` must be >=1); otherwise the layer degrades
+  to quota-only. Another model/effort, tier, task, role, or policy never steers this route, and
+  zero observed outcomes always force the conservative fallback.
 - Write boundary: ledger writes (`--ledger` on record commands, `--record-ledger`) are only
   accepted inside the default `.outcome-ledger/` directory or under literal `/tmp` (POSIX
-  standard location; `tempfile.gettempdir()` is deliberately ignored — `TMPDIR` is
-  environment-controlled and must never widen the allowlist). Test scripts whose temp dir is
-  not under `/tmp` pass an explicit `--allow-test-dir <path>` (test-only, never derived from
-  env; the protected floor still wins). Protected paths (`lab/data|runs|models`,
-  `lab/infra/private`, `checkpoints`, `wandb`, `mlruns`, `.env`) and any other location are
-  rejected with a non-zero exit. Reads are unrestricted (fixtures replay). Known limitation
-  (recorded honestly): a TOCTOU window exists between resolve and open — this is an
-  anti-footgun guard (same stance as `pre_tool_guard.py`), not an adversarial sandbox.
+  standard location; `tempfile.gettempdir()` / `TMPDIR` are ignored). There is no CLI flag to
+  authorize another directory. Repo root, `.env*`, symlink components, lexical/realpath escape,
+  protected repo paths, and every other location are rejected. Reads remain unrestricted.
+  A TOCTOU window still exists between check and open, so this is an anti-footgun guard, not an
+  adversarial sandbox.
+- Decision IDs are unique per ledger. `record-decision` and `outcome_route.py --record` validate
+  the target ledger and reject an existing `decision_id` before append; repeated deterministic
+  replay cannot silently self-pollute the evidence store.
 - Cost is quota-only in this version: candidate routes are compared/sorted by `quota_cost`
   (subscription window burn, estimate). `metered_price_estimate` ($/token) is reserved and NOT
   implemented (plan decision Q6). Reports keep dimensions separate (outcome / quota_cost /

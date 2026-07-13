@@ -10,6 +10,15 @@
 Claude Code 当前窗口与周额度，并把 `subagent-routing` / `subagent-router-agent` 升级为
 配额感知的 provider/model 路由；验证已通过。
 
+## Feature branch handoff（2026-07-13）
+
+- `feat/15-outcome-aware-routing` fresh review 四项门槛已修：ledger 写入只允许 canonical
+  `.outcome-ledger/` 与字面 `/tmp`；outcome 证据按完整具体路线七维键隔离；两个 decision
+  写入口 append 前拒绝重复 ID；`--min-samples >= 1` 且零 outcome 保守回退。
+- 新增 repo 根、`.env*`、symlink/越界、跨 model/effort/policy 污染、重复 decision ID、
+  零/非法样本阈值对抗测试。定向结果：47/47 unittest 通过，outcome strict schema gate
+  0 error / 0 warning；完整 governance/harness/anatomy 门禁见本分支最新提交。
+
 ## Constraints
 
 - 遵守 `AGENTS.md` / `.agent/AGENTS.md` / `.agent/action-boundary.md`。

@@ -347,3 +347,9 @@ policy 演化，且其中 `xhigh` 是跨生态抽象值，不等同于所有 pro
   status=missing 优雅降级，不新增读取面）。验证：14/14 targeted unittest、validate-governance OK、
   `sync-codex-adapters.py --check` OK、真实 `codex exec -c model_reasoning_effort=medium` smoke
   exit 0（gpt-5.6-terra/medium/degraded=false，deterministic decision_id）。
+- 2026-07-13 fresh review 门槛修复（worker：干将·改·15结果路由）：移除生产 CLI
+  `--allow-test-dir` 任意写逃生口，只允许 canonical `.outcome-ledger/` 与字面 `/tmp`，并拒绝
+  repo 根、`.env*`、symlink/realpath 越界；统计与推荐改按 `provider + model + effort + role +
+  task_class + routing_tier + policy_version` 完整具体路线隔离；`record-decision` 与
+  `outcome_route --record` append 前拒绝重复 `decision_id`；`--min-samples` 收紧为 ≥1，零
+  observed outcome 强制 degraded quota-only fallback。对抗回归覆盖四项门槛。

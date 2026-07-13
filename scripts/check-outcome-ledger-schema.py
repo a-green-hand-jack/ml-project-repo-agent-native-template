@@ -13,12 +13,13 @@
 4. 真实 ledger（`.outcome-ledger/ledger.jsonl`，若存在）同样通过 schema 校验。
 5. fallback 行为：对 stale quota fixture 跑 replay，必须 degraded=true 并回退
    quota-only 推荐；对 frozen fixture 跑两次，输出必须逐字节一致（确定性）；
-   从未见过的 task_class（无该 segment 样本）必须 degraded=true 并回退。
+   从未见过的 task_class（零条具体路线 outcome）必须 degraded=true 并回退；
+   `--min-samples 0` 必须被 CLI 拒绝。
 6. credential 防线：skill scripts 静态扫描，不得出现 credential 类路径字面量；
    `.gitignore` 必须覆盖 `.outcome-ledger` 明细。
 7. 负向 schema 校验：以 sample fixture 的合法 decision/outcome 为底，逐个删除
    required key（含 quota_cost 子字段）、破坏 schema_version / decision_id 格式，
-   validator 必须逐条拒绝（缺字段绝不静默通过）。
+   validator 必须逐条拒绝；完整路线统计键必须含 provider/model/effort/role/task/tier/policy。
 
 校验逻辑经 importlib 复用 skill 内 `outcome_ledger.py`（同
 `check-adoption-integrity.py` 复用 adopt 脚本的先例），避免两份 schema 漂移。
@@ -105,6 +106,26 @@ def check_fixture_ledgers(ol, catalog) -> None:
                     "fixture 无任何 Codex 生态 decision 记录——跨 provider schema "
                     "退化成 Claude-only（plan doc Child H 要求至少一条）"
                 )
+            route_stats = ol.route_stats(
+                records,
+                role="impl",
+                task_class="bounded-implementation",
+                routing_tier=2,
+                policy_version=catalog["policy_version"],
+            )
+            expected_codex_route = (
+                "codex", "gpt-5.6-terra", "medium", "impl",
+                "bounded-implementation", 2, catalog["policy_version"],
+            )
+            if route_stats.get(expected_codex_route, {}).get("observed", 0) < 3:
+                errors.append(
+                    "fixture 完整路线统计异常：codex/gpt-5.6-terra@medium 的 "
+                    "impl/bounded-implementation/tier2 样本不足"
+                )
+            if any(len(identity) != 7 for identity in route_stats):
+                errors.append(
+                    "outcome 统计键未按 provider+model+effort+role+task+tier+policy 隔离"
+                )
             pending = [
                 r for r in records if r.get("record_type") == "decision"
                 and r.get("decision_id") not in {
@@ -183,6 +204,16 @@ def check_fallback_and_determinism() -> None:
         errors.append("task 身份隔离失效：未见过的 task_class 应 degraded=true（不得借用他类样本）")
     elif rec.get("provider") != rec.get("baseline_provider"):
         errors.append("unseen task_class degraded 时未回退 quota-only 推荐")
+    # 样本阈值不得通过 0 绕过；argparse 必须在进入推荐逻辑前拒绝。
+    min_zero = subprocess.run(
+        [sys.executable, str(ROUTE_SCRIPT),
+         "--quota-fixture", str(FROZEN_QUOTA), "--ledger", str(SAMPLE_LEDGER),
+         "--role", "impl", "--tier", "2", "--task-class", "bounded-implementation",
+         "--now", REPLAY_NOW, "--min-samples", "0"],
+        capture_output=True, text=True, cwd=REPO,
+    )
+    if min_zero.returncode != 2 or "must be >= 1" not in min_zero.stderr:
+        errors.append("--min-samples 0 未被 CLI 正整数地板拒绝")
 
 
 def check_negative_schema_rejection(ol, catalog) -> None:
@@ -219,6 +250,8 @@ def check_negative_schema_rejection(ol, catalog) -> None:
             errors.append(f"负向校验失效：outcome schema_version={bad!r}（类型混淆）未被拒绝")
     if not ol.validate_decision({**decision, "decision_id": "not-a-valid-id"}, catalog):
         errors.append("负向校验失效：decision_id 非 d-<id> 格式未被拒绝")
+    if not ol.validate_records([decision, dict(decision)], catalog):
+        errors.append("负向校验失效：重复 decision_id 未被拒绝")
 
 
 def check_credentials_and_gitignore() -> None:
@@ -232,6 +265,10 @@ def check_credentials_and_gitignore() -> None:
     gitignore = REPO / ".gitignore"
     if not gitignore.exists() or ".outcome-ledger" not in gitignore.read_text(encoding="utf-8"):
         errors.append(".gitignore 未覆盖 .outcome-ledger 明细（决策：repo 内 gitignored 目录）")
+    for script in (SKILL / "scripts" / "outcome_ledger.py",
+                   SKILL / "scripts" / "outcome_route.py"):
+        if "--allow-test-dir" in script.read_text(encoding="utf-8"):
+            errors.append(f"生产 CLI 仍暴露任意测试写目录逃生口：{script.name}")
 
 
 def main() -> int:

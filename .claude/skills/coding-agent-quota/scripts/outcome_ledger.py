@@ -36,6 +36,7 @@ import argparse
 import datetime as dt
 import hashlib
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -46,18 +47,9 @@ REPO_ROOT = SKILL_DIR.parents[2]
 DEFAULT_LEDGER_FILE = SKILL_DIR / ".outcome-ledger" / "ledger.jsonl"
 DEFAULT_CATALOG = SKILL_DIR / "fixtures" / "outcome" / "model-catalog.v1.json"
 
-# Write boundary (BLOCKER fix): ledger writes are only allowed inside the
-# default gitignored ledger directory or literal `/tmp` (POSIX standard temp
-# location — deliberately NOT tempfile.gettempdir(), which is environment
-# controlled: `TMPDIR=.agent` must never widen the allowlist). Protected paths
-# (aligned with .claude/hooks/pre_tool_guard.py PROTECTED_PREFIXES) and any
-# other location are rejected — `--ledger`/`--record-ledger` must not become
-# an arbitrary file-write primitive that bypasses the protected-path floor.
-PROTECTED_REPO_PREFIXES = (
-    "lab/data/", "lab/runs/", "lab/models/", "lab/infra/private/",
-    "checkpoints/", "wandb/", "mlruns/",
-)
-PROTECTED_REPO_FILES = (".env",)
+# Ledger writes have exactly two roots: the canonical gitignored ledger
+# directory and literal `/tmp`. There is deliberately no caller/CLI escape
+# hatch for extra directories. `TMPDIR` is environment-controlled and ignored.
 LITERAL_TMP = Path("/tmp")
 
 SCHEMA_VERSION = 1
@@ -124,6 +116,39 @@ def canonical_json(obj: Any) -> str:
 
 def make_decision_id(payload: dict[str, Any]) -> str:
     return "d-" + hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()[:12]
+
+
+def route_identity(
+    decision: dict[str, Any], outcome: dict[str, Any] | None = None
+) -> tuple[str, str, str, str, str, int, str] | None:
+    """Concrete evidence identity; observed results use the route that ran."""
+    observed = outcome is not None and outcome.get("outcome_status") == "observed"
+    provider = outcome.get("actual_provider") if observed else decision.get("provider")
+    model = outcome.get("actual_model") if observed else decision.get("model")
+    effort = outcome.get("actual_effort") if observed else decision.get("effort")
+    policy = outcome.get("policy_version") if observed else decision.get("policy_version")
+    values = (
+        provider,
+        model,
+        effort,
+        decision.get("role"),
+        decision.get("task_class"),
+        decision.get("routing_tier"),
+        policy,
+    )
+    if not all(isinstance(value, str) and value for value in values[:5] + values[6:]):
+        return None
+    if not isinstance(values[5], int) or isinstance(values[5], bool):
+        return None
+    return values  # type: ignore[return-value]
+
+
+def route_identity_label(identity: tuple[str, str, str, str, str, int, str]) -> str:
+    provider, model, effort, role, task_class, tier, policy = identity
+    return (
+        f"{provider}/{model}@{effort}|role={role}|task_class={task_class}|"
+        f"tier={tier}|policy={policy}"
+    )
 
 
 def load_catalog(path: Path = DEFAULT_CATALOG) -> dict[str, Any]:
@@ -391,7 +416,7 @@ def _avg(values: list[float]) -> float | None:
 
 
 def summarize(records: list[dict[str, Any]], catalog: dict[str, Any]) -> dict[str, Any]:
-    """Per-route report with dimensions kept separate (no single merged score)."""
+    """Per-concrete-route report; no evidence crosses an identity dimension."""
     expensive = catalog.get("expensive_routes", {})
     expensive_models = set(expensive.get("models", []))
     min_expensive_tier = expensive.get("min_expensive_tier", 3)
@@ -401,20 +426,23 @@ def summarize(records: list[dict[str, Any]], catalog: dict[str, Any]) -> dict[st
 
     routes: dict[str, dict[str, Any]] = {}
     for did, dec in sorted(decisions.items()):
-        provider = dec.get("provider", "unknown")
-        model = dec.get("model", "unknown")
-        key = f"{provider}/{model}"
+        out = outcomes.get(did)
+        identity = route_identity(dec, out)
+        if identity is None:
+            continue
+        provider, model, effort, role, task_class, tier, policy = identity
+        key = route_identity_label(identity)
         route = routes.setdefault(key, {
-            "provider": provider, "model": model,
+            "provider": provider, "model": model, "effort": effort,
+            "role": role, "task_class": task_class, "routing_tier": tier,
+            "policy_version": policy,
             "decisions": 0, "pending": 0, "observed": 0, "unavailable": 0,
             "outcomes": {"pass": 0, "partial": 0, "fail": 0},
             "failure_reasons": {},
             "_rework": [], "_tokens_in": [], "_tokens_out": [], "_latency": [], "_quota": [],
-            "expensive_route": model in expensive_models
-            or (isinstance(dec.get("routing_tier"), int) and dec["routing_tier"] >= min_expensive_tier),
+            "expensive_route": model in expensive_models or tier >= min_expensive_tier,
         })
         route["decisions"] += 1
-        out = outcomes.get(did)
         if out is None:
             route["pending"] += 1
             continue
@@ -446,6 +474,11 @@ def summarize(records: list[dict[str, Any]], catalog: dict[str, Any]) -> dict[st
         report[key] = {
             "provider": r["provider"],
             "model": r["model"],
+            "effort": r["effort"],
+            "role": r["role"],
+            "task_class": r["task_class"],
+            "routing_tier": r["routing_tier"],
+            "policy_version": r["policy_version"],
             "expensive_route": r["expensive_route"],
             "decisions": r["decisions"],
             "pending": r["pending"],
@@ -473,22 +506,18 @@ def summarize(records: list[dict[str, Any]], catalog: dict[str, Any]) -> dict[st
     return {"policy_version": catalog.get("policy_version"), "routes": report}
 
 
-def provider_stats(
+def route_stats(
     records: list[dict[str, Any]],
     role: str | None = None,
     task_class: str | None = None,
     routing_tier: int | None = None,
-) -> dict[str, dict[str, Any]]:
-    """Per-provider observed-outcome stats, filtered by role/task_class/routing_tier.
-
-    Task-identity isolation: callers routing a specific segment must filter on
-    the full ``role + task_class + routing_tier`` combination so that e.g.
-    tier-3 samples never pollute a tier-2 routing decision.
-    """
+    policy_version: str | None = None,
+) -> dict[tuple[str, str, str, str, str, int, str], dict[str, Any]]:
+    """Stats keyed by provider+model+effort+role+task+tier+policy."""
     decisions = {r["decision_id"]: r for r in records
                  if r.get("record_type") == "decision" and isinstance(r.get("decision_id"), str)}
     outcomes = latest_outcomes(records)
-    stats: dict[str, dict[str, Any]] = {}
+    stats: dict[tuple[str, str, str, str, str, int, str], dict[str, Any]] = {}
     for did, dec in sorted(decisions.items()):
         if role is not None and dec.get("role") != role:
             continue
@@ -499,9 +528,12 @@ def provider_stats(
         out = outcomes.get(did)
         if out is None or out.get("outcome_status") != "observed":
             continue
-        provider = out.get("actual_provider") or dec.get("provider", "unknown")
-        s = stats.setdefault(provider, {"observed": 0, "pass": 0, "fail": 0, "partial": 0,
-                                        "_rework": [], "_quota": [], "_latency": [], "_tokens_out": []})
+        identity = route_identity(dec, out)
+        if identity is None or (policy_version is not None and identity[6] != policy_version):
+            continue
+        s = stats.setdefault(identity, {"observed": 0, "pass": 0, "fail": 0, "partial": 0,
+                                        "_rework": [], "_quota": [], "_latency": [],
+                                        "_tokens_out": []})
         s["observed"] += 1
         quality = out.get("outcome_quality")
         if quality in ("pass", "fail", "partial"):
@@ -515,11 +547,11 @@ def provider_stats(
             s["_latency"].append(float(out["latency_wall_clock_s"]))
         if isinstance(out.get("tokens_out"), (int, float)):
             s["_tokens_out"].append(float(out["tokens_out"]))
-    result: dict[str, dict[str, Any]] = {}
-    for provider in sorted(stats):
-        s = stats[provider]
+    result: dict[tuple[str, str, str, str, str, int, str], dict[str, Any]] = {}
+    for identity in sorted(stats):
+        s = stats[identity]
         judged = s["pass"] + s["fail"]
-        result[provider] = {
+        result[identity] = {
             "observed": s["observed"],
             "pass": s["pass"], "fail": s["fail"], "partial": s["partial"],
             "success_rate": round(s["pass"] / judged, 4) if judged else None,
@@ -535,58 +567,59 @@ class LedgerWriteError(ValueError):
     """Raised when a ledger write target violates the write boundary."""
 
 
-def resolve_write_path(path: Path | str, allow_test_dir: Path | str | None = None) -> Path:
+def _first_symlink(path: Path) -> Path | None:
+    current = Path(path.anchor)
+    for part in path.parts[1:]:
+        current /= part
+        if current.is_symlink():
+            return current
+    return None
+
+
+def resolve_write_path(path: Path | str) -> Path:
     """Resolve (realpath) a ledger WRITE target and enforce the write boundary.
 
-    Allowed: the default `.outcome-ledger/` directory inside this skill, and
+    Allowed: the canonical `.outcome-ledger/` directory inside this skill and
     the literal POSIX ``/tmp`` prefix (tests only). ``tempfile.gettempdir()``
-    is deliberately NOT consulted: it is environment controlled (``TMPDIR``)
-    and must never widen the allowlist. Test scripts that need a different
-    temp location must pass it explicitly via ``allow_test_dir``
-    (CLI: ``--allow-test-dir``) — never derived from the environment.
-    Rejected with ``LedgerWriteError``: protected repo paths (lab/data|runs|
-    models, lab/infra/private, checkpoints, wandb, mlruns, .env — aligned with
-    pre_tool_guard) and any other repo or non-temp location; the protected
-    floor also wins over ``allow_test_dir``. Read paths are NOT restricted.
+    and ``TMPDIR`` are deliberately ignored. Repository root, any `.env*`
+    component, symlinked path component, traversal/escape, and every other
+    location are rejected. Read paths are not restricted.
 
     Known limitation (TOCTOU): the boundary is checked at resolve time and the
     filesystem can change between this check and the subsequent open. Like
     ``.claude/hooks/pre_tool_guard.py`` this is an anti-footgun guard, not an
     adversarial sandbox; data safety ultimately relies on gitignore + backups.
     """
-    resolved = Path(path).expanduser().resolve()
+    candidate = Path(path).expanduser()
+    if not candidate.is_absolute():
+        candidate = Path.cwd() / candidate
+    lexical = Path(os.path.abspath(candidate))
     repo_root = REPO_ROOT.resolve()
-    try:
-        rel = resolved.relative_to(repo_root).as_posix()
-    except ValueError:
-        rel = None
-    if rel is not None and (
-        rel in PROTECTED_REPO_FILES
-        or resolved.name in PROTECTED_REPO_FILES
-        or any(rel == p.rstrip("/") or rel.startswith(p) for p in PROTECTED_REPO_PREFIXES)
-    ):
+    if lexical == repo_root:
+        raise LedgerWriteError("refusing to write ledger to repository root")
+    if any(part.startswith(".env") for part in lexical.parts):
         raise LedgerWriteError(
-            f"refusing to write ledger to protected path: {path} "
-            "(protected-path floor, see .agent/action-boundary.md)"
+            f"refusing to write ledger to protected .env* path: {path}"
         )
-    # Literal /tmp only — never tempfile.gettempdir() (TMPDIR-controlled).
-    allowed_dirs = {DEFAULT_LEDGER_FILE.parent.resolve(), LITERAL_TMP}
-    if allow_test_dir is not None:
-        allowed_dirs.add(Path(allow_test_dir).expanduser().resolve())
-    for root in allowed_dirs:
-        if root in resolved.parents:
+    symlink = _first_symlink(lexical)
+    if symlink is not None:
+        raise LedgerWriteError(
+            f"refusing to write ledger through symlink component: {symlink}"
+        )
+    resolved = lexical.resolve()
+    # Both lexical and resolved containment must hold. This rejects `..`,
+    # symlink escapes, and aliases that merely resolve into an allowed root.
+    for root in (DEFAULT_LEDGER_FILE.parent.resolve(), LITERAL_TMP):
+        if root in lexical.parents and root in resolved.parents:
             return resolved
     raise LedgerWriteError(
         f"refusing to write ledger outside the allowed directories: {path} "
-        f"(allowed: {DEFAULT_LEDGER_FILE.parent}, literal /tmp, or an explicit "
-        "--allow-test-dir)"
+        f"(allowed: {DEFAULT_LEDGER_FILE.parent} or literal /tmp)"
     )
 
 
-def append_record(
-    record: dict[str, Any], ledger_file: Path, allow_test_dir: Path | str | None = None
-) -> None:
-    ledger_file = resolve_write_path(ledger_file, allow_test_dir=allow_test_dir)
+def append_record(record: dict[str, Any], ledger_file: Path) -> None:
+    ledger_file = resolve_write_path(ledger_file)
     ledger_file.parent.mkdir(parents=True, exist_ok=True)
     with ledger_file.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
@@ -598,9 +631,24 @@ def _fail_on_errors(errs: list[str]) -> int:
     return 1 if errs else 0
 
 
+def decision_id_write_errors(
+    ledger_file: Path, decision_id: str, catalog: dict[str, Any]
+) -> list[str]:
+    """Reject corrupt targets and duplicate decision IDs before append."""
+    records, parse_errs = read_ledger(ledger_file)
+    errs = parse_errs + validate_records(records, catalog)
+    if any(
+        record.get("record_type") == "decision"
+        and record.get("decision_id") == decision_id
+        for record in records
+    ):
+        errs.append(f"duplicate decision_id: {decision_id}; refusing to append")
+    return errs
+
+
 def cmd_record_decision(args: argparse.Namespace) -> int:
     try:
-        ledger_path = resolve_write_path(args.ledger, allow_test_dir=args.allow_test_dir)
+        ledger_path = resolve_write_path(args.ledger)
     except LedgerWriteError as exc:
         print(f"ERROR {exc}", file=sys.stderr)
         return 2
@@ -635,9 +683,11 @@ def cmd_record_decision(args: argparse.Namespace) -> int:
                                 "provider", "model", "effort", "policy_version")}
     )
     errs = validate_decision(record, catalog)
+    if not errs:
+        errs.extend(decision_id_write_errors(ledger_path, record["decision_id"], catalog))
     if errs:
         return _fail_on_errors(errs)
-    append_record(record, ledger_path, allow_test_dir=args.allow_test_dir)
+    append_record(record, ledger_path)
     print(json.dumps({"decision_id": record["decision_id"], "ledger": str(args.ledger)},
                      ensure_ascii=False))
     return 0
@@ -645,7 +695,7 @@ def cmd_record_decision(args: argparse.Namespace) -> int:
 
 def cmd_record_outcome(args: argparse.Namespace) -> int:
     try:
-        ledger_path = resolve_write_path(args.ledger, allow_test_dir=args.allow_test_dir)
+        ledger_path = resolve_write_path(args.ledger)
     except LedgerWriteError as exc:
         print(f"ERROR {exc}", file=sys.stderr)
         return 2
@@ -679,12 +729,12 @@ def cmd_record_outcome(args: argparse.Namespace) -> int:
             "attribution_confidence": args.attribution,
             "is_estimate": True,
         }
-    records, parse_errs = read_ledger(Path(args.ledger))
+    records, parse_errs = read_ledger(ledger_path)
     decision_ids = {r.get("decision_id") for r in records if r.get("record_type") == "decision"}
     errs = parse_errs + validate_outcome(record, catalog, decision_ids)
     if errs:
         return _fail_on_errors(errs)
-    append_record(record, ledger_path, allow_test_dir=args.allow_test_dir)
+    append_record(record, ledger_path)
     print(json.dumps({"decision_id": record["decision_id"], "status": record["outcome_status"]},
                      ensure_ascii=False))
     return 0
@@ -727,11 +777,6 @@ def build_parser() -> argparse.ArgumentParser:
                         help="JSONL ledger file (default: repo-local gitignored ledger)")
     parser.add_argument("--catalog", default=str(DEFAULT_CATALOG),
                         help="frozen model catalog JSON")
-    parser.add_argument("--allow-test-dir", default=None,
-                        help="TEST-ONLY: extra directory allowed for ledger writes "
-                             "(for test scripts whose temp dir is not literal /tmp); "
-                             "explicit by design — never derived from TMPDIR/env, and "
-                             "protected paths stay rejected regardless")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("record-decision", help="append a route decision (outcome pending)")

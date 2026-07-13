@@ -26,14 +26,14 @@ import outcome_ledger as ol  # noqa: E402
 
 
 def _tmp_writable() -> bool:
-    """True when a writable temp dir exists (read-only sandboxes lack one).
+    """True when literal /tmp is writable (the only test write root).
 
     Must catch everything NamedTemporaryFile can raise when no usable temp dir
     exists (FileNotFoundError from gettempdir(), PermissionError, generic
     OSError) so environments without a writable temp SKIP cleanly, never fail.
     """
     try:
-        with tempfile.NamedTemporaryFile():
+        with tempfile.NamedTemporaryFile(dir="/tmp"):
             return True
     except OSError:
         return False
@@ -155,8 +155,8 @@ class Replay(unittest.TestCase):
         self.assertEqual(costs, sorted(costs))
 
 
-class TaskIdentityIsolation(unittest.TestCase):
-    """Outcome samples are isolated per role + task_class + routing_tier segment."""
+class RouteIdentityIsolation(unittest.TestCase):
+    """Evidence is isolated across every concrete route identity dimension."""
 
     def test_task_classes_get_isolated_results(self):
         """Same ledger, different task_class: bounded-implementation has enough
@@ -192,14 +192,120 @@ class TaskIdentityIsolation(unittest.TestCase):
         self.assertIn("tier=3", rec["degraded_reason"])
         self.assertEqual(rec["provider"], rec["baseline_provider"])
 
-    def test_provider_stats_filters_on_tier(self):
+    def test_route_stats_filters_on_tier(self):
         records, _ = ol.read_ledger(FIXTURES / "outcome-ledger.sample.jsonl")
-        tier2 = ol.provider_stats(records, role="impl",
-                                  task_class="bounded-implementation", routing_tier=2)
-        tier3 = ol.provider_stats(records, role="impl",
-                                  task_class="bounded-implementation", routing_tier=3)
-        self.assertGreaterEqual(tier2.get("codex", {}).get("observed", 0), 3)
+        tier2 = ol.route_stats(records, role="impl",
+                               task_class="bounded-implementation", routing_tier=2)
+        tier3 = ol.route_stats(records, role="impl",
+                               task_class="bounded-implementation", routing_tier=3)
+        codex_terra = (
+            "codex", "gpt-5.6-terra", "medium", "impl",
+            "bounded-implementation", 2, "routing-policy-v1",
+        )
+        self.assertGreaterEqual(tier2.get(codex_terra, {}).get("observed", 0), 3)
         self.assertEqual(tier3, {})
+
+    @NEEDS_TMP
+    def test_other_codex_model_effort_cannot_steer_current_route(self):
+        """Same provider/role/task/tier is still foreign evidence when the
+        concrete model or effort differs from the catalog candidate route."""
+        records, _ = ol.read_ledger(FIXTURES / "outcome-ledger.sample.jsonl")
+        mutated = []
+        for record in records:
+            record = dict(record)
+            if (
+                record.get("record_type") == "outcome"
+                and record.get("actual_provider") == "codex"
+                and record.get("actual_model") == "gpt-5.6-terra"
+            ):
+                record["actual_model"] = "gpt-5.5"
+                record["actual_effort"] = "high"
+            mutated.append(record)
+        with tempfile.TemporaryDirectory(dir="/tmp") as tmp:
+            ledger = Path(tmp) / "foreign-codex-route.jsonl"
+            ledger.write_text(
+                "\n".join(json.dumps(r, sort_keys=True) for r in mutated) + "\n",
+                encoding="utf-8",
+            )
+            result = run([
+                str(SCRIPTS / "outcome_route.py"),
+                "--quota-fixture", str(FIXTURES / "quota-snapshot.frozen.json"),
+                "--ledger", str(ledger),
+                "--role", "impl", "--tier", "2",
+                "--task-class", "bounded-implementation", "--now", NOW,
+            ])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rec = json.loads(result.stdout)["outcome_route_recommendation"]
+        self.assertTrue(rec["degraded"])
+        self.assertEqual(rec["provider"], rec["baseline_provider"])
+        self.assertIn("codex/gpt-5.6-terra@medium observed=0", rec["degraded_reason"])
+        codex_candidate = next(
+            c for c in rec["candidates_by_quota_cost"] if c["provider"] == "codex"
+        )
+        self.assertEqual(codex_candidate["observed"], 0)
+
+    def test_policy_version_is_part_of_stats_key(self):
+        records, _ = ol.read_ledger(FIXTURES / "outcome-ledger.sample.jsonl")
+        decision_id = "d-fx0001"
+        mutated = []
+        for record in records:
+            record = dict(record)
+            if record.get("decision_id") == decision_id:
+                record["policy_version"] = "routing-policy-old"
+            mutated.append(record)
+        current = ol.route_stats(
+            mutated,
+            role="impl",
+            task_class="bounded-implementation",
+            routing_tier=2,
+            policy_version="routing-policy-v1",
+        )
+        old = ol.route_stats(
+            mutated,
+            role="impl",
+            task_class="bounded-implementation",
+            routing_tier=2,
+            policy_version="routing-policy-old",
+        )
+        self.assertNotEqual(current, old)
+        self.assertTrue(all(identity[6] == "routing-policy-v1" for identity in current))
+        self.assertTrue(all(identity[6] == "routing-policy-old" for identity in old))
+
+
+class ConservativeSampleFloor(unittest.TestCase):
+    def test_min_samples_must_be_positive(self):
+        for value in ("0", "-1"):
+            with self.subTest(value=value):
+                result = replay(
+                    "quota-snapshot.frozen.json",
+                    "outcome-ledger.sample.jsonl",
+                    extra=["--min-samples", value],
+                )
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("must be >= 1", result.stderr)
+
+    @NEEDS_TMP
+    def test_zero_observed_outcomes_force_degraded_fallback(self):
+        records, _ = ol.read_ledger(FIXTURES / "outcome-ledger.sample.jsonl")
+        pending_only = [r for r in records if r.get("record_type") == "decision"]
+        with tempfile.TemporaryDirectory(dir="/tmp") as tmp:
+            ledger = Path(tmp) / "pending-only.jsonl"
+            ledger.write_text(
+                "\n".join(json.dumps(r, sort_keys=True) for r in pending_only) + "\n",
+                encoding="utf-8",
+            )
+            result = run([
+                str(SCRIPTS / "outcome_route.py"),
+                "--quota-fixture", str(FIXTURES / "quota-snapshot.frozen.json"),
+                "--ledger", str(ledger),
+                "--role", "impl", "--tier", "2",
+                "--task-class", "bounded-implementation", "--now", NOW,
+            ])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rec = json.loads(result.stdout)["outcome_route_recommendation"]
+        self.assertTrue(rec["degraded"])
+        self.assertEqual(rec["provider"], rec["baseline_provider"])
+        self.assertTrue(all(c["observed"] == 0 for c in rec["candidates_by_quota_cost"]))
 
 
 @NEEDS_TMP
@@ -217,7 +323,7 @@ class InvalidLedgerFallback(unittest.TestCase):
 
     def test_catalog_invalid_ledger_degrades_and_never_switches(self):
         text = (FIXTURES / "outcome-ledger.codex-degraded.jsonl").read_text(encoding="utf-8")
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(dir="/tmp") as tmp:
             bad = Path(tmp) / "ledger.jsonl"
             # Model outside the frozen catalog => schema validation errors.
             bad.write_text(text.replace("gpt-5.6-terra", "gpt-9000-nonexistent"),
@@ -234,7 +340,7 @@ class InvalidLedgerFallback(unittest.TestCase):
         self.assertIn("WARN ledger:", result.stderr)
 
     def test_json_corrupt_ledger_degrades(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(dir="/tmp") as tmp:
             bad = Path(tmp) / "ledger.jsonl"
             bad.write_text("{this is not json\n", encoding="utf-8")
             result = self._replay_with_ledger(str(bad))
@@ -247,7 +353,7 @@ class InvalidLedgerFallback(unittest.TestCase):
     def test_non_utf8_ledger_degrades_instead_of_crashing(self):
         """Corrupt bytes must take the same degraded path as JSON/schema errors,
         never an uncaught UnicodeDecodeError traceback."""
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(dir="/tmp") as tmp:
             bad = Path(tmp) / "ledger.jsonl"
             bad.write_bytes(b"\xff\xfe\x00broken bytes\x80\n")
             result = self._replay_with_ledger(str(bad))
@@ -312,12 +418,15 @@ class WriteBoundary(unittest.TestCase):
         for ledger in ("lab/data/forbidden.jsonl", "lab/runs/forbidden.jsonl",
                        "lab/models/forbidden.jsonl", "lab/infra/private/forbidden.jsonl",
                        "checkpoints/forbidden.jsonl", "wandb/forbidden.jsonl",
-                       "mlruns/forbidden.jsonl", ".env"):
+                       "mlruns/forbidden.jsonl", ".env", ".env.local", ".environment"):
             with self.subTest(ledger=ledger):
                 self._assert_rejected(ledger)
 
     def test_arbitrary_repo_path_rejected(self):
         self._assert_rejected("scripts/evil-ledger.jsonl")
+
+    def test_repo_root_rejected(self):
+        self._assert_rejected(str(REPO))
 
     def test_path_outside_repo_and_tmp_rejected(self):
         self._assert_rejected(str(REPO.parent / "evil-ledger.jsonl"))
@@ -364,22 +473,48 @@ class WriteBoundary(unittest.TestCase):
                 self.assertIn("refusing to write ledger", result.stderr)
                 self.assertFalse(evil.exists(), ".agent/evil-ledger.jsonl must not be created")
 
-    def test_allow_test_dir_is_explicit_and_keeps_protected_floor(self):
-        """--allow-test-dir grants exactly the named dir; the protected-path
-        floor still wins even when allow_test_dir points inside it."""
-        target = REPO / "some-test-dir" / "ledger.jsonl"
-        self.assertEqual(
-            ol.resolve_write_path(target, allow_test_dir=REPO / "some-test-dir"),
-            target.resolve(),
+    def test_allow_test_dir_escape_hatch_removed_from_both_clis(self):
+        ledger_result = run([
+            str(SCRIPTS / "outcome_ledger.py"),
+            "validate", "--allow-test-dir", str(REPO),
+        ])
+        route_result = replay(
+            "quota-snapshot.frozen.json",
+            "outcome-ledger.sample.jsonl",
+            extra=["--allow-test-dir", str(REPO)],
         )
-        # Explicit flag never overrides the protected floor.
-        with self.assertRaises(ol.LedgerWriteError):
-            ol.resolve_write_path(REPO / "lab" / "data" / "x.jsonl",
-                                  allow_test_dir=REPO / "lab" / "data")
-        # And it grants only that dir, nothing else.
-        with self.assertRaises(ol.LedgerWriteError):
-            ol.resolve_write_path(REPO / "elsewhere" / "x.jsonl",
-                                  allow_test_dir=REPO / "some-test-dir")
+        for result in (ledger_result, route_result):
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("unrecognized arguments: --allow-test-dir", result.stderr)
+
+    def test_env_prefix_rejected_even_under_allowed_roots(self):
+        for target in (
+            ol.DEFAULT_LEDGER_FILE.parent / ".env.routing",
+            Path("/tmp") / ".env-routing-ledger.jsonl",
+            Path("/tmp") / ".environment" / "ledger.jsonl",
+        ):
+            with self.subTest(target=target):
+                with self.assertRaises(ol.LedgerWriteError):
+                    ol.resolve_write_path(target)
+
+    @NEEDS_TMP
+    def test_symlink_components_rejected_even_without_escape(self):
+        with tempfile.TemporaryDirectory(dir="/tmp") as tmp:
+            root = Path(tmp)
+            real = root / "real"
+            real.mkdir()
+            link = root / "link"
+            link.symlink_to(real, target_is_directory=True)
+            with self.assertRaises(ol.LedgerWriteError):
+                ol.resolve_write_path(link / "ledger.jsonl")
+
+    @NEEDS_TMP
+    def test_symlink_escape_from_tmp_rejected(self):
+        with tempfile.TemporaryDirectory(dir="/tmp") as tmp:
+            link = Path(tmp) / "repo-link"
+            link.symlink_to(REPO, target_is_directory=True)
+            with self.assertRaises(ol.LedgerWriteError):
+                ol.resolve_write_path(link / "scripts" / "ledger.jsonl")
 
 
 class RequiredKeyFloor(unittest.TestCase):
@@ -487,12 +622,9 @@ class LedgerLifecycle(unittest.TestCase):
 @NEEDS_TMP
 class LedgerCli(unittest.TestCase):
     def test_record_show_summary_roundtrip(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(dir="/tmp") as tmp:
             ledger = str(Path(tmp) / "ledger.jsonl")
-            # Explicit --allow-test-dir: the temp dir may not be literal /tmp
-            # (TMPDIR), and the allowlist never reads the environment.
-            base = [str(SCRIPTS / "outcome_ledger.py"), "--ledger", ledger,
-                    "--allow-test-dir", tmp]
+            base = [str(SCRIPTS / "outcome_ledger.py"), "--ledger", ledger]
             rec = run([*base, "record-decision", "--role", "impl", "--routing-tier", "2",
                        "--provider", "codex", "--model", "gpt-5.6-terra", "--effort", "medium",
                        "--launch-surface", "codex_exec", "--task-class", "roundtrip-test",
@@ -513,19 +645,55 @@ class LedgerCli(unittest.TestCase):
             self.assertEqual(validate.returncode, 0, validate.stdout)
             summary = run([*base, "summary"])
             routes = json.loads(summary.stdout)["routes"]
-            self.assertEqual(routes["codex/gpt-5.6-terra"]["outcome"]["pass"], 1)
+            key = next(iter(routes))
+            self.assertIn("codex/gpt-5.6-terra@medium", key)
+            self.assertEqual(routes[key]["outcome"]["pass"], 1)
 
     def test_record_outcome_for_unknown_decision_fails(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(dir="/tmp") as tmp:
             ledger = str(Path(tmp) / "ledger.jsonl")
             result = run([str(SCRIPTS / "outcome_ledger.py"), "--ledger", ledger,
-                          "--allow-test-dir", tmp,
                           "record-outcome", "--decision-id", "d-nope",
                           "--status", "observed", "--quality", "pass",
                           "--evidence-source", "x",
                           "--actual-provider", "codex", "--actual-model", "gpt-5.6-terra",
                           "--actual-effort", "medium"])
             self.assertEqual(result.returncode, 1)
+
+    def test_record_decision_rejects_duplicate_before_append(self):
+        with tempfile.TemporaryDirectory(dir="/tmp") as tmp:
+            ledger = str(Path(tmp) / "ledger.jsonl")
+            command = [
+                str(SCRIPTS / "outcome_ledger.py"), "--ledger", ledger,
+                "record-decision", "--decision-id", "d-duplicate-test",
+                "--role", "impl", "--routing-tier", "2",
+                "--provider", "codex", "--model", "gpt-5.6-terra",
+                "--effort", "medium", "--launch-surface", "codex_exec",
+                "--task-class", "duplicate-test", "--decided-at", NOW,
+                "--quota-source", "test",
+            ]
+            first, second = run(command), run(command)
+            self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+            self.assertEqual(second.returncode, 1)
+            self.assertIn("duplicate decision_id", second.stdout)
+            self.assertEqual(len(Path(ledger).read_text(encoding="utf-8").splitlines()), 1)
+
+    def test_outcome_route_record_rejects_duplicate_before_append(self):
+        with tempfile.TemporaryDirectory(dir="/tmp") as tmp:
+            ledger = Path(tmp) / "route-decisions.jsonl"
+            command = [
+                str(SCRIPTS / "outcome_route.py"),
+                "--quota-fixture", str(FIXTURES / "quota-snapshot.frozen.json"),
+                "--ledger", str(FIXTURES / "outcome-ledger.sample.jsonl"),
+                "--role", "impl", "--tier", "2",
+                "--task-class", "bounded-implementation", "--now", NOW,
+                "--record", "--record-ledger", str(ledger),
+            ]
+            first, second = run(command), run(command)
+            self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+            self.assertEqual(second.returncode, 1)
+            self.assertIn("duplicate decision_id", second.stderr)
+            self.assertEqual(len(ledger.read_text(encoding="utf-8").splitlines()), 1)
 
 
 if __name__ == "__main__":
