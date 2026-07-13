@@ -21,7 +21,10 @@
   五项并补 normal/`python -S` 对抗 fixtures，code target 为 `b7c7c7a`。G1 已用同一
   malformed-draft fixture 在两个新顶层 Claude sessions 证明默认 deny/显式 SKIP allow；G2 已用
   实际指向注册表的 opaque `--pathspec-from-file` 在第三个 session 证明 deny，三者都绑定
-  `b7c7c7a`。下一门槛是全 strict gates、提交 evidence-only direct child 并做新的独立 final review。
+  `b7c7c7a`。evidence-only direct child `f31e5d3` 已纳入上述八份 raw/debug 与 SHA256；
+  SHA256、normal/`python -S` self-test、G1/G2 guard regression、continuity probes、adapter sync、
+  strict doc-lifecycle/harness/anatomy/governance、same-commit 与 diff/clean 检查均通过。下一门槛仅为
+  exact HEAD `f31e5d3` 的独立 final fresh review；未获 `APPROVE` 前仍保持 implementing、不得合入。
 - 权威状态注册表：`memory/doc-lifecycle.yaml`（brief/plan/review/decision 四类统一，语义见 `plans/ANATOMY.md`）。
 - 其余存量 plan 均已 `verified`，decisions 均 `approved`（详见注册表）。
 - 本节由 agent 在状态流转时更新；compact/clear 后 `context_continuity.py` 会把本文件回注新上下文。
@@ -55,8 +58,8 @@
 ## 未合入 blocker
 
 - #13：C1-C3/X1-X3/G1-G2 真实 runtime evidence 已 8/8 PASS；`8b4c55b` exact HEAD final
-  review 的五个 MAJOR 已由 `b7c7c7a` 修复，G1/G2 已绑定该 target 重跑。仍须全 strict gates、
-  evidence-only child 与 exact HEAD fresh `APPROVE`，否则不得合入。
+  review 的五个 MAJOR 已由 `b7c7c7a` 修复，G1/G2 已绑定该 target 重跑；evidence-only child
+  `f31e5d3` 的 SHA256 与全 strict gates 已通过。仍须 exact HEAD 独立 fresh `APPROVE`，否则不得合入。
 - #18 `cebe427`：raw-evidence 绑定 validator 的代码 MAJOR 已修复并获 code APPROVE；仍须纳入
   #13 hook 兼容修复，在最终 exact target 完成 C1-C7/X1-X7、`--require-fresh` exit 0 与 fresh
   final review。未取得这些证据前不得合入。
@@ -421,8 +424,9 @@ kind/category/blocker/target_path 都按当前树重算；
 
 本轮由 Codex 接管已停止的 Paseo agent，并使用隔离 worktree 的 native subagents 做实现/终审切片。
 截至当前：#12/#12b/#12c/#14/#15/#16/#17 已 fresh `APPROVE` 并合入本地 main；#13 的
-C1-C3/X1-X3/G1-G2 真实 runtime smoke 已 8/8 PASS，正在修复 exact `8b4c55b` final review 的
-五个代码/状态 MAJOR；#18 仍待纳入 #13 hook 后完成最终 runtime 矩阵与 fresh review。
+C1-C3/X1-X3/G1-G2 真实 runtime smoke 已 8/8 PASS，五个 final-review MAJOR 已在 `b7c7c7a`
+修复并由 evidence-only `f31e5d3` 绑定 raw evidence、通过全 strict gates，正在等待 exact HEAD
+独立 final fresh review；#18 仍待纳入 #13 hook 后完成最终 runtime 矩阵与 fresh review。
 
 ## Open issues / blockers（issue #12 part A，本轮新增）
 
