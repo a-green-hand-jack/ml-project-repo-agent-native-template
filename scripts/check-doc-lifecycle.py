@@ -12,15 +12,18 @@
 1. 注册表可解析、无制表符；id 唯一；kind/status 枚举合法。
 2. path 指向真实存在的文件；upstream/downstream/superseded_by 指向注册表内真实条目（悬空即错）。
 3. approved/implementing/verified 必须有非占位 approval 证据引用。
-4. plan 类在 approved/implementing 态必须有非空、非占位的
+4. 活跃 plan（approved/implementing）的 issue 必须是非占位规范坐标、branch 必须是现存
+   Git ref；implementing 的 worktree 必须是 `git worktree list` 中绑定同一 branch 的真实条目。
+   issue 是远端实体，离线 validator 只锁定 `#N`/GitHub issue URL，不发网络请求。
+5. plan 类在 approved/implementing 态必须有非空、非占位的
    「## Allowed paths」「## Forbidden paths」「## 验证标准」段（verified/superseded 是历史态，不追溯）。
-5. 过期 approval（human 拍板：唯一触发）：上游引用被标 superseded → 本条 approved/implementing 失效。
-6. approved/implementing 态的「## Human 批注区」不得残留 `[?]` / `[改]` 未决批注
+6. 过期 approval（human 拍板：唯一触发）：上游引用被标 superseded → 本条 approved/implementing 失效。
+7. approved/implementing 态的「## Human 批注区」不得残留 `[?]` / `[改]` 未决批注
    （格式约定 + 模式匹配，不做语义分类；防止未收敛被误判为已收敛）。
-7. 文档状态锚点必须与注册表一致（矛盾即错）；四类文档（导航四件套除外）必须登记。
-8. kind 必须与路径类别一致（plans/ 只能登记 kind=plan，human/decisions/ 只能 kind=decision，
+8. 文档状态锚点必须与注册表一致（矛盾即错）；四类文档（导航四件套除外）必须登记。
+9. kind 必须与路径类别一致（plans/ 只能登记 kind=plan，human/decisions/ 只能 kind=decision，
    以此类推；防止谎报 kind 绕过 plan 必填段校验）。路径不在四类目录内才允许自由声明 kind（告警）。
-9. 存在四类受管文档但注册表缺失 → error（非 strict 也 fail）：注册表一旦建立就是治理面，
+10. 存在四类受管文档但注册表缺失 → error（非 strict 也 fail）：注册表一旦建立就是治理面，
    缺失/被删即异常。
 
 复用 check_release_gates / check_regression_matrix 的「占位符容忍 + 非默认态需真实证据」范式：
@@ -45,6 +48,7 @@ from __future__ import annotations
 import os
 import re
 import shlex
+import subprocess
 import sys
 from pathlib import Path
 
@@ -58,6 +62,12 @@ APPROVAL_REQUIRED = {"approved", "implementing", "verified"}
 # scope/forbidden/verification 必填 + 批注收敛 + 过期 approval 检查只作用于「进行中的授权工作」；
 # verified/superseded 是历史事实，不追溯重写正文（存量回填据此可行）。
 SCOPE_REQUIRED = {"approved", "implementing"}
+# 活跃 plan 的执行坐标必须能在本地离线核验。verified 是历史态：branch/worktree 合并后可清理，
+# 不追溯要求它们继续存在；此时由 approval 中的 commit/PR/test 证据承担历史可追溯性。
+ACTIVE_PLAN_ASSOC_REQUIRED = {"approved", "implementing"}
+ISSUE_REF = re.compile(
+    r"(?:#[1-9]\d*|https://github\.com/[^/\s]+/[^/\s]+/issues/[1-9]\d*)\Z"
+)
 
 REQUIRED_PLAN_SECTIONS = ("Allowed paths", "Forbidden paths", "验证标准")
 ANNOTATION_SECTION = "Human 批注区"
@@ -74,6 +84,17 @@ LIST_FIELDS = ("upstream", "downstream")
 
 def _is_placeholder(value) -> bool:
     return isinstance(value, str) and value.strip().startswith("<")
+
+
+def _is_missing_or_placeholder(value) -> bool:
+    if value is None:
+        return True
+    text = str(value).strip()
+    return (
+        not text
+        or _is_placeholder(text)
+        or text.lower() in {"none", "null", "n/a", "na", "tbd", "todo", "-"}
+    )
 
 
 # ---------------------------------------------------------------- 注册表解析
@@ -243,6 +264,106 @@ def annotation_conflict(text: str, *, whole_doc: bool = True) -> bool:
 
 # ---------------------------------------------------------------- 校验规则
 
+def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(
+            ["git", "-C", str(repo), *args],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return subprocess.CompletedProcess(["git", *args], 127, "", "git unavailable")
+
+
+def _branch_exists(repo: Path, branch: str) -> bool:
+    """只接受一个真实 Git ref；活跃 plan 不允许用自由文本拼多个 branch。"""
+    branch = branch.strip()
+    if not branch or any(ch.isspace() for ch in branch):
+        return False
+    refs = [branch] if branch.startswith("refs/") else [
+        f"refs/heads/{branch}",
+        f"refs/remotes/{branch}",
+    ]
+    return any(_git(repo, "show-ref", "--verify", "--quiet", ref).returncode == 0 for ref in refs)
+
+
+def _worktree_records(repo: Path) -> list[tuple[Path, str | None]]:
+    proc = _git(repo, "worktree", "list", "--porcelain")
+    if proc.returncode != 0:
+        return []
+    records: list[tuple[Path, str | None]] = []
+    path: Path | None = None
+    branch: str | None = None
+    for line in [*proc.stdout.splitlines(), ""]:
+        if line.startswith("worktree "):
+            path = Path(line[len("worktree "):]).resolve()
+        elif line.startswith("branch "):
+            branch = line[len("branch "):].strip()
+        elif not line and path is not None:
+            records.append((path, branch))
+            path, branch = None, None
+    return records
+
+
+def _worktree_candidates(repo: Path, raw: str) -> set[Path]:
+    path = Path(raw.strip())
+    if path.is_absolute():
+        return {path.resolve()}
+    candidates = {(repo / path).resolve()}
+    common = _git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if common.returncode == 0 and common.stdout.strip():
+        # linked worktree 的 common dir 位于主 checkout 的 .git；registry 路径以主 checkout 为基准。
+        candidates.add((Path(common.stdout.strip()).resolve().parent / path).resolve())
+    return candidates
+
+
+def _worktree_matches(repo: Path, raw: str, branch: str) -> bool:
+    candidates = _worktree_candidates(repo, raw)
+    expected_branch = branch if branch.startswith("refs/") else f"refs/heads/{branch}"
+    return any(path in candidates and actual_branch == expected_branch
+               for path, actual_branch in _worktree_records(repo))
+
+
+def _active_plan_association_errors(e: dict, repo: Path) -> list[str]:
+    """活跃 plan 的 issue/branch/worktree 关联合同。
+
+    issue 是远端实体，离线 validator 不做网络请求；以非占位、规范 `#N`/GitHub issue URL
+    锁定明确坐标。branch/worktree 是本地实体，分别核验 Git ref 与 `git worktree list`，且
+    implementing worktree 必须绑定同一 branch。
+    """
+    eid = str(e.get("id") or "<no-id>")
+    status = e.get("status")
+    if e.get("kind") != "plan" or status not in ACTIVE_PLAN_ASSOC_REQUIRED:
+        return []
+
+    errors: list[str] = []
+    issue = e.get("issue")
+    branch = e.get("branch")
+    worktree = e.get("worktree")
+    if _is_missing_or_placeholder(issue):
+        errors.append(f"{eid}: status={status} 的活跃 plan 缺非占位 issue 关联")
+    elif not ISSUE_REF.fullmatch(str(issue).strip()):
+        errors.append(
+            f"{eid}: issue 关联格式非法：{issue}（应为 #N 或 https://github.com/<owner>/<repo>/issues/N）"
+        )
+
+    if _is_missing_or_placeholder(branch):
+        errors.append(f"{eid}: status={status} 的活跃 plan 缺非占位 branch 关联")
+    elif not _branch_exists(repo, str(branch)):
+        errors.append(f"{eid}: branch 不存在或不是单一 Git ref：{branch}")
+
+    if status == "implementing" and _is_missing_or_placeholder(worktree):
+        errors.append(f"{eid}: status=implementing 的 plan 缺非占位 worktree 关联")
+    elif not _is_missing_or_placeholder(worktree) and not _is_missing_or_placeholder(branch):
+        if not _worktree_matches(repo, str(worktree), str(branch)):
+            errors.append(
+                f"{eid}: worktree 不存在、未登记，或未绑定 branch={branch}：{worktree}"
+            )
+    return errors
+
+
 def registry_errors(entries: list[dict], repo: Path, *, check_paths: bool = True) -> list[str]:
     errs: list[str] = []
     ids: dict[str, dict] = {}
@@ -282,6 +403,7 @@ def registry_errors(entries: list[dict], repo: Path, *, check_paths: bool = True
         sb = e.get("superseded_by")
         if sb and str(sb) not in ids:
             errs.append(f"{eid}: superseded_by 引用不存在的条目：{sb}（悬空引用）")
+        errs += _active_plan_association_errors(e, repo)
     # 过期 approval（唯一触发，human 拍板）：上游被标 superseded → 本条进阶态失效。
     for e in entries:
         if e.get("status") in SCOPE_REQUIRED:
@@ -499,21 +621,40 @@ def _find_seq(haystack: list[str], needle: list[str], start: int) -> int:
     return -1
 
 
+def _unique_anchor(haystack: list[str], anchor: str, start: int) -> int:
+    matches = [i for i in range(start, len(haystack)) if haystack[i] == anchor]
+    return matches[0] if len(matches) == 1 else -1
+
+
 def _reconstruct_update(current: str, hunk_lines: list[str]) -> str | None:
     """按 apply_patch Update 语义把 hunk 应用到 current，返回 patch 后全文。
-    无法可靠重建（上下文对不上/行前缀不明/纯新增无定位）返回 None——调用方**保守拦截**，
-    不再用「旧全文+新增行」联合语料（那会先读到旧状态，静默放行状态跃迁，见初审 MAJOR-1）。"""
+    `@@ <anchor>` 是 apply_patch 的 section 定位符，不是可丢弃的装饰：先唯一定位 anchor，
+    再在其后匹配 hunk 的旧序列。anchor 缺失或重复时无法证明与真实 patch 落点一致，返回 None
+    让调用方保守拦截。上下文对不上/行前缀不明/纯新增无定位同理。
+
+    不再用「旧全文+新增行」联合语料（那会先读到旧状态，静默放行状态跃迁，见初审
+    MAJOR-1）；也不忽略 anchor 后从文件头匹配重复片段（fresh review 回归）。
+    """
     orig = current.split("\n")
-    hunks: list[list[str]] = [[]]
+    hunks: list[tuple[str | None, list[str]]] = []
+    anchor: str | None = None
+    body: list[str] = []
     for ln in hunk_lines:
         if ln.startswith("@@"):
-            if hunks[-1]:
-                hunks.append([])
+            if body:
+                hunks.append((anchor, body))
+            anchor = ln[2:].strip() or None
+            # 数字 unified-diff header 不是本 parser 承诺支持的 apply_patch section anchor。
+            if anchor and re.match(r"^-\d+(?:,\d+)?\s+\+\d+(?:,\d+)?\s+@@", anchor):
+                return None
+            body = []
         else:
-            hunks[-1].append(ln)
+            body.append(ln)
+    if body:
+        hunks.append((anchor, body))
     out: list[str] = []
     pos = 0
-    for hunk in hunks:
+    for anchor, hunk in hunks:
         if not hunk:
             continue
         old_seq: list[str] = []
@@ -533,7 +674,13 @@ def _reconstruct_update(current: str, hunk_lines: list[str]) -> str | None:
                 return None  # 行前缀不属于 apply_patch 语法，语义不明
         if not old_seq:
             return None  # 纯新增且无上下文行，无法可靠定位
-        idx = _find_seq(orig, old_seq, pos)
+        search_from = pos
+        if anchor is not None:
+            anchor_idx = _unique_anchor(orig, anchor, pos)
+            if anchor_idx < 0:
+                return None  # 非空 anchor 缺失/重复：不能猜真实 apply_patch 落点
+            search_from = anchor_idx + 1
+        idx = _find_seq(orig, old_seq, search_from)
         if idx < 0:
             return None  # hunk 上下文与当前文件对不上
         out.extend(orig[pos:idx])
@@ -556,6 +703,12 @@ _REGISTRY_REMOVE_MSG = (
 )
 # Bash 侧只拦「删除/移走注册表」这一件可判定的事；其余 Bash 写入由 validator 兜底。
 _DELETIONISH = {"rm", "unlink", "shred", "srm", "truncate", "mv"}
+_SHELL_WRAPPERS = {"command", "exec"}
+_ENV_FLAGS_WITH_VALUE = {"-u", "--unset", "-C", "--chdir", "-S", "--split-string"}
+_GIT_GLOBAL_FLAGS_WITH_VALUE = {
+    "-C", "-c", "--config-env", "--exec-path", "--git-dir", "--work-tree",
+    "--namespace", "--super-prefix", "--list-cmds", "--attr-source",
+}
 
 
 def _is_registry_path(raw: str, repo: Path) -> bool:
@@ -563,6 +716,82 @@ def _is_registry_path(raw: str, repo: Path) -> bool:
         return True
     p = (raw or "").strip().strip('"').strip("'")
     return p == REGISTRY_REL or p.endswith("/" + REGISTRY_REL)
+
+
+def _strip_command_wrapper_options(args: list[str]) -> list[str]:
+    i = 0
+    while i < len(args) and args[i] in {"-p", "--"}:
+        i += 1
+    return args[i:]
+
+
+def _strip_env_wrapper(args: list[str]) -> list[str]:
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--":
+            return args[i + 1:]
+        if re.match(r"^[A-Za-z_]\w*=", arg):
+            i += 1
+            continue
+        if arg in {"-i", "--ignore-environment", "-0", "--null"}:
+            i += 1
+            continue
+        if arg in _ENV_FLAGS_WITH_VALUE:
+            if i + 1 >= len(args):
+                return []
+            i += 2
+            continue
+        if any(arg.startswith(flag + "=") for flag in _ENV_FLAGS_WITH_VALUE if flag.startswith("--")):
+            i += 1
+            continue
+        break
+    return args[i:]
+
+
+def _unwrap_command(seg: list[str]) -> tuple[str, list[str]]:
+    """展开前导 assignment 与 `command`/`exec`/`env` wrapper，返回实际命令与参数。"""
+    remaining = list(seg)
+    for _ in range(8):  # wrapper 可嵌套；有界循环避免畸形输入拖住 hook
+        while remaining and re.match(r"^[A-Za-z_]\w*=", remaining[0]):
+            remaining.pop(0)
+        if not remaining:
+            return "", []
+        name = remaining[0].rsplit("/", 1)[-1]
+        args = remaining[1:]
+        if name in _SHELL_WRAPPERS:
+            remaining = _strip_command_wrapper_options(args)
+            continue
+        if name == "env":
+            remaining = _strip_env_wrapper(args)
+            continue
+        return name, args
+    return "", []
+
+
+def _git_subcommand(args: list[str]) -> tuple[str, list[str]]:
+    """跳过 git 全局选项，定位 subcommand；覆盖 `git -C . rm` 等合法形态。"""
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--":
+            i += 1
+            break
+        if not arg.startswith("-") or arg == "-":
+            return arg, args[i + 1:]
+        if arg in _GIT_GLOBAL_FLAGS_WITH_VALUE:
+            if i + 1 >= len(args):
+                return "", []
+            i += 2
+            continue
+        if any(arg.startswith(flag + "=") for flag in _GIT_GLOBAL_FLAGS_WITH_VALUE
+               if flag.startswith("--")):
+            i += 1
+            continue
+        i += 1  # 无参数全局 flag，如 --literal-pathspecs
+    if i < len(args):
+        return args[i], args[i + 1:]
+    return "", []
 
 
 def _bash_reason(cmd: str, repo: Path) -> str | None:
@@ -582,16 +811,10 @@ def _bash_reason(cmd: str, repo: Path) -> str | None:
         else:
             segs[-1].append(t)
     for seg in segs:
-        i = 0
-        while i < len(seg) and re.match(r"^[A-Za-z_]\w*=", seg[i]):
-            i += 1  # 跳过前导 env 赋值
-        seg = seg[i:]
-        if not seg:
-            continue
-        name = seg[0].rsplit("/", 1)[-1]
-        args = seg[1:]
-        if name == "git" and args[:1] == ["rm"]:
-            name, args = "rm", args[1:]
+        name, args = _unwrap_command(seg)
+        if name == "git":
+            subcommand, args = _git_subcommand(args)
+            name = subcommand.rsplit("/", 1)[-1]
         if name not in _DELETIONISH:
             continue
         if any(not a.startswith("-") and _is_registry_path(a, repo) for a in args):
@@ -724,6 +947,9 @@ docs:
     path: plans/demo.zh.md
     kind: plan
     status: approved
+    issue: "#123"
+    branch: feat/demo
+    worktree: .
     approval: "human 批准（demo）"
     upstream: []
     downstream: []
@@ -735,6 +961,24 @@ def _mk(root: Path, files: dict[str, str]) -> None:
         p = root / rel
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(text, encoding="utf-8")
+
+
+def _init_fixture_git(root: Path) -> None:
+    subprocess.run(
+        ["git", "init", "-q", "-b", "feat/demo", str(root)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        [
+            "git", "-C", str(root), "-c", "user.name=doc-lifecycle-fixture",
+            "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-qm", "fixture",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
 
 
 def self_test() -> int:
@@ -751,6 +995,7 @@ def self_test() -> int:
         td = tempfile.TemporaryDirectory()
         root = Path(td.name)
         _mk(root, files)
+        _init_fixture_git(root)
         return td, root
 
     print("[check-doc-lifecycle] self-test（内嵌 fixtures）")
@@ -906,6 +1151,39 @@ def self_test() -> int:
     )
     check("hook 保守拦 apply_patch(Update 无法重建全文)",
           pretooluse_reason("apply_patch", {"command": bad_ctx}, root) is not None)
+
+    # fresh review 回归：`@@ <anchor>` 必须把重复片段定位到指定 section，不能丢 anchor 后改第一处。
+    anchored_doc = _OK_PLAN.replace(
+        "## Human 批注区\n\n- [OK] 同意",
+        "## Notes\n\n- [OK] 同意\n\n## Human 批注区\n\n- [OK] 同意",
+    )
+    (root / "plans/demo.zh.md").write_text(anchored_doc, encoding="utf-8")
+    anchored_patch = (
+        "*** Begin Patch\n*** Update File: plans/demo.zh.md\n@@ ## Human 批注区\n"
+        "-- [OK] 同意\n+- [改] 仍未收敛\n*** End Patch"
+    )
+    anchored_result = _reconstruct_update(
+        anchored_doc,
+        ["@@ ## Human 批注区", "-- [OK] 同意", "+- [改] 仍未收敛"],
+    )
+    check(
+        "apply_patch Update 尊重 @@ anchor 定位重复片段",
+        anchored_result is not None
+        and "## Notes\n\n- [OK] 同意" in anchored_result
+        and "## Human 批注区\n\n- [改] 仍未收敛" in anchored_result,
+    )
+    check(
+        "hook 拦 anchored Update 在 Human 批注区引入 [改]",
+        pretooluse_reason("apply_patch", {"command": anchored_patch}, root) is not None,
+    )
+    ambiguous = anchored_doc.replace("## Notes", "## Human 批注区")
+    check(
+        "重复非空 anchor 时保守拒绝重建",
+        _reconstruct_update(
+            ambiguous,
+            ["@@ ## Human 批注区", "-- [OK] 同意", "+- [改] 仍未收敛"],
+        ) is None,
+    )
     td.cleanup()
 
     # 14. hook：apply_patch Update 注册表 → 重建全文判定（初审 MAJOR-1 PoC：悬空 upstream）
@@ -940,6 +1218,16 @@ def self_test() -> int:
     check("hook 拦 Bash mv 注册表",
           pretooluse_reason("Bash", {"command": f"cd /x && mv {REGISTRY_REL} /tmp/"}, root)
           is not None)
+    for wrapped in (
+        f"git -C . rm {REGISTRY_REL}",
+        f"git --literal-pathspecs rm {REGISTRY_REL}",
+        f"command rm {REGISTRY_REL}",
+        f"env rm {REGISTRY_REL}",
+    ):
+        check(
+            f"hook 拦 Bash wrapper/global-option 绕过：{wrapped.split()[0:3]}",
+            pretooluse_reason("Bash", {"command": wrapped}, root) is not None,
+        )
     check("hook 放行 Bash 只读触碰注册表",
           pretooluse_reason(
               "Bash", {"command": f"cat {REGISTRY_REL} && grep status {REGISTRY_REL}"}, root
@@ -962,7 +1250,44 @@ def self_test() -> int:
           errs == [] and any("自由声明" in w for w in warns))
     td.cleanup()
 
-    # 17. 注册表缺失（初审 MAJOR-2）：有受管文档 → error；完全未启用 → 不报
+    # 17. 活跃 plan 关联：issue 非占位规范坐标、branch 真实存在、implementing worktree
+    # 必须是 git worktree 且绑定同一 branch；verified 历史态允许清理临时实体。
+    implementing_plan = _OK_PLAN.replace("Status: approved", "Status: implementing")
+    implementing_reg = _OK_REGISTRY.replace("status: approved", "status: implementing")
+    td, root = fresh({"plans/demo.zh.md": implementing_plan, REGISTRY_REL: implementing_reg})
+    errs, _ = validate_repo(root)
+    check("implementing plan 的真实 issue/branch/worktree 关联通过", errs == [])
+
+    for label, bad_reg, needle in (
+        ("issue 占位", implementing_reg.replace('issue: "#123"', 'issue: "<issue>"'), "issue"),
+        ("branch 不存在", implementing_reg.replace("branch: feat/demo", "branch: feat/missing"), "branch"),
+        ("worktree 缺失", implementing_reg.replace("worktree: .", "worktree: null"), "worktree"),
+        ("worktree 未登记", implementing_reg.replace("worktree: .", "worktree: missing"), "worktree"),
+    ):
+        (root / REGISTRY_REL).write_text(bad_reg, encoding="utf-8")
+        errs, _ = validate_repo(root)
+        check(f"implementing plan 的{label}被报错", any(needle in e for e in errs))
+        check(
+            f"hook 拦 implementing plan 的{label}注册表写入",
+            pretooluse_reason(
+                "Write", {"file_path": str(root / REGISTRY_REL), "content": bad_reg}, root
+            ) is not None,
+        )
+    td.cleanup()
+
+    verified_plan = _OK_PLAN.replace("Status: approved", "Status: verified")
+    verified_reg = (
+        _OK_REGISTRY.replace("status: approved", "status: verified")
+        .replace('issue: "#123"', "issue: null")
+        .replace("branch: feat/demo", "branch: feat/already-deleted")
+        .replace("worktree: .", "worktree: null")
+    )
+    td, root = fresh({"plans/demo.zh.md": verified_plan, REGISTRY_REL: verified_reg})
+    errs, _ = validate_repo(root)
+    check("verified 历史 plan 不追溯要求临时 branch/worktree 存活", errs == [])
+    td.cleanup()
+
+    # 18. 注册表缺失（初审 MAJOR-2）：有受管文档 → error；完全未启用 → 不报
     td, root = fresh({"plans/demo.zh.md": _OK_PLAN})
     errs, _ = validate_repo(root)
     check("有受管文档但注册表缺失升级为 error", any("缺失" in e for e in errs))

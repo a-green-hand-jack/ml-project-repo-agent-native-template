@@ -3,8 +3,9 @@
 
 覆盖两层：
 - **安全地板**（sudo/pip/rm/push/受保护路径/curl|sh）：doc-lifecycle 改动不得弱化旧行为；
-- **doc-lifecycle 层**（issue #13）：含初审（Codex gpt-5.6-sol high）4 条 MAJOR 的 PoC 负向用例
-  （apply_patch Update 状态跃迁绕过、注册表 Update 悬空引用、删除注册表、kind 谎报）。
+- **doc-lifecycle 层**（issue #13）：含初审（Codex gpt-5.6-sol high）4 条 MAJOR 与 fresh
+  review 的 PoC 负向用例（`@@ <anchor>` 重复片段定位、Bash wrapper/git 全局选项删除绕过、
+  implementing plan 的实体关联）。
 
 判定层单元 fixtures 见 `scripts/check-doc-lifecycle.py --self-test`（临时目录内自包含）；
 本脚本是对真实 repo 内 hook 的端到端面：会在 `plans/` 下临时创建
@@ -25,9 +26,35 @@ HOOK = REPO / ".claude" / "hooks" / "pre_tool_guard.py"
 REGISTRY = "memory/doc-lifecycle.yaml"
 TMP_PLAN = REPO / "plans" / ".guard-regression-tmp.zh.md"
 TMP_PLAN_REL = "plans/.guard-regression-tmp.zh.md"
+TMP_ANCHOR_PLAN = REPO / "plans" / ".guard-regression-anchor-tmp.zh.md"
+TMP_ANCHOR_PLAN_REL = "plans/.guard-regression-anchor-tmp.zh.md"
 
 # 无必填段的 verified 文档：flip 到 approved 必须被拦（初审 MAJOR-1 PoC 场景）。
 TMP_PLAN_TEXT = "# guard regression tmp\n\nStatus: verified · 2026-07-13 · synthetic\n"
+TMP_ANCHOR_PLAN_TEXT = """# guard anchor regression tmp
+
+Status: approved · 2026-07-13 · synthetic human approval
+
+## Allowed paths
+
+- plans/.guard-regression-anchor-tmp.zh.md
+
+## Forbidden paths
+
+- lab/data/**
+
+## Notes
+
+- [OK] repeated fragment
+
+## Human 批注区
+
+- [OK] repeated fragment
+
+## 验证标准
+
+- synthetic
+"""
 
 
 def run(tool: str, tool_input: dict, env_extra: dict | None = None) -> int:
@@ -56,6 +83,15 @@ def main() -> int:
     reg_ok_patch = (
         f"*** Begin Patch\n*** Update File: {REGISTRY}\n@@\n"
         f"-{registry_first_line}\n+{registry_first_line} \n*** End Patch"
+    )
+    anchor_patch = (
+        f"*** Begin Patch\n*** Update File: {TMP_ANCHOR_PLAN_REL}\n@@ ## Human 批注区\n"
+        "-- [OK] repeated fragment\n+- [改] unresolved\n*** End Patch"
+    )
+    bad_assoc_patch = (
+        f"*** Begin Patch\n*** Update File: {REGISTRY}\n@@\n"
+        "-    branch: feat/13-plan-lifecycle-state\n+    branch: feat/missing-lifecycle-branch\n"
+        "*** End Patch"
     )
     kind_lie_registry = (
         f"docs:\n  - id: lie\n    path: {TMP_PLAN_REL}\n    kind: decision\n"
@@ -86,19 +122,32 @@ def main() -> int:
          {"command": flip_patch}, 2, None),
         ("PoC-1b: apply_patch Update 注册表悬空 upstream 拦", "apply_patch",
          {"command": reg_dangling_patch}, 2, None),
+        ("fresh-review-1: apply_patch Update 尊重 @@ anchor，Human 批注 [改] 被拦", "apply_patch",
+         {"command": anchor_patch}, 2, None),
         ("PoC-2: apply_patch Delete 注册表拦", "apply_patch",
          {"command": f"*** Begin Patch\n*** Delete File: {REGISTRY}\n*** End Patch"}, 2, None),
         ("PoC-2: Bash rm 注册表拦", "Bash", {"command": f"rm {REGISTRY}"}, 2, None),
+        ("fresh-review-2a: git -C . rm 注册表拦", "Bash",
+         {"command": f"git -C . rm {REGISTRY}"}, 2, None),
+        ("fresh-review-2b: git --literal-pathspecs rm 注册表拦", "Bash",
+         {"command": f"git --literal-pathspecs rm {REGISTRY}"}, 2, None),
+        ("fresh-review-2c: command rm 注册表拦", "Bash",
+         {"command": f"command rm {REGISTRY}"}, 2, None),
+        ("fresh-review-2d: env rm 注册表拦", "Bash",
+         {"command": f"env rm {REGISTRY}"}, 2, None),
         ("PoC-2: Bash rm 注册表 + DOC_LIFECYCLE_SKIP=1 显式放行", "Bash",
          {"command": f"rm {REGISTRY}"}, 0, {"DOC_LIFECYCLE_SKIP": "1"}),
         ("PoC-3: Write 注册表 kind 谎报拦", "Write",
          {"file_path": REGISTRY, "content": kind_lie_registry}, 2, None),
+        ("fresh-review-3: implementing plan 的不存在 branch 关联拦", "apply_patch",
+         {"command": bad_assoc_patch}, 2, None),
         # —— 不误拦面 ——
         ("dl: apply_patch Update 注册表合规放行", "apply_patch", {"command": reg_ok_patch}, 0, None),
     ]
     failures = 0
     print("[doc-lifecycle guard regression] pre_tool_guard 端到端 synthetic")
     TMP_PLAN.write_text(TMP_PLAN_TEXT, encoding="utf-8")
+    TMP_ANCHOR_PLAN.write_text(TMP_ANCHOR_PLAN_TEXT, encoding="utf-8")
     try:
         for name, tool, tin, want, env_extra in cases:
             got = run(tool, tin, env_extra)
@@ -107,6 +156,7 @@ def main() -> int:
             print(f"  {'PASS' if ok else 'FAIL'}  {name} (exit {got}, want {want})")
     finally:
         TMP_PLAN.unlink(missing_ok=True)
+        TMP_ANCHOR_PLAN.unlink(missing_ok=True)
     print(f"[doc-lifecycle guard regression] {'OK' if not failures else 'FAIL'} — {failures} failure(s)")
     return 1 if failures else 0
 

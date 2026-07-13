@@ -30,9 +30,13 @@ clear 探针 stdout 头部（截取）：
 
 ## hook 拦截面探针（pre_tool_guard × doc-lifecycle）
 
-- 命令：`python3 scripts/check-doc-lifecycle.py --self-test`（判定层，内嵌 fixtures，30/30 PASS，
-  含初审 4 个 PoC 的负向用例）+ `python3 lab/evals/doc-lifecycle/run-guard-regression.py`
-  （对 `.claude/hooks/pre_tool_guard.py` 的端到端 stdin 回归：安全地板 11 例 +
-  doc-lifecycle 9 例，2026-07-13 实跑 20/20 PASS——安全地板旧行为零弱化，4 个 PoC 全部转红）。
+- 命令：`python3 scripts/check-doc-lifecycle.py --self-test`（判定层，内嵌 fixtures，47/47 PASS，
+  含初审 4 个 PoC + fresh review 的 `@@ <anchor>` 重复片段、wrapper/global-option 删除绕过、
+  活跃 plan issue/branch/worktree 关联负向用例）+
+  `python3 lab/evals/doc-lifecycle/run-guard-regression.py`（对
+  `.claude/hooks/pre_tool_guard.py` 的端到端 stdin 回归：安全地板 11 例 + doc-lifecycle 15 例，
+  2026-07-13 实跑 26/26 PASS——安全地板旧行为零弱化，fresh review PoC 全部转红）。
 - Claude 与 Codex 表面共用同一物理 hook 文件（`.claude/settings.json` 与 `.codex/config.toml`
   分别挂 PreToolUse），synthetic 探针对两侧等价；差异只剩 runtime 接线/trust，见 checklist。
+- **证据边界不变：**真实 Claude/Codex fresh/clear/compact 与 hook trust 冒烟仍未执行，属于
+  `runtime-smoke-checklist.md` 明示的 merge blocker；本记录不把 synthetic 结果冒充 runtime PASS。

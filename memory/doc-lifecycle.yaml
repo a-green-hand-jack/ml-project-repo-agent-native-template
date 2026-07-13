@@ -10,7 +10,10 @@
 # 状态枚举：draft → in-review → approved → implementing → verified；superseded 为终态。
 # 字段（每条 docs[]）：
 #   id / path / kind(brief|plan|review|decision) / status
-#   issue / branch / worktree —— 关联坐标（自由文本，可为 null）
+#   issue / branch / worktree —— 执行关联坐标。活跃 plan（approved/implementing）的 issue
+#     必须是非占位 `#N` 或 GitHub issue URL，branch 必须是现存 Git ref；implementing 的
+#     worktree 必须是 `git worktree list` 中绑定该 branch 的真实条目。verified 是历史态，
+#     合并后允许 branch/worktree 被清理，历史事实由 approval 的 commit/PR/test 引用承担。
 #   approval —— human gate 证据引用（approved/implementing/verified 必填、非占位）
 #   upstream / downstream —— 注册表内其他条目 id（必须真实存在；上游被标 superseded
 #     时，本条 approved/implementing 视为过期 approval，需重新走 human gate）

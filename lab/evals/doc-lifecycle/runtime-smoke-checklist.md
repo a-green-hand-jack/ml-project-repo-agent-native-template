@@ -6,6 +6,9 @@
 > runtime 接线（matcher、hook trust、注入是否真正进上下文）。以下每项由监控员在合并前跑一次，
 > 把证据填进模板后连同 PR 一起给 human 复核。
 
+**当前状态：下列 8 项仍全部未跑，是 merge blocker。** synthetic probe、adapter parity、governance
+通过都不能替代这些真实 Claude/Codex session 证据；本实现 worker 不伪造、不代填 PASS。
+
 ## 待跑清单
 
 - [ ] **C1 Claude fresh startup**：在 repo 根新开 Claude Code session，不带任何历史。
