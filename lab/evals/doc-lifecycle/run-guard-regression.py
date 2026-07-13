@@ -124,6 +124,11 @@ def main() -> int:
         "    kind: plan\n    status: verified\n    approval: TODO\n"
         "    upstream: []\n    downstream: []\n"
     )
+    draft_registry = (
+        f"docs:\n  - id: draft-fields\n    path: {TMP_ANCHOR_PLAN_REL}\n"
+        "    kind: plan\n    status: draft\n    issue: null\n    branch: null\n"
+        "    worktree: null\n    approval: null\n    upstream: []\n    downstream: []\n"
+    )
     prose_approval_registry = placeholder_approval_registry.replace(
         "approval: TODO", 'approval: "review completed after checking TODO handling"'
     )
@@ -152,6 +157,15 @@ def main() -> int:
         "upstream-map": placeholder_approval_registry.replace(
             "upstream: []", "upstream: {bad: ref}"
         ),
+    }
+    draft_non_scalar_registries = {
+        field: draft_registry.replace(f"{field}: null", f"{field}: {bad_value}")
+        for field, bad_value in (
+            ("issue", "[]"),
+            ("branch", "{}"),
+            ("worktree", "[]"),
+            ("approval", "{}"),
+        )
     }
     quoted_scalar_registries = {
         value: placeholder_approval_registry.replace("approval: TODO", f'approval: "{value}"')
@@ -184,6 +198,14 @@ def main() -> int:
     fenced_only_anchor_plan = (
         "# fenced-only status\n\n```text\n"
         "Status: draft · 2026-07-13 · example only\n```\n"
+    )
+    blockquoted_only_anchor_plan = (
+        "# blockquoted-only status\n\n"
+        "> Status: draft · 2026-07-13 · example only\n"
+    )
+    real_plus_blockquoted_anchor_plan = (
+        TMP_ANCHOR_PLAN_TEXT
+        + "\n> Status: draft · 2026-07-13 · blockquoted example only\n"
     )
     placeholder_section_plan = TMP_ANCHOR_PLAN_TEXT.replace(
         "- plans/.guard-regression-anchor-tmp.zh.md", "- [ ] TODO"
@@ -338,6 +360,14 @@ def main() -> int:
          {"command": "git rm -- 'memory/doc-lifecycle.*'"}, 2, None),
         ("fresh-review-2n12: git :(glob) pathspec registry rm 拦", "Bash",
          {"command": "git rm -- ':(glob)memory/doc-lifecycle.y*'"}, 2, None),
+        ("exact-head: git rm pathspec file fail-closed", "Bash",
+         {"command": "git rm --pathspec-from-file=/tmp/doc-lifecycle-paths"}, 2, None),
+        ("exact-head: git rm separate pathspec file fail-closed", "Bash",
+         {"command": "git rm --pathspec-from-file /tmp/doc-lifecycle-paths"}, 2, None),
+        ("exact-head: git rm stdin pathspec fail-closed", "Bash",
+         {"command": "git rm --pathspec-from-file=-"}, 2, None),
+        ("exact-head: git rm NUL stdin pathspec fail-closed", "Bash",
+         {"command": "git rm --pathspec-from-file=- --pathspec-file-nul"}, 2, None),
         ("fresh-review-2n13: rm -rf registry ancestor memory 拦", "Bash",
          {"command": "rm -rf memory"}, 2, None),
         ("fresh-review-2n14: mv registry ancestor memory 拦", "Bash",
@@ -455,6 +485,8 @@ def main() -> int:
          {"file_path": TMP_ANCHOR_PLAN_REL, "content": late_anchor_plan}, 2, None),
         ("final-review: fenced 示例不能冒充正文状态锚点", "Write",
          {"file_path": TMP_ANCHOR_PLAN_REL, "content": fenced_only_anchor_plan}, 2, None),
+        ("exact-head: blockquoted 示例不能冒充正文状态锚点", "Write",
+         {"file_path": TMP_ANCHOR_PLAN_REL, "content": blockquoted_only_anchor_plan}, 2, None),
         ("fresh-review-6a: registry approval=TODO 拦", "Write",
          {"file_path": REGISTRY, "content": placeholder_approval_registry}, 2, None),
         ("fresh-review-6b: plan section checkbox TODO 拦", "Write",
@@ -531,6 +563,8 @@ def main() -> int:
          {"file_path": TMP_ANCHOR_PLAN_REL, "content": legitimate_table_plan}, 0, None),
         ("control: ref 以 TBD detector prose 开头放行", "Write",
          {"file_path": TMP_ANCHOR_PLAN_REL, "content": tbd_detector_ref_plan}, 0, None),
+        ("control: 真实锚点加 blockquoted 示例不误判重复", "Write",
+         {"file_path": TMP_ANCHOR_PLAN_REL, "content": real_plus_blockquoted_anchor_plan}, 0, None),
         ("control: unquoted approval 1.2e3 按 PyYAML 保持 string", "Write",
          {"file_path": REGISTRY, "content": exponent_string_registry}, 0, None),
         ("control: quoted approval 内 # 保持正文", "Write",
@@ -544,6 +578,11 @@ def main() -> int:
     for label, content in malformed_field_registries.items():
         cases.append((
             f"exact-head: registry 非标量字段 {label} fail-closed", "Write",
+            {"file_path": REGISTRY, "content": content}, 2, None,
+        ))
+    for field, content in draft_non_scalar_registries.items():
+        cases.append((
+            f"exact-head: draft registry 非标量 {field} fail-closed", "Write",
             {"file_path": REGISTRY, "content": content}, 2, None,
         ))
     for label, content in quoted_scalar_registries.items():
@@ -573,8 +612,31 @@ def main() -> int:
             ("第二份合法重复 docs", REGISTRY, duplicate_docs_registry),
             ("重复/歧义状态锚点", TMP_ANCHOR_PLAN_REL, duplicate_anchor_plan),
             ("fenced 示例冒充状态锚点", TMP_ANCHOR_PLAN_REL, fenced_only_anchor_plan),
+            ("blockquoted 示例冒充状态锚点", TMP_ANCHOR_PLAN_REL, blockquoted_only_anchor_plan),
         ):
             got = run_no_site("Write", {"file_path": path, "content": content})
+            ok = got == 2
+            failures += 0 if ok else 1
+            print(
+                "  "
+                f"{'PASS' if ok else 'FAIL'}  real python -S hook: {name} fail-closed "
+                f"(exit {got}, want 2)"
+            )
+        for field, content in draft_non_scalar_registries.items():
+            got = run_no_site("Write", {"file_path": REGISTRY, "content": content})
+            ok = got == 2
+            failures += 0 if ok else 1
+            print(
+                "  "
+                f"{'PASS' if ok else 'FAIL'}  real python -S hook: draft registry 非标量 "
+                f"{field} fail-closed (exit {got}, want 2)"
+            )
+        for name, command in (
+            ("pathspec file", "git rm --pathspec-from-file=/tmp/doc-lifecycle-paths"),
+            ("stdin pathspec", "git rm --pathspec-from-file=-"),
+            ("NUL stdin pathspec", "git rm --pathspec-from-file=- --pathspec-file-nul"),
+        ):
+            got = run_no_site("Bash", {"command": command})
             ok = got == 2
             failures += 0 if ok else 1
             print(

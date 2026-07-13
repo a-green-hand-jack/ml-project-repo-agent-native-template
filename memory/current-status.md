@@ -13,14 +13,13 @@
   默认非法 Write deny、仅显式 `DOC_LIFECYCLE_SKIP=1` allow、registry delete deny 均有顶层
   Claude Code session hook raw evidence。
   raw 转录、debug log 与 sha256 见 `lab/evals/doc-lifecycle/evidence-20260713-runtime-probes.md`。
-  evidence-only `d57957c` 的独立 fresh review 认可 raw/duplicate-root/Null/非标量/wrapper
-  证据，但发现三个 MAJOR：detached exact clone 的 branch/worktree 绑定失败、本文旧段仍称
-  runtime smoke 缺失、状态锚点不要求顶部且不唯一。本轮修复已加入 detached exact + 双亲
-  synthetic merge + remote 分叉对抗 fixtures、唯一顶部锚点/fenced 示例对抗 fixtures，并删除
-  下方旧状态矛盾。新 code target `6950825` 的 G1 默认 deny + 独立 SKIP allow、G2 registry
-  delete deny 已由三个顶层 Claude session 真实重跑，reject/delete clones clean、skip 产物只在
-  disposable clone；下一门槛是提交 raw gzip+SHA evidence-only direct child、重跑全 strict gates
-  并做独立 exact HEAD final review。
+  evidence-only `8b4c55b` 已完成全 strict gates 与独立 exact HEAD final review；reviewer 认可
+  48 份 raw 的 SHA256、G1/G2 与 continuity 证据，但以 `CHANGES_REQUESTED` 报告五个 MAJOR：
+  `git rm --pathspec-from-file` 不透明删除绕过、blockquoted Status 示例冒充锚点、octopus
+  detached merge 冒充双亲 synthetic merge、draft 等非活跃态的 issue/branch/worktree/approval
+  非标量 fail-open，以及本文仍指向已完成的 evidence-only 步骤。本轮 code target 同步修复这
+  五项并补 normal/`python -S` 对抗 fixtures；下一门槛是提交代码、在精确新 target 重跑 G1/G2、
+  全 strict gates，再提交 evidence-only direct child 并做新的独立 final review。
 - 权威状态注册表：`memory/doc-lifecycle.yaml`（brief/plan/review/decision 四类统一，语义见 `plans/ANATOMY.md`）。
 - 其余存量 plan 均已 `verified`，decisions 均 `approved`（详见注册表）。
 - 本节由 agent 在状态流转时更新；compact/clear 后 `context_continuity.py` 会把本文件回注新上下文。
@@ -53,9 +52,9 @@
 
 ## 未合入 blocker
 
-- #13：C1-C3/X1-X3/G1-G2 真实 runtime evidence 已 8/8 PASS；`d57957c` final review 的三个
-  MAJOR 已由 `6950825` 修复，detached/anchor 双模式对抗 fixtures 与 exact-target G1/G2 均通过。
-  当前仅剩 evidence-only direct child 的全 strict gates 与 exact HEAD fresh APPROVE。
+- #13：C1-C3/X1-X3/G1-G2 真实 runtime evidence 已 8/8 PASS；`8b4c55b` exact HEAD final
+  review 为 `CHANGES_REQUESTED`，五个 MAJOR 正在本轮修复。必须在新 code target 重跑 G1/G2、
+  全 strict gates，提交 evidence-only child 并取得 exact HEAD fresh `APPROVE` 后才能合入。
 - #18 `cebe427`：raw-evidence 绑定 validator 的代码 MAJOR 已修复并获 code APPROVE；仍须纳入
   #13 hook 兼容修复，在最终 exact target 完成 C1-C7/X1-X7、`--require-fresh` exit 0 与 fresh
   final review。未取得这些证据前不得合入。
@@ -420,8 +419,8 @@ kind/category/blocker/target_path 都按当前树重算；
 
 本轮由 Codex 接管已停止的 Paseo agent，并使用隔离 worktree 的 native subagents 做实现/终审切片。
 截至当前：#12/#12b/#12c/#14/#15/#16/#17 已 fresh `APPROVE` 并合入本地 main；#13 的
-C1-C3/X1-X3/G1-G2 真实 runtime smoke 已 8/8 PASS，正在修复 exact `d57957c` final review 的
-三个代码/状态 MAJOR；#18 仍待纳入 #13 hook 后完成最终 runtime 矩阵与 fresh review。
+C1-C3/X1-X3/G1-G2 真实 runtime smoke 已 8/8 PASS，正在修复 exact `8b4c55b` final review 的
+五个代码/状态 MAJOR；#18 仍待纳入 #13 hook 后完成最终 runtime 矩阵与 fresh review。
 
 ## Open issues / blockers（issue #12 part A，本轮新增）
 

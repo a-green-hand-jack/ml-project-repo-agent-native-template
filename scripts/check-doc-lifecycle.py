@@ -79,9 +79,9 @@ ANNOTATION_SECTION = "Human 批注区"
 NAV_BASENAMES = {"README.md", "AGENTS.md", "CLAUDE.md", "ANATOMY.md"}
 DOC_DIRS = ("plans", "human/briefs", "human/reviews", "human/decisions")
 
-STATUS_PREFIX = re.compile(r"^\s*>?\s*Status[:：]")
+STATUS_PREFIX = re.compile(r"^\s*Status[:：]")
 STATUS_LINE = re.compile(
-    r"^\s*>?\s*Status[:：]\s*([A-Za-z-]+)\s*·\s*"
+    r"^\s*Status[:：]\s*([A-Za-z-]+)\s*·\s*"
     r"(\d{4}-\d{2}-\d{2})\s*·\s*(.*?)\s*$"
 )
 UNRESOLVED_MARK = re.compile(r"^\s*(?:[-*]\s*)?\[(?:\?|改)\]", re.MULTILINE)
@@ -652,7 +652,7 @@ def _worktree_matches(repo: Path, raw: str, branch: str) -> bool:
                 return True
             parents = _git(repo, "rev-list", "--parents", "-n", "1", head)
             fields = parents.stdout.split() if parents.returncode == 0 else []
-            if len(fields) >= 3 and target in fields[1:]:
+            if len(fields) == 3 and target in fields[1:]:
                 return True
         return False
     candidates = _worktree_candidates(repo, raw)
@@ -741,6 +741,10 @@ def registry_errors(entries: list[dict], repo: Path, *, check_paths: bool = True
             errs.append(f"{eid}: path 应为非空字符串，实际：{path!r}")
         elif check_paths and not (repo / path).is_file():
             errs.append(f"{eid}: path 指向不存在的文件：{path}（悬空引用）")
+        for field in ("issue", "branch", "worktree", "approval"):
+            raw_value = e.get(field)
+            if raw_value is not None and not isinstance(raw_value, str):
+                errs.append(f"{eid}: {field} 应为字符串或 null，实际：{raw_value!r}")
         # kind 与路径类别一致性：四类目录内的文档不允许谎报 kind（否则可绕过 plan 必填段校验）。
         if isinstance(path, str) and isinstance(kind, str) and kind in KINDS:
             expected = doc_kind(path)
@@ -1622,6 +1626,13 @@ def _bash_reason(cmd: str, repo: Path) -> str | None:
             continue
         if name not in _DELETIONISH:
             continue
+        if git_command and any(
+            arg == "--pathspec-from-file" or arg.startswith("--pathspec-from-file=")
+            for arg in args
+        ):
+            # Opaque file/stdin pathspecs cannot be proven not to select the registry. This also
+            # covers --pathspec-file-nul because the source itself is already uninspectable here.
+            return _REGISTRY_REMOVE_MSG
         recursive = name == "rm" and any(
             arg == "--recursive"
             or (arg.startswith("-") and not arg.startswith("--") and "r" in arg.lower())
@@ -2092,6 +2103,9 @@ def self_test() -> int:
         "git rm :(literal)memory/doc-lifecycle.yaml",
         "git rm -- 'memory/doc-lifecycle.*'",
         "git rm -- ':(glob)memory/doc-lifecycle.y*'",
+        "git rm --pathspec-from-file=/tmp/doc-lifecycle-paths",
+        "git rm --pathspec-from-file /tmp/doc-lifecycle-paths",
+        "git rm --pathspec-from-file=- --pathspec-file-nul",
         "rm -rf memory",
         "mv memory /tmp/memory-away",
         "git rm -r memory",
@@ -2406,6 +2420,43 @@ def self_test() -> int:
     errs, _ = validate_repo(clone)
     check("detached synthetic merge 的直接 feature parent 通过 worktree=. 绑定", errs == [])
 
+    extra_parents = []
+    for message in ("octopus side one", "octopus side two"):
+        extra_parents.append(
+            subprocess.run(
+                [
+                    "git", "-C", str(clone), "-c", "user.name=doc-lifecycle-fixture",
+                    "-c", "user.email=fixture@example.invalid", "commit-tree", tree,
+                    "-p", base_commit, "-m", message,
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+        )
+    octopus_commit = subprocess.run(
+        [
+            "git", "-C", str(clone), "-c", "user.name=doc-lifecycle-fixture",
+            "-c", "user.email=fixture@example.invalid", "commit-tree", tree,
+            "-p", base_commit, "-p", target,
+            "-p", extra_parents[0], "-p", extra_parents[1],
+            "-m", "synthetic octopus merge",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    subprocess.run(
+        ["git", "-C", str(clone), "checkout", "--detach", "-q", octopus_commit],
+        check=True,
+        capture_output=True,
+    )
+    errs, _ = validate_repo(clone)
+    check(
+        "detached octopus merge 不冒充双亲 synthetic merge",
+        any("worktree" in e for e in errs),
+    )
+
     linear_commit = subprocess.run(
         [
             "git", "-C", str(clone), "-c", "user.name=doc-lifecycle-fixture",
@@ -2528,6 +2579,11 @@ def self_test() -> int:
             "# demo plan\n\n```text\nStatus: draft · 2026-07-12 · example only\n```\n",
             "缺状态锚点",
         ),
+        (
+            "仅 blockquoted 示例",
+            "# demo plan\n\n> Status: draft · 2026-07-12 · example only\n",
+            "缺状态锚点",
+        ),
     )
     for label, malformed, needle in ambiguous_anchors:
         td, root = fresh({"plans/demo.zh.md": malformed, REGISTRY_REL: _OK_REGISTRY})
@@ -2545,6 +2601,7 @@ def self_test() -> int:
         _OK_PLAN
         + "\n```text\nStatus: draft · 2026-07-13 · example only\n```\n"
         + "\n> ```text\n> Status: verified · 2026-07-13 · quoted example only\n> ```\n"
+        + "\n> Status: draft · 2026-07-13 · blockquoted example only\n"
         + "\n<!-- Status: superseded · 2026-07-13 · commented example only -->\n"
     )
     td, root = fresh({"plans/demo.zh.md": fenced_example, REGISTRY_REL: _OK_REGISTRY})
@@ -2726,6 +2783,46 @@ def self_test() -> int:
         check(
             f"受限 parser 非标量 registry {label} 同样拒绝",
             any(needle in e for e in restricted_errors),
+        )
+        td.cleanup()
+
+    draft_registry = (
+        _OK_REGISTRY.replace("status: approved", "status: draft")
+        .replace('issue: "#123"', "issue: null")
+        .replace("branch: feat/demo", "branch: null")
+        .replace("worktree: .", "worktree: null")
+        .replace('approval: "human 批准（demo）"', "approval: null")
+    )
+    for field, bad_value in (
+        ("issue", "[]"),
+        ("branch", "{}"),
+        ("worktree", "[]"),
+        ("approval", "{}"),
+    ):
+        malformed_registry = draft_registry.replace(f"{field}: null", f"{field}: {bad_value}")
+        td, root = fresh({
+            "plans/demo.zh.md": _OK_PLAN.replace("Status: approved", "Status: draft"),
+            REGISTRY_REL: malformed_registry,
+        })
+        entries, perr = parse_registry_text(malformed_registry)
+        typed_errors = registry_errors(entries, root) if not perr else perr
+        check(
+            f"draft registry 非标量 {field} 在默认 parser fail-closed",
+            any(f"{field} 应为字符串或 null" in e for e in typed_errors),
+        )
+        restricted_entries, restricted_perr = _parse_restricted(malformed_registry)
+        restricted_errors = (
+            registry_errors(restricted_entries, root) if not restricted_perr else restricted_perr
+        )
+        check(
+            f"draft registry 非标量 {field} 在受限 parser fail-closed",
+            any(f"{field} 应为字符串或 null" in e for e in restricted_errors),
+        )
+        check(
+            f"hook 拦 draft registry 非标量 {field}",
+            pretooluse_reason(
+                "Write", {"file_path": str(root / REGISTRY_REL), "content": malformed_registry}, root
+            ) is not None,
         )
         td.cleanup()
 
