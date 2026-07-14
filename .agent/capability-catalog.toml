@@ -15,27 +15,17 @@
 schema_version = 1
 profile = "research"
 
-# 消费 research-writing-bridge 的 chassis-spec：绑定不可变 commit + v1 spec 文件 blob digest。
-# Bridge issue #3/#6 虽仍 OPEN，但 chassis/v1 与 compatibility/matrix 的 repo bytes 已存在，
-# 以 commit/bytes 为事实。升级 chassis 走本 pin/compatibility gate（见 check-capability-catalog.py）。
+# 消费 research-writing-bridge 的 chassis-spec：catalog 只引用窄 lock artifact
+# `.agent/chassis-lock.toml`（human-reviewed provenance owner），不 vendor spec 正文。
+# validator 结构化加载 lock，要求 source/pin/paths/blob OID/compatibility 精确一致。
 [chassis_spec]
+lock = ".agent/chassis-lock.toml"
+lock_id = "bridge-chassis-v1"
 source = "a-green-hand-jack/research-writing-bridge"
+pin = "5e02b52e6026a0581b6fa33987ce997f52b547a3"   # 必须精确等于 lock.commit
 spec_issue = 3
 version_pins_issue = 6
 promotion_lifecycle_issue = 7
-status = "pinned"
-spec_version = "v1"
-pin = "5e02b52e6026a0581b6fa33987ce997f52b547a3"   # Bridge main 不可变 commit
-# pinned spec 文件 → git blob digest（gh api contents .sha @ pin，可离线判定的固定 ref）
-[chassis_spec.spec_files]
-"chassis/v1/spec.md" = "c444645e44411ffb6e87086c8744f5e622e95d56"
-"chassis/v1/capability.schema.json" = "a99e120560703f0a0ddf80d25adfb12709a7c0b2"
-"compatibility/matrix.json" = "7bc86077ebf61cef826c098028d6821351d57101"
-# 本地按 compatibility/matrix.json 的 supported 条目消费 chassis 1.0.0（major 必须在本地支持范围）。
-[chassis_spec.compatibility]
-chassis = "1.0.0"
-protocol = "1.0.0"
-status = "supported"
 
 # ============================ agents（16）============================
 

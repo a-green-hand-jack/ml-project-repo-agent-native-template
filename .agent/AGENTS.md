@@ -35,6 +35,8 @@ doctrine 是分文件的，每个文件一个关注点，短而稳定、可 revi
 - `.agent/capability-catalog.toml` — 声明式能力目录（canonical）：所有正式
   agent/skill/command/hook 的 contract 登记与 adapter parity，由
   `scripts/check-capability-catalog.py`（并入 `validate-governance`）强制，见 issue #28。
+  它引用 `.agent/chassis-lock.toml` — Bridge chassis-spec 的窄 lock artifact（commit +
+  blob OID + 支持范围，human-reviewed provenance owner，validator 不联网）。
 
 ## 与其他平面的关系
 

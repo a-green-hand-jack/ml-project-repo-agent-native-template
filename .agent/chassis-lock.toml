@@ -1,0 +1,29 @@
+# chassis-lock.toml — research-writing-bridge chassis-spec 的窄 lock artifact
+#
+# 这是 checked-in、human-reviewed 的 provenance owner：validator 不联网，以本文件的
+# commit + blob OID 为事实。绑定不可变 ref，不 vendor spec 正文。Bridge issue #3/#6 虽仍
+# OPEN，但 chassis/v1 与 compatibility/matrix 的 repo bytes 已存在，以 commit/bytes 为准。
+#
+# 复核（有 Bridge checkout/mirror 时）：
+#   git -C <bridge> cat-file -e 5e02b52e6026a0581b6fa33987ce997f52b547a3
+#   git -C <bridge> rev-parse 5e02b52...:chassis/v1/spec.md   # 应等于下方 blobs OID
+# catalog（.agent/capability-catalog.toml）只引用 lock_id/commit；升级 chassis 改本文件后
+# 由 check-capability-catalog.py 强制 source/pin/paths/blob OID/compatibility 精确一致。
+
+lock_id = "bridge-chassis-v1"
+source = "a-green-hand-jack/research-writing-bridge"
+commit = "5e02b52e6026a0581b6fa33987ce997f52b547a3"
+spec_version = "v1"
+
+# pinned spec 文件 → exact git blob OID @ commit（不是内容哈希，是 git object id）。
+[blobs]
+"chassis/v1/spec.md" = "c444645e44411ffb6e87086c8744f5e622e95d56"
+"chassis/v1/capability.schema.json" = "a99e120560703f0a0ddf80d25adfb12709a7c0b2"
+"compatibility/matrix.json" = "7bc86077ebf61cef826c098028d6821351d57101"
+
+# 本地按 compatibility/matrix.json 的 supported 条目消费 chassis 1.0.0。
+[compatibility]
+chassis = "1.0.0"
+protocol = "1.0.0"
+status = "supported"
+supported_chassis_range = ">=1.0.0 <2.0.0"
