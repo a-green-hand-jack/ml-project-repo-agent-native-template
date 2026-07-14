@@ -3,10 +3,10 @@
 > **活文件**。这是当前状态的单一真相源。每次 session 结束、compact 前、完成小目标时更新。
 > fresh session 应能只读本文件 + `session-tree.md` 就接续工作。
 
-## 当前 plan 指针（doc-lifecycle，fresh session 先看这里）
+## 最近完成 plan（doc-lifecycle，fresh session 先看这里）
 
-- 当前活跃 plan：`plans/20260712-plan-lifecycle-state.zh.md`（issue #13）· status: **implementing** ·
-  branch `feat/13-plan-lifecycle-state`（worktree `.claude/worktrees/13-plan-lifecycle-state`）。
+- 最近完成 plan：`plans/20260712-plan-lifecycle-state.zh.md`（issue #13）· status: **verified** ·
+  approved source `3704d33` · local main merge `8ee6760`。
 - 2026-07-14 主控审计确认：原 issue 是轻量生命周期/审批证据；注册表 Bash 删除 guard 是初审后
   追加的防御性扩展，逐命令完备化导致非收敛 review/evidence 循环。旧执行 agent 已中断，保持 idle。
 - human 随后明确回复“ok do it”，首次真实批准冻结边界：PreToolUse 只拦单次调用可独立判定的局部
@@ -14,21 +14,22 @@
   仅保留现有常见路径尽力拦截，不再扩展 Shell parser。
 - `c9a8bf2` 提交说明及接班 agent 的旧 status 在 human 回答前声称“human 拍板 Option 1”，属于错误
   provenance；本收口改动显式纠正，不把后续授权追溯成先前授权。
-- 既有 C1-C3/X1-X3 与 G1/G2 runtime 证据仍保留在
-  `lab/evals/doc-lifecycle/evidence-20260713-runtime-probes.md`；本轮不改 hook 行为，只补合同边界与
-  回归。收口候选已通过 lifecycle self-test、真实 hook regression、launch/continuity probes、adapter
-  sync 及 strict harness/anatomy/doc-lifecycle/governance；合并前仍必须把独立 fresh `APPROVE` 绑定到
-  待合入的 exact HEAD。
+- 既有 C1-C3/X1-X3 与 G1/G2 runtime 证据保留在
+  `lab/evals/doc-lifecycle/evidence-20260713-runtime-probes.md`。source `3704d33` 已获独立 fresh
+  `APPROVE`；human 明确授权后以双亲 merge `8ee6760` 合入，合并 tree 与 source 完全一致。
+- 合并提交上 lifecycle self-test normal/`python -S` 各 410 PASS、真实 hook regression 242 PASS、
+  launch 66/66、continuity 8/8；adapter sync、strict harness/anatomy/doc-lifecycle/governance、
+  same-commit 与 py_compile 全绿。
 - 权威状态注册表：`memory/doc-lifecycle.yaml`（brief/plan/review/decision 四类统一，语义见 `plans/ANATOMY.md`）。
 - 其余存量 plan 均已 `verified`，decisions 均 `approved`（详见注册表）。
 - 本节由 agent 在状态流转时更新；compact/clear 后 `context_continuity.py` 会把本文件回注新上下文。
 
 ## 当前 objective
 
-九个 human 指定 feature 的本地集成已完成七个：#12/#12b/#12c/#14/#15/#16/#17 均有 fresh
-`APPROVE`、已进入本地 `main`，对应 feature branch/worktree 已删除。#13/#18 未获最终 APPROVE，
-保留 clean branch/worktree 与可复现 blocker；禁止伪造 fresh-session/隔离环境证据。冻结快照见
-`memory/handoffs/20260713-local-issue-integration-codex.md`。
+九个 human 指定 feature 的本地集成已完成八个：#12/#12b/#12c/#13/#14/#15/#16/#17 均有 fresh
+`APPROVE` 并已进入本地 `main`。早先七个 feature branch/worktree 已删除；#13 worktree 暂留，等待
+单独的清理授权。当前只剩 #18 的最终 runtime/隔离证据与 fresh review；禁止伪造证据。冻结快照见
+`memory/handoffs/20260713-local-issue-integration-codex.md`，最新进度以本文件为准。
 
 ## 最终 release gate（human 明确授权，尚未满足）
 
@@ -38,7 +39,16 @@
 - semver 判级由 human 覆盖：从 `v1.3.0` 起每个 feat 计一个 PATCH，最终目标 `v1.3.9`。
 - 仅在发布级矩阵全绿后更新 `VERSION/CHANGELOG`，并只对最终 release commit 创建一个本地
   annotated tag `v1.3.9`；不建中间 tag，不 push main/tag，不建 release。
-- 当前 `VERSION` 仍为 `v1.3.0`，HEAD 无 tag；#13/#18 blocker 未清除前不得发版或打 tag。
+- 当前 `VERSION` 仍为 `v1.3.0`，HEAD 无 tag；#18 blocker 未清除前不得发版或打 tag。
+
+## #13 本地集成（2026-07-14）
+
+- exact source `3704d33317dde678c0f88e80c7d69d63842e8f1f` 获独立 Codex fresh `APPROVE`，确认
+  hook/validator 边界与错误授权归因均已修正；Bash 删除 guard 明确保留为尽力减速带。
+- human 明确回复“合并 #13”后，本地 `main` 生成双亲 merge
+  `8ee67604e2440c9e28db90127c517e1e68853af8`。merge tree 与 source tree 均为
+  `246c24ccc74b9177c274c44679a164728660b08a`；未 push、未 tag、未 release。
+- 合并提交上的定向回归、runtime probes、adapter/parity、strict governance 与 same-commit 全绿。
 
 ## #17 本地集成（2026-07-13）
 
@@ -51,10 +61,6 @@
 
 ## 未合入 blocker
 
-- #13：2026-07-14 final Codex review 对 `c9a8bf2` 给出 `CHANGES_REQUESTED`（MEDIUM），指出 plan 曾把
-  “状态与注册表矛盾”写成每次工具调用的 hook 责任，而实现有意留给 commit 级 validator。human 已批准
-  按可执行边界收敛合同并停止 Bash parser 扩张；收口门禁已全绿，待合入 exact HEAD 必须有独立 fresh
-  `APPROVE`，否则不得合入。
 - #18 `cebe427`：raw-evidence 绑定 validator 的代码 MAJOR 已修复并获 code APPROVE；仍须纳入
   #13 hook 兼容修复，在最终 exact target 完成 C1-C7/X1-X7、`--require-fresh` exit 0 与 fresh
   final review。未取得这些证据前不得合入。
@@ -418,10 +424,9 @@ kind/category/blocker/target_path 都按当前树重算；
 ## Subagent reports
 
 本轮由 Codex 接管已停止的 Paseo agent，并使用隔离 worktree 的 native subagents 做实现/终审切片。
-截至当前：#12/#12b/#12c/#14/#15/#16/#17 已 fresh `APPROVE` 并合入本地 main；#13 的
-C1-C3/X1-X3 真实 runtime smoke 已 PASS；`df61087` final review 新发现的无标题锚点代码 MAJOR
-已由 `8eea18e` 修复，G1/G2 已补含 exact HEAD、pathspec bytes 与 post-state 的 raw evidence；
-#18 仍待纳入 #13 hook 后完成最终 runtime 矩阵与 fresh review。
+截至当前：#12/#12b/#12c/#13/#14/#15/#16/#17 已 fresh `APPROVE` 并合入本地 main；#13 source
+`3704d33` 以 merge `8ee6760` 集成且组合门禁全绿。#18 仍待纳入 main 上的 #13 hook 后完成最终
+runtime 矩阵与 fresh review。
 
 ## Open issues / blockers（issue #12 part A，本轮新增）
 

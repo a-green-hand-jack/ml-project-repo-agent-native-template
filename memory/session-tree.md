@@ -10,8 +10,8 @@ release/version/tag，远端保持不变。
 
 ## Current phase
 
-七个 feature 已 APPROVE + integrated；#13/#18 因真实 runtime/隔离证据与 #18 validator MAJOR
-保留为 blocker。#16/#17 合并后组合 validator 全绿；release gate 尚未满足。
+八个 feature 已 APPROVE + integrated；#13 source `3704d33` 已以 local merge `8ee6760` 合入并通过
+组合门禁。当前只剩 #18 的 #13 兼容整合、最终 runtime 矩阵与 fresh review；release gate 尚未满足。
 
 ## Children
 
@@ -23,12 +23,12 @@ release/version/tag，远端保持不变。
 | issue-12-bootstrap | Issue #12 part A: new-project bootstrap command (`scripts/bootstrap-project.py` + `bootstrap-project` skill) | local `main` (`3bad60d` merge); feature branch/worktree retired | `plans/20260712-bootstrap-adoption-proof.zh.md` | APPROVE + integrated | Keep remote unchanged until a separate push-main authorization. |
 | issue-12-smoke-contract | Issue #12 part C: structured runtime/smoke contract and real-repo replay | local `main` (`1a72762` merge); feature branch/worktree retired | `plans/20260712-bootstrap-adoption-proof.zh.md` | APPROVE + integrated | Seven original C scenarios were preserved in the combined 27-scenario adoption smoke. |
 | issue-12b-semantic-classification | Issue #12 part B: four-way conservative classification, plan revalidation, safe state paths, shared postflight | local `main` (approved source `f33ff9c`); feature branch/worktree retired after this merge | `plans/20260712-bootstrap-adoption-proof.zh.md` | APPROVE + integrated | Validate the combined B+C behavior; do not push `main` without separate authorization. |
-| issue-13-plan-lifecycle | Document lifecycle state and runtime continuity enforcement | `feat/13-plan-lifecycle-state` / `.claude/worktrees/13-plan-lifecycle-state` at `02626c3` | `plans/20260712-plan-lifecycle-state.zh.md` | REQUEST_CHANGES / blocked | Run real C1-C3/X1-X3/G1-G2 evidence; do not merge or retire before fresh APPROVE. |
+| issue-13-plan-lifecycle | Document lifecycle state and runtime continuity enforcement | local `main` merge `8ee6760`; approved source `3704d33`; feature worktree retained pending separate cleanup authorization | `plans/20260712-plan-lifecycle-state.zh.md` | APPROVE + integrated | Keep remote unchanged; do not reopen the frozen Bash-parser non-goal. |
 | issue-14-multi-agent | Multi-agent control plane | local `main` source `e0a32b5`; feature branch/worktree retired | `plans/20260712-multi-agent-control-plane.zh.md` | APPROVE + integrated | Keep remote unchanged. |
 | issue-15-outcome-routing | Outcome-aware routing | local `main` merge `8b2bb93`; feature branch/worktree retired | `plans/20260712-outcome-aware-routing.zh.md` | APPROVE + integrated | Keep remote unchanged. |
 | issue-16-experiment-control | Experiment lifecycle/control plane | local `main` merge `cbf6ab6`; source `ecf0c80`; feature branch/worktree retired | `plans/20260712-experiment-control-plane.zh.md` | APPROVE + integrated | Four-mode interpreter and strict integration checks passed. |
 | issue-17-evidence-chain | Artifact→evidence→claim→deliverable provenance | local `main` merge `405c542`; source `52f83aa`; feature branch/worktree retired | `plans/20260712-artifact-evidence-chain.zh.md` | APPROVE + integrated | Integration candidate was freshly re-reviewed after #16 status compatibility fix. |
-| issue-18-anatomy-parity | ANATOMY semantic parity and runtime evidence | `feat/18-anatomy-semantic-parity` / `.claude/worktrees/18-anatomy-semantic-parity` at `2bfef30` | `plans/20260712-anatomy-semantic-parity.zh.md` | REQUEST_CHANGES / blocked | Fix evidence-validator fail-closed gap, collect C1-C7/X1-X7 evidence, then fresh review. |
+| issue-18-anatomy-parity | ANATOMY semantic parity and runtime evidence | `feat/18-anatomy-semantic-parity` / `.claude/worktrees/18-anatomy-semantic-parity` at `cebe427` | `plans/20260712-anatomy-semantic-parity.zh.md` | code APPROVE / final runtime pending | Integrate #13 compatibility, complete C1-C7/X1-X7 with `--require-fresh`, then run exact-HEAD fresh review. |
 
 ### Handoff note — issue-12b-semantic-classification（2026-07-13）
 

@@ -126,11 +126,11 @@ docs:
   - id: plan-20260712-plan-lifecycle-state
     path: plans/20260712-plan-lifecycle-state.zh.md
     kind: plan
-    status: implementing
+    status: verified
     issue: "#13"
     branch: feat/13-plan-lifecycle-state
-    worktree: .
-    approval: "human 逐条拍板（plan doc「当前决策」1–11，Plan revision log 2026-07-12 末三条）"
+    worktree: null
+    approval: "human 决策 1–12；source 3704d33 fresh APPROVE；local main merge 8ee6760；集成门禁全绿"
     upstream: []
     downstream: []
     superseded_by: null

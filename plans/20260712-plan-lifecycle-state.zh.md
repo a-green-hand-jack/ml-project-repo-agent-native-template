@@ -1,6 +1,6 @@
 # Plan 生命周期状态（issue #13）交互式计划
 
-Status: implementing · 2026-07-14 · human 拍板批准（见「当前决策」1–12 与 Plan revision log）→ final review 收口
+Status: verified · 2026-07-14 · source `3704d33` fresh `APPROVE`；local main merge `8ee6760`
 
 > 这是 human 与 Claude Code 的协商界面：Claude 写初稿 → human 在「Human 批注区」批注 → Claude 读 diff、收敛 → 每次采纳的修订做一个小 commit。实现只在 scope / forbidden paths / verification 清楚后开始。
 >
@@ -218,10 +218,11 @@ repo 里已经有好几套相邻但不统一的"状态/审批"机制，设计新
 
 ## 下一步
 
-- **全部 open question 已收敛，功能实现与既有 runtime evidence 已完成。** 2026-07-14 审计已冻结
-  验收边界：不再新增 Bash 命令解析；跨文件锚点/注册表一致性由 validator 在 commit 粒度强制。
-- 收口候选必须通过完整门禁并取得独立 exact-HEAD fresh review；只有 verdict 为 `APPROVE`，才可
-  进入本地合并决策。Bash parser 不再作为开放式审查目标。
+- **已完成并合入本地 `main`。** exact source `3704d33` 获独立 fresh `APPROVE`，human 明确授权后
+  生成双亲 merge commit `8ee6760`；合并结果 tree 与 source tree 完全一致。
+- 合并提交已通过 normal/`python -S` lifecycle self-test、真实 hook regression、launch/continuity
+  probes、adapter sync、strict harness/anatomy/doc-lifecycle/governance、same-commit 与 py_compile。
+- Bash 注册表 guard 的冻结边界继续生效：它是尽力减速带，不作为后续开放式 parser 扩张入口。
 
 ## Plan revision log
 
@@ -257,3 +258,4 @@ repo 里已经有好几套相邻但不统一的"状态/审批"机制，设计新
 - 2026-07-13 **evidence HEAD `9dfc432` 独立 final review：`CHANGES_REQUESTED`（1 MAJOR）**。GNU `cp` 接受 `--target-directory` 的无歧义长选项缩写（`--t` 起）且 Bash 会展开 `$PWD`，旧 parser 只认完整 option 并把 shell word 当字面路径，故 `cp --t=memory ...` 与 `cp --target-directory=$PWD/memory ...` 均可覆盖 registry 而 hook 放行。修复统一解析 `--t`/`--pa`/`--no-t` 及更长合法前缀，确定性展开 `$PWD`/`${PWD}`，对其余活动 shell 展开 fail-closed；normal/`python -S` self-test 与真实 hook regression 补 abbreviation、expansion、quoted/escaped literal、repo 外 controls。新 code target 仍须实际重跑 G1/G2、raw evidence、全 strict gates 与独立 final review。
 - 2026-07-13 **最终 code target `821350a` 的 G1/G2 exact-target runtime PASS**。四个全新 disposable clones 与独立顶层 Claude Code 2.1.207 / Opus 4.8 sessions 分别证明 malformed Write 默认 deny、仅进程级 `DOC_LIFECYCLE_SKIP=1` allow、opaque `git rm --pathspec-from-file` deny、原始 `cp --t=$PWD/memory .../doc-lifecycle.yaml` deny；每份有效 typescript 只有一个 tool call，并内嵌 exact HEAD、wrapper 全文+SHA、环境与 pre/post facts。首次 reject 因网络沙箱 `ConnectionRefused` 且零 tool call，不计 PASS但原文保留。十份 raw/debug 以 `gzip -n` 与 SHA256 纳入 direct evidence child；下一门槛仅为全 strict gates 与独立 exact-HEAD final review。
 - 2026-07-14 **human 审计纠偏并明确回复“ok do it”**。审计确认原 issue 是轻量生命周期/审批证据，Bash 注册表删除 guard 是初审后追加的防御性扩展，逐命令完备化导致非收敛 review/evidence 循环。冻结验收边界：hook 只拦单次调用可独立判定的局部不完整；锚点/注册表跨文件一致性由 commit/治理门禁 validator 强制；Bash 删除 guard 仅保留现有尽力减速带，不再扩张。另纠正 `c9a8bf2` 提交说明及接班 status 在 human 回答前错误声称“human 拍板 Option 1”的 provenance；当前授权不追溯使该旧声明变真。
+- 2026-07-14 **exact source `3704d33` fresh `APPROVE` 并完成本地集成**。独立 Codex 审查确认上一轮 MEDIUM 已解决：hook 只判单次调用局部完整性，validator 权威强制跨文件最终一致性；错误 Option 1 provenance 已纠正。human 明确回复“合并 #13”后，本地 `main` 生成双亲 merge `8ee6760`，其 tree 与 source 完全一致。合并提交上 normal/`python -S` lifecycle self-test 各 410 PASS、真实 hook regression 242 PASS、launch gate 66/66、continuity 8/8，adapter sync、strict harness/anatomy/doc-lifecycle/governance、same-commit 与 py_compile 全绿；状态转为 verified。未 push、未打 tag、未 release。
