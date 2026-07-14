@@ -1,5 +1,7 @@
 # 采用 agent-native ML research 模板作为项目控制根
 
+Status: approved · 2026-07-12 · DECISIONS.md 索引 accepted（human）；存量回填（issue #13 doc-lifecycle）
+
 ## Context
 
 作为 AI 方向的博士，研究工作越来越多由 coding agent（Claude Code / Codex 等）在 repo 内推进。若关键上下文（当前状态、决策、任务定义、对外 claim 的证据）只存在于聊天窗口，会随 session 结束、context compact 而丢失，导致 fresh session 无法接续、结论无法追溯、对外表述容易 overclaim。

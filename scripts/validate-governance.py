@@ -11,7 +11,10 @@
    必须指向 claims.yaml 中真实存在的 claim（防止「已判定放行/已判定回归通过」却引用空主张）。
 6. merge 哨兵：template-manifest.toml 标为 merge 的文件必须有成对 template:begin/end 块，
    否则 template-sync 会整体跳过它、模板更新传不到下游（见 template-versioning-policy.md）。
-7. provenance 链（子检查 check-provenance-chain.py）：run→artifact→evidence→claim→
+7. doc lifecycle（子检查 check-doc-lifecycle.py）：brief/plan/review/decision 四类文档的
+   状态锚点与 memory/doc-lifecycle.yaml 注册表一致、引用完整、进阶态证据齐全
+   （见 plans/ANATOMY.md 与 plans/20260712-plan-lifecycle-state.zh.md）。
+8. provenance 链（子检查 check-provenance-chain.py）：run→artifact→evidence→claim→
    deliverable 引用完整性、run 闭环、checksum（统一 sha256）、claim marker。
 
 先跑子检查（作为独立进程，便于单独调用），再跑本文件治理规则。
@@ -385,6 +388,7 @@ def main() -> int:
     strict = "--strict" in sys.argv
     run_subcheck("check-agent-harness.py", strict)
     run_subcheck("check-anatomy-drift.py", strict)
+    run_subcheck("check-doc-lifecycle.py", strict)
     run_subcheck("check-outcome-ledger-schema.py", strict)
     run_subcheck("validate-experiment-state.py", strict)
     run_subcheck("check-provenance-chain.py", strict)

@@ -22,6 +22,7 @@ description: 当要落地一处代码改动时，用来走 issue→branch→work
 - `.agent/repo-editing-guardrails.md`（门禁流程）。
 - `.agent/human-gates.md`（push/PR/merge 审批）。
 - `.agent/anatomy-protocol.md`（同 commit 更新地图）。
+- `memory/doc-lifecycle.yaml`（linked plan doc 的生命周期状态，语义见 `plans/ANATOMY.md`）。
 
 ## 允许修改的路径
 
@@ -31,7 +32,9 @@ description: 当要落地一处代码改动时，用来走 issue→branch→work
 
 ## 步骤
 
-1. issue：先有一个可追溯的 issue/plan。
+1. issue：先有一个可追溯的 issue/plan。linked plan doc 的状态必须 **≥ approved**
+   （查 `memory/doc-lifecycle.yaml` 与文档 `Status:` 锚点）；未 approved 先回 interactive-plan-doc。
+   开始实现时 **agent 自主**把状态转 `implementing`（锚点+注册表同 commit 对齐）。
 2. branch on correct base：按模式选 base——
    - 单 trunk（pairwise-diffusion 式）：`git worktree add ../wt-<slug> -b <slug> <trunk>`。
    - branch-local mainline（DOLoop 式）：base 为 `mainline/<domain>`，如 `git worktree add ../wt-<slug> -b <domain>/<slug> mainline/<domain>`。
@@ -40,12 +43,15 @@ description: 当要落地一处代码改动时，用来走 issue→branch→work
 5. 定向测试 + validator：只跑相关测试，跑 validator。
 6. PR：写清 evidence（跑了什么、结果）与 risks；**human gate**。
 7. review → merge（human gate）→ 归档：更新索引，清理 worktree（`git worktree remove ../wt-<slug>`）。
+   merge 后据验证证据（测试/validator/PR 合入）**agent 自主**把 plan doc 状态转 `verified`；
+   human 审 PR 时复核这些状态流转（`approved` 本身始终是 human gate）。
 
 ## 验证命令
 
 ```
 python scripts/validate-governance.py
 python scripts/check-anatomy-drift.py
+python scripts/check-doc-lifecycle.py
 ```
 
 ## 失败时的 handoff

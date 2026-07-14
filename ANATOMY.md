@@ -1,6 +1,7 @@
 ---
 related_files:
   - human/ANATOMY.md
+  - plans/ANATOMY.md
   - .agent/AGENTS.md
   - .claude/ANATOMY.md
   - .codex/ANATOMY.md
@@ -30,6 +31,7 @@ maintenance: |
 | --- | --- | --- | --- |
 | 入口层 | `AGENTS.md` `CLAUDE.md` `PROJECT.md` `DESIGN.md` | agent/human 入口、项目描述、模板设计说明 | — |
 | 交互层 | `human/` | brief / review / decision / inbox | `human/ANATOMY.md` |
+| 协商层 | `plans/` | 交互式 plan doc + 四类文档生命周期状态（注册表 `memory/doc-lifecycle.yaml`） | `plans/ANATOMY.md` |
 | doctrine 层 | `.agent/` | 行为契约、边界、政策、协议 | `.agent/AGENTS.md` |
 | Claude 能力层 | `.claude/` | canonical subagents / skills / commands / hooks / settings | `.claude/ANATOMY.md` |
 | Codex 适配层 | `.codex/` `.agents/` | Codex config / custom agents / repo skills adapters | `.codex/ANATOMY.md` · `.agents/ANATOMY.md` |

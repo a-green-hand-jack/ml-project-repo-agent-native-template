@@ -1,5 +1,7 @@
 # adopt-existing-repo 迁移能力计划
 
+Status: verified · 2026-07-12 · 已实现并合入 main（commit 93fabae）；存量回填（issue #13 doc-lifecycle）
+
 > 目标：新增一个可分步、可验证、尽量无人值守的迁移能力，把一个已经存在的 repo
 > 收敛成 `ml-project-repo-agent-native-template` 的完整形态，而不是只叠加少量文件。
 

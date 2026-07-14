@@ -9,7 +9,8 @@
 自命名默认开启（human 定 = 选项 A）：指令默认注入；真正 `paseo rename` 由 agent 调
 `agent_name_set.py` 执行，`AGENT_NO_AUTORENAME=1` 可关掉 rename 那步。
 
-注入通道：UserPromptSubmit / SessionStart 的 stdout（exit 0）并入上下文。永远 exit 0、不 raise。
+注入通道：UserPromptSubmit / SessionStart 的结构化 stdout（exit 0）并入上下文。
+永远 exit 0、不 raise。
 """
 import json
 import sys
@@ -21,6 +22,20 @@ import agent_identity  # noqa: E402
 
 DOCTRINE = ".agent/agent-identity.md"
 SETTER = ".claude/hooks/agent_name_set.py"
+
+
+def _emit_context(event: str, message: str) -> None:
+    print(
+        json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": event,
+                    "additionalContext": message,
+                }
+            },
+            ensure_ascii=False,
+        )
+    )
 
 
 def _prompt_marker(session_id: str) -> Path:
@@ -52,7 +67,10 @@ def main() -> None:
     if event == "SessionStart":
         # 已命名 → 重申身份；未命名 → 交给首个 UserPromptSubmit（此刻任务未知）
         if name:
-            print(f"[identity] 你是 **{name}**。据此身份工作、与其它 agent 交流。")
+            _emit_context(
+                "SessionStart",
+                f"[identity] 你是 **{name}**。据此身份工作、与其它 agent 交流。",
+            )
         sys.exit(0)
 
     # 默认视作 UserPromptSubmit
@@ -66,7 +84,7 @@ def main() -> None:
         marker.write_text("1")
     except OSError:
         pass  # 去重尽力而为
-    print(_naming_directive())
+    _emit_context("UserPromptSubmit", _naming_directive())
     sys.exit(0)
 
 

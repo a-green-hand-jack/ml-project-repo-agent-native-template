@@ -1,5 +1,7 @@
 # artifact → evidence → claim → deliverable 端到端完整性 交互式计划
 
+Status: verified · 2026-07-13 · fresh APPROVE 52f83aa；本地 merge 405c542；strict provenance/integration gates 全绿
+
 > 这是 human 与 Claude Code 的协商界面：Claude 写初稿 → human 在文件里批注 → Claude 读 diff、
 > 收敛计划 → 每次采纳的修订做一个小 commit。实现只在 scope / forbidden paths / verification
 > 清楚后开始。

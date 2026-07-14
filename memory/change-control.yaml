@@ -21,6 +21,13 @@ changes:
     anatomy_updated: true
     validator_passed: true
     human_approved: true
+  - id: chg-20260712-doc-lifecycle
+    date: 2026-07-12
+    kind: capability
+    summary: 四类文档（brief/plan/review/decision）生命周期状态：memory/doc-lifecycle.yaml 注册表 + scripts/check-doc-lifecycle.py 校验 + pre_tool_guard doc-lifecycle 机械拦截 + 存量回填（issue #13）
+    anatomy_updated: true
+    validator_passed: true
+    human_approved: true
   - id: chg-20260713-multi-agent-control-plane
     date: 2026-07-13
     kind: capability

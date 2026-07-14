@@ -227,6 +227,12 @@ prefix_rule(
 )
 
 prefix_rule(
+    pattern = [["python", "python3"], "scripts/check-doc-lifecycle.py"],
+    decision = "allow",
+    justification = "Doc lifecycle validator (brief/plan/review/decision status + registry integrity).",
+)
+
+prefix_rule(
     pattern = [["python", "python3"], "scripts/check-provenance-chain.py"],
     decision = "allow",
     justification = "Repo provenance chain validator (read-only, in-process sha256).",

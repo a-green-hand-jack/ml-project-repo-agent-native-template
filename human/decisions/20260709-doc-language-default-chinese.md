@@ -1,5 +1,7 @@
 # 书面文档默认使用中文
 
+Status: approved · 2026-07-12 · DECISIONS.md 索引 accepted（human）；存量回填（issue #13 doc-lifecycle）
+
 ## Context
 
 某次 agent session（不同分支）里，agent 写了两份英文报告，而本 repo 其余文档

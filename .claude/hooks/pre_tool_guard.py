@@ -16,6 +16,11 @@
 exit 0 = 放行。解析失败保守放行。无第三方依赖。push 到受保护分支需
 `CLAUDE_ALLOW_PUSH_MAIN=1` 或 `CODEX_ALLOW_PUSH_MAIN=1`（见 `.agent/autonomous-window.md`）。
 
+另挂 doc-lifecycle 机械拦截（issue #13，安全地板之外的完整性层）：对 brief/plan/review/decision
+四类文档与 memory/doc-lifecycle.yaml 的写入/删除（Edit|Write|apply_patch|Bash），调
+scripts/check-doc-lifecycle.py 的 pretooluse_reason() 拦「状态跃迁到进阶态但完整性不成立」
+「删除/移走注册表」等可判定事实；判定层自身异常保守放行，human 显式绕过 DOC_LIFECYCLE_SKIP=1。
+
 另挂多 agent 冲突/写错-worktree 机械拦截（issue #14，安全地板之外的协作完整性层）：对
 Edit/Write/NotebookEdit/apply_patch 的写入，调 scripts/check-agent-conflicts.py 的
 pretooluse_reason() 拦「写入其他活跃 agent 声明的 owned path / 自己声明的 forbidden path /
@@ -46,6 +51,11 @@ PROTECTED_FILES = (".env",)
 # 受保护分支：push 需 human 明确放行。
 PROTECTED_BRANCHES = {"main", "master"}
 PUSH_ESCAPE_ENVS = ("CLAUDE_ALLOW_PUSH_MAIN", "CODEX_ALLOW_PUSH_MAIN")
+
+# doc-lifecycle 机械拦截（issue #13）：判定本体在 scripts/check-doc-lifecycle.py（runtime-neutral），
+# 这里只做薄接线。路径身份必须交给判定本体解析；字面量预过滤会漏掉 cwd/symlink alias。
+# human 显式绕过：DOC_LIFECYCLE_SKIP=1（判定层内识别）。
+DOC_LIFECYCLE_SCRIPT = REPO_ROOT / "scripts" / "check-doc-lifecycle.py"
 
 # 多 agent 冲突/写错-worktree 机械拦截（issue #14）：判定本体在
 # scripts/check-agent-conflicts.py（runtime-neutral），这里只做薄接线 + 廉价预过滤。
@@ -321,6 +331,25 @@ def _check_bash(raw_cmd: str) -> None:
                 )
 
 
+def _doc_lifecycle_reason(tool: str, tool_input: dict) -> str | None:
+    """doc-lifecycle 完整性拦截（见 plans/20260712-plan-lifecycle-state.zh.md 已决策 2/4）。
+    只拦「状态跃迁到进阶态但状态/引用完整性不成立」这类可判定事实；判定层任何异常
+    保守放行——本函数绝不能反噬上面的安全地板逻辑。"""
+    if not DOC_LIFECYCLE_SCRIPT.is_file():
+        return None
+    try:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("check_doc_lifecycle", DOC_LIFECYCLE_SCRIPT)
+        if spec is None or spec.loader is None:
+            return None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod.pretooluse_reason(tool, tool_input, REPO_ROOT)
+    except Exception:  # noqa: BLE001  判定层失败保守放行
+        return None
+
+
 def _agent_conflict_reason(tool: str, tool_input: dict) -> str | None:
     """多 agent ownership/worktree 完整性拦截（见 plans/20260712-multi-agent-control-plane.zh.md
     已决策 5/6）。只拦「写入其他活跃 agent 的 owned path / 自己的 forbidden path / 写错
@@ -360,15 +389,21 @@ def main() -> None:
 
     if tool == "Bash":
         _check_bash(tool_input.get("command", "") or "")
+        reason = _doc_lifecycle_reason(tool, tool_input)  # 拦 rm/mv 等删除/移走注册表
+        if reason:
+            _block(reason)
     elif tool in ("Edit", "Write", "NotebookEdit"):
         path = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
         if path and _is_protected_file(path):
             _block(
                 f"受保护路径不可写：{path}。bytes/私有/产物只留 index，删改走 human gate。"
             )
-        reason = _agent_conflict_reason(tool, tool_input)
-        if reason:
-            _block(reason)
+        for reason in (
+            _agent_conflict_reason(tool, tool_input),
+            _doc_lifecycle_reason(tool, tool_input),
+        ):
+            if reason:
+                _block(reason)
     elif tool == "apply_patch":
         patch_text = tool_input.get("command", "") or ""
         for path in _patch_paths(patch_text):
@@ -376,9 +411,12 @@ def main() -> None:
                 _block(
                     f"受保护路径不可写：{path}。bytes/私有/产物只留 index，删改走 human gate。"
                 )
-        reason = _agent_conflict_reason(tool, tool_input)
-        if reason:
-            _block(reason)
+        for reason in (
+            _agent_conflict_reason(tool, tool_input),
+            _doc_lifecycle_reason(tool, tool_input),
+        ):
+            if reason:
+                _block(reason)
 
     sys.exit(0)
 

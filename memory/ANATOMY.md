@@ -13,6 +13,7 @@ memory/
 ├── deprecated-practices.md  失效技巧账
 ├── phase-dashboard.yaml     phase 看板（结构化，validator 可读）
 ├── change-control.yaml      变更登记账（结构化，validator 可读）
+├── doc-lifecycle.yaml       brief/plan/review/decision 生命周期注册表（schema 见 plans/ANATOMY.md，由 check-doc-lifecycle.py 校验）
 ├── gc/                      过期状态/handoff 归档区
 ├── branches/                <slug>.md 单分支状态
 ├── handoffs/                <YYYYMMDD>-<slug>.md 交接文档
@@ -47,7 +48,7 @@ session 开始
 ## 持久状态归属
 
 - **活状态**（会频繁变）：`current-status.md`、`session-tree.md`、`branches/`。
-- **登记账**（追加为主）：`phase-dashboard.yaml`、`change-control.yaml`、`handoffs/`。
+- **登记账**（追加为主）：`phase-dashboard.yaml`、`change-control.yaml`、`doc-lifecycle.yaml`、`handoffs/`。
 - **归档**（只读历史）：`gc/`。
 
 ## 与其它层的边界

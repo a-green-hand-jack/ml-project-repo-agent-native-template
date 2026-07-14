@@ -1,5 +1,7 @@
 # lab/docs/ 下 reference / research-narrative 平面与外部 vendor 代码位置
 
+Status: approved · 2026-07-12 · DECISIONS.md 索引 accepted（human）；存量回填（issue #13 doc-lifecycle）
+
 ## Context
 
 模板本身有意不设通用根级 `docs/`（见 `.agent/repo-documentation-topology.md`「为什么没有通用

@@ -3,6 +3,26 @@
 > **活文件**。这是当前状态的单一真相源。每次 session 结束、compact 前、完成小目标时更新。
 > fresh session 应能只读本文件 + `session-tree.md` 就接续工作。
 
+## 当前 plan 指针（doc-lifecycle，fresh session 先看这里）
+
+- 当前活跃 plan：`plans/20260712-plan-lifecycle-state.zh.md`（issue #13）· status: **implementing** ·
+  branch `feat/13-plan-lifecycle-state`（worktree `.claude/worktrees/13-plan-lifecycle-state`）。
+- 2026-07-14 主控审计确认：原 issue 是轻量生命周期/审批证据；注册表 Bash 删除 guard 是初审后
+  追加的防御性扩展，逐命令完备化导致非收敛 review/evidence 循环。旧执行 agent 已中断，保持 idle。
+- human 随后明确回复“ok do it”，首次真实批准冻结边界：PreToolUse 只拦单次调用可独立判定的局部
+  不完整；文档锚点/注册表跨文件一致性由 commit/治理门禁 validator 权威强制；Bash 删除 guard
+  仅保留现有常见路径尽力拦截，不再扩展 Shell parser。
+- `c9a8bf2` 提交说明及接班 agent 的旧 status 在 human 回答前声称“human 拍板 Option 1”，属于错误
+  provenance；本收口改动显式纠正，不把后续授权追溯成先前授权。
+- 既有 C1-C3/X1-X3 与 G1/G2 runtime 证据仍保留在
+  `lab/evals/doc-lifecycle/evidence-20260713-runtime-probes.md`；本轮不改 hook 行为，只补合同边界与
+  回归。收口候选已通过 lifecycle self-test、真实 hook regression、launch/continuity probes、adapter
+  sync 及 strict harness/anatomy/doc-lifecycle/governance；合并前仍必须把独立 fresh `APPROVE` 绑定到
+  待合入的 exact HEAD。
+- 权威状态注册表：`memory/doc-lifecycle.yaml`（brief/plan/review/decision 四类统一，语义见 `plans/ANATOMY.md`）。
+- 其余存量 plan 均已 `verified`，decisions 均 `approved`（详见注册表）。
+- 本节由 agent 在状态流转时更新；compact/clear 后 `context_continuity.py` 会把本文件回注新上下文。
+
 ## 当前 objective
 
 九个 human 指定 feature 的本地集成已完成七个：#12/#12b/#12c/#14/#15/#16/#17 均有 fresh
@@ -31,11 +51,13 @@
 
 ## 未合入 blocker
 
-- #13 `02626c3`：代码/合成测试已修复，但 C1-C3/X1-X3/G1-G2 真实双 runtime smoke 全未跑；
-  `lab/evals/doc-lifecycle/runtime-smoke-checklist.md` 明确标为 merge blocker。
-- #18 `2bfef30`：final `REQUEST_CHANGES`。C1-C7/X1-X6=`unknown`、X7=`unavailable`；strict fresh
-  evidence gate exit 1。另有代码 MAJOR：evidence validator 只看 status/非空 cell，尚不能拒绝
-  placeholder 或空 raw-output 的伪 PASS。修复并取得真实证据、fresh APPROVE 前不得合入。
+- #13：2026-07-14 final Codex review 对 `c9a8bf2` 给出 `CHANGES_REQUESTED`（MEDIUM），指出 plan 曾把
+  “状态与注册表矛盾”写成每次工具调用的 hook 责任，而实现有意留给 commit 级 validator。human 已批准
+  按可执行边界收敛合同并停止 Bash parser 扩张；收口门禁已全绿，待合入 exact HEAD 必须有独立 fresh
+  `APPROVE`，否则不得合入。
+- #18 `cebe427`：raw-evidence 绑定 validator 的代码 MAJOR 已修复并获 code APPROVE；仍须纳入
+  #13 hook 兼容修复，在最终 exact target 完成 C1-C7/X1-X7、`--require-fresh` exit 0 与 fresh
+  final review。未取得这些证据前不得合入。
 
 ## #16 fresh-review handoff（2026-07-13）
 
@@ -395,9 +417,11 @@ kind/category/blocker/target_path 都按当前树重算；
 
 ## Subagent reports
 
-本轮由 Codex 接管已停止的 Paseo agent，并使用隔离 worktree 的 native subagents 做实现/终审切片：
-#12b、#12c、#15 已取得独立 `APPROVE`；#13 仍缺真实 Claude/Codex runtime smoke，#16/#17
-仍在修复，#18 fresh review 为 `REQUEST_CHANGES`。最终集成与验证由主 agent 负责。
+本轮由 Codex 接管已停止的 Paseo agent，并使用隔离 worktree 的 native subagents 做实现/终审切片。
+截至当前：#12/#12b/#12c/#14/#15/#16/#17 已 fresh `APPROVE` 并合入本地 main；#13 的
+C1-C3/X1-X3 真实 runtime smoke 已 PASS；`df61087` final review 新发现的无标题锚点代码 MAJOR
+已由 `8eea18e` 修复，G1/G2 已补含 exact HEAD、pathspec bytes 与 post-state 的 raw evidence；
+#18 仍待纳入 #13 hook 后完成最终 runtime 矩阵与 fresh review。
 
 ## Open issues / blockers（issue #12 part A，本轮新增）
 

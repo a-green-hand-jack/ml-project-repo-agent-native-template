@@ -1,5 +1,7 @@
 # 自动化项目 bootstrap 并增强 existing-repo adoption proof
 
+Status: verified · 2026-07-13 · fresh APPROVE 6182630/35c6196/f33ff9c；本地 merges 3bad60d/1a72762/36ce42a；27 场景 smoke 全绿
+
 > 复制到 `plans/<YYYYMMDD>-<topic>.zh.md`。这是 human 与 Claude Code 的协商界面：
 > Claude 写初稿 → human 在文件里批注 → Claude 读 diff、收敛计划 → 每次采纳的修订做一个小 commit。
 > 实现只在 scope / forbidden paths / verification 清楚后开始。

@@ -1,5 +1,7 @@
 # 多 Agent 状态/通信/Handoff 控制面 —— 交互式计划
 
+Status: verified · 2026-07-13 · fresh APPROVE e0a32b5；本地 main 已含该提交；harness follow-up e24a652
+
 > 这是 human 与 Claude Code 的协商界面：Claude 写初稿 → human 在「Human 批注区」批注 → Claude 读 diff、收敛 → 每次采纳的修订做一个小 commit。实现只在 scope / forbidden paths / verification 清楚后开始。
 >
 > 触发背景：GitHub issue #14。这是这批 issue 里范围最大、最容易发散的一个（涉及 Paseo 集成、agent identity/lease/mailbox schema、冲突检测）。本文刻意把「第一版最小可用范围」与「明确推迟」分开写，不在这一份计划里设计完整分布式系统。
