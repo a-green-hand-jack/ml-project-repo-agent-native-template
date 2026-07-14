@@ -225,6 +225,54 @@ def _extract_dict_list(fm: str, key: str) -> tuple[list[dict[str, str]], list[st
     return entries, errs
 
 
+_TYPED_TOP_LEVEL_KEYS = (
+    ("parent", "scalar"),
+    ("children", "list"),
+    ("contracts", "list"),
+    ("contract_for", "list"),
+)
+
+
+def _scan_typed_key_schema(fm: str, key: str, kind: str) -> list[str]:
+    """typed relation 顶层字段窄 scanner：只认 frontmatter 里列首（无缩进）出现的 `key:` 行，
+    不是通用 YAML parser。`maintenance: |` 等 literal block 内的缩进 prose 天然不匹配列首正则，
+    不会被误判成声明。
+
+    检测两类问题并各自产出违规短语（不含 GOVERNANCE 前缀，由调用方拼行）：
+    - 顶层 key 重复声明（同一 key 出现多次，语义歧义，只有第一次声明会被下游实际采用）。
+    - 不支持的 shape：scalar key（parent）用了 `[`/`{` 开头的 inline/flow 值；list key
+      （children/contracts/contract_for）用了任意 inline 值，或声明了 key 却没有紧跟
+      文档化的缩进 `- ...` block。
+    """
+    occurrences = [
+        (i, m.group(1))
+        for i, line in enumerate(fm.splitlines())
+        for m in (re.match(rf"^{re.escape(key)}:(.*)$", line),)
+        if m
+    ]
+    if not occurrences:
+        return []
+    violations: list[str] = []
+    if len(occurrences) > 1:
+        at = "、".join(str(i + 1) for i, _ in occurrences)
+        violations.append(
+            f"顶层字段 {key} 重复声明 {len(occurrences)} 次（frontmatter 第 {at} 行，"
+            f"只有第一次声明会被采用，语义歧义）"
+        )
+    rest = occurrences[0][1].strip()
+    if kind == "scalar":
+        if rest.startswith("[") or rest.startswith("{"):
+            violations.append(f"{key} 使用了不支持的 inline/flow 值 -> {rest!r}")
+    else:
+        if rest:
+            violations.append(f"{key} 使用了不支持的 inline/flow 值 -> {rest!r}")
+        elif _extract_block(fm, key) is None:
+            violations.append(
+                f"声明了 {key} 但未找到合法的缩进 block（需紧跟 `- item` 或 `- k: v` 形式）"
+            )
+    return violations
+
+
 def _classify_relation_target(ref: str, repo: Path) -> tuple[Path | None, str | None]:
     """路径安全校验：typed relation target 一律 repo-root-relative（不是相对当前文件）。
     返回 (安全解析后的绝对路径 或 None, 违规原因 或 None)。
@@ -271,6 +319,14 @@ def validate_typed_relations(repo: Path, anatomy_files: list[Path]) -> list[str]
         fm = _frontmatter(text)
         if not fm:
             continue
+
+        for key, kind in _TYPED_TOP_LEVEL_KEYS:
+            for v in _scan_typed_key_schema(fm, key, kind):
+                findings.append(
+                    f"GOVERNANCE anatomy={rel(anatomy)} relation={key} rule=schema "
+                    f"violation={v} action=改为 .agent/anatomy-protocol.md 文档化的顶层唯一 "
+                    f"+ 缩进 block 语法"
+                )
 
         present, parent_ref = _extract_scalar(fm, "parent")
         if present:
@@ -365,6 +421,12 @@ def validate_typed_relations(repo: Path, anatomy_files: list[Path]) -> list[str]
         if not fm:
             contract_for_of[owner_path] = []
             continue
+        for v in _scan_typed_key_schema(fm, "contract_for", "list"):
+            findings.append(
+                f"GOVERNANCE owner={rel(owner_path)} relation=contract_for rule=schema "
+                f"violation={v} action=改为 .agent/anatomy-protocol.md 文档化的顶层唯一 "
+                f"+ 缩进 block 语法"
+            )
         cf_entries, entry_errs = _extract_dict_list(fm, "contract_for")
         for e in entry_errs:
             findings.append(
@@ -531,6 +593,23 @@ def _build_fixtures(root: Path) -> None:
     # 9) 合法 ungoverned leaf/template scaffold：只有 related_files，无 governance 字段。
     _write(root / "leaf/ANATOMY.md", "---\nrelated_files:\n  - ../ANATOMY.md\n---\n# leaf，不进 governed set\n")
 
+    # 10) 顶层 typed key 重复声明（同一 key 出现两次，语义歧义）。
+    _write(root / "schema_dup/ANATOMY.md", "---\nparent: a.md\nparent: b.md\n---\n# dup key\n")
+
+    # 11) 不支持的 inline/flow shape（不是文档化的缩进 block 语法）。
+    _write(root / "schema_inline/ANATOMY.md", (
+        "---\ncontracts: [{component: comp-inline, owner: policy.md}]\n---\n# inline\n"
+    ))
+
+    # 12) maintenance literal block 里出现 typed-key-looking 文字，仍合法、不应被扫描器误判。
+    _write(root / "schema_maintenance/ANATOMY.md", (
+        "---\n"
+        "maintenance: |\n"
+        "  这里提到 children: [a, b] 只是文字说明，不是真实顶层字段。\n"
+        "  也提到 contracts: 这个词，同样不是声明。\n"
+        "---\n# maintenance 内 typed-key-looking prose 合法\n"
+    ))
+
 
 def self_test() -> int:
     with tempfile.TemporaryDirectory(prefix="anatomy-graph-selftest-") as td:
@@ -567,6 +646,21 @@ def self_test() -> int:
                 "rule=no-duplicate" in joined and "dup_rel/ANATOMY.md" in joined
             )),
             ("9 合法 ungoverned leaf 不产生发现", "leaf/ANATOMY.md" not in joined),
+            ("10 顶层 typed key 重复声明被检出", (
+                "anatomy=schema_dup/ANATOMY.md" in joined
+                and "relation=parent" in joined
+                and "rule=schema" in joined
+                and "重复声明" in joined
+            )),
+            ("11 不支持的 inline/flow shape 被检出", (
+                "anatomy=schema_inline/ANATOMY.md" in joined
+                and "relation=contracts" in joined
+                and "rule=schema" in joined
+                and "不支持的 inline/flow 值" in joined
+            )),
+            ("12 maintenance 内 typed-key-looking prose 合法不误报", (
+                "schema_maintenance/ANATOMY.md" not in joined
+            )),
         ]
 
         ok = True

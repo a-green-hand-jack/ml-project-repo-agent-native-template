@@ -48,14 +48,21 @@
 
 ## typed relation schema（静态图，由 `scripts/check-anatomy-drift.py` 强制）
 
-只认四个固定 frontmatter 字段，与通用 `related_files` 完全分离：
+只认四个固定 frontmatter 字段，与通用 `related_files` 完全分离。窄 restricted parser 只支持下面
+这种缩进 block 语法，**不支持 inline/flow 写法**（如 `children: [a, b]`）；顶层每个 key 只能出现
+一次，重复声明与不支持的 shape 都会被 fail closed 成 schema 违规：
 
-- `parent: <repo-root-relative path>` — 本 ANATOMY 的父 ANATOMY，单值。
-- `children: [<repo-root-relative path>, ...]` — 本 ANATOMY 的子 ANATOMY 列表。
-- `contracts: [{component: <id>, owner: <repo-root-relative path>}, ...]` — 本 ANATOMY 承认某
-  component 的行为承诺归 `owner` 文件（truth direction 见上一节），必须 component 全局唯一 owner。
-- `contract_for: [{component: <id>, anatomy: <repo-root-relative path>}, ...]` — 承诺 owner 文件
-  反向声明自己治理哪个 ANATOMY 的哪个 component；必须与对应 `contracts` 双向一致。
+```yaml
+parent: <repo-root-relative path>       # 单值，本 ANATOMY 的父 ANATOMY
+children:                                # 本 ANATOMY 的子 ANATOMY 列表
+  - <repo-root-relative path>
+contracts:                               # 本 ANATOMY 承认某 component 的行为承诺归 owner 文件
+  - component: <id>                      # （truth direction 见上一节），必须 component 全局唯一 owner
+    owner: <repo-root-relative path>
+contract_for:                            # 承诺 owner 文件反向声明自己治理哪个 ANATOMY 的哪个
+  - component: <id>                      # component；必须与对应 contracts 双向一致
+    anatomy: <repo-root-relative path>
+```
 
 target 一律 repo-root-relative（不是相对当前文件），拒绝空值/绝对路径/`..`/repo 外逃逸/不存在的路径。
 只纳管**显式声明**这些字段的节点；未声明的目录是合法 ungoverned leaf，不受影响。当前唯一纳管的
