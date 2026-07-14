@@ -22,6 +22,10 @@ related_files:
   - check-agent-conflicts.py
   - ../template-manifest.toml
   - ../VERSION
+parent: ANATOMY.md
+contracts:
+  - component: template-sync
+    owner: .agent/template-versioning-policy.md
 maintenance: |
   新增/删除检查脚本时同 commit 更新本表。检查项与 .agent/ doctrine 对应关系变化时也更新。
 ---

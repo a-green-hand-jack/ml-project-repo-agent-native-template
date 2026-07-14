@@ -1,3 +1,8 @@
+---
+contract_for:
+  - component: template-sync
+    anatomy: scripts/ANATOMY.md
+---
 # template-versioning-policy — 模板版本与上下游同步契约
 
 > 这个模板会被多个下游 ml-research-project 采用。下游在使用中发现缺口 → 上报成本 repo 的 issue
