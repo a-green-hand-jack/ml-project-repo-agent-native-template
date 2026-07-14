@@ -1,37 +1,57 @@
 #!/usr/bin/env python3
 """下游追平：把上游 template 的框架层同步进本（下游）repo。
 
-四站闭环的第④站，见 .agent/template-versioning-policy.md。本脚本**在下游 repo 内**运行：
-  1. 读下游 .template.toml（origin + 当前 version）与上游 VERSION（目标 version）。
-  2. 若跨了 MAJOR 且未加 --allow-major → 停下让 human reconcile（MAJOR 定义上不可全自动）。
-  3. 读上游 template-manifest.toml，逐个上游文件按 kind 处理：
-       framework 覆盖 / generated 跳过(稍后重建) / project 不碰 / scaffold 缺才建 / merge 只换哨兵块。
-  4. 跑下游 scripts/sync-codex-adapters.py 重建 .codex/.agents 适配。
-  5. 写回下游 .template.toml 的 version。
-  6. 跑 validate-governance.py 验收（除非 --no-verify）。
-  7. 反查上游「你上报的 from-downstream issue」这次关了哪些（best-effort，无 gh/网络则跳过）。
+四站闭环的第④站，见 .agent/template-versioning-policy.md。本脚本**在下游 repo 内**运行。
 
-无第三方硬依赖（tomllib 读；.template.toml 手写）。退出码 0 = 成功，非 0 = 失败或需人工介入。
+分阶段事务流（issue #35 的 P0 correctness 合同）：
+
+  preflight  读下游 .template.toml（origin + 当前 version）、上游 VERSION（目标 version）、
+             上游 Git SHA（无 Git 时对全部上游文件算 source digest）；跨 MAJOR 且未 --allow-major
+             时在任何写动作之前 STOP。
+  plan       读上游 template-manifest.toml，逐个上游文件按 kind 生成动作计划
+             （framework 覆盖 / generated 跳过稍后重建 / project 不碰 / scaffold 缺才建 /
+             merge 只换哨兵块）。dry-run 与 apply 共用同一份 classify/plan parser。
+  apply      按计划落地文件，并回读校验每处写入确实生效（manifest missing/unexpected）。
+  verify     跑下游 scripts/sync-codex-adapters.py 重建 .codex/.agents 适配，再跑
+             validate-governance.py 验收。任一步失败/超时 → **绝不推进版本**。
+  commit     只有 apply + 生成器 + validator 全部成功后，才用「同目录临时文件 + 原子替换」
+             把下游 .template.toml 的 version 推进到上游版本。
+
+无论成败都写一份结构化 sync receipt：result 区分 pass / partial / fail / unknown，
+绑定 exact upstream commit/digest、from/to version、expected/actual path manifest、
+分类结果、逐阶段状态、失败阶段与可重跑命令。失败时版本保持旧值、精确列出已改路径，
+不静默伪装成功；超时/中断记为 unknown，绝不显示为 pass。版本不前进 + 精确 partial
+receipt + 可重跑，取代危险的自动 rollback。
+
+无第三方硬依赖（tomllib 读；.template.toml 手写）。退出码 0 = 成功（pass/partial），
+非 0 = 失败或需人工介入（fail/unknown/MAJOR-STOP）。
 用法：
   python scripts/template-sync.py --from /path/to/upstream/template-checkout
   python scripts/template-sync.py --from ... --allow-major     # 明确接受破坏性追平
-  python scripts/template-sync.py --from ... --dry-run          # 只报告不落地
+  python scripts/template-sync.py --from ... --dry-run          # 只报告不落地、不推进版本
+  python scripts/template-sync.py --from ... --receipt PATH      # 自定义 receipt 落盘路径
 """
 from __future__ import annotations
 
 import argparse
 import fnmatch
+import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
 import tomllib
+from dataclasses import dataclass, field
 from pathlib import Path
 
 DOWNSTREAM = Path(__file__).resolve().parent.parent
 SEMVER_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
 SENTINEL_BEGIN = "<!-- template:begin -->"
 SENTINEL_END = "<!-- template:end -->"
+RECEIPT_SCHEMA = "template-sync-receipt/v1"
+DEFAULT_RECEIPT = DOWNSTREAM / ".template-sync-receipt.json"
+STAGE_TIMEOUT_DEFAULT = 600
 
 
 def parse_semver(raw: str) -> tuple[int, int, int]:
@@ -90,67 +110,191 @@ def sentinel_block(text: str) -> str | None:
     return text[i : j + len(SENTINEL_END)]
 
 
-class Report:
-    def __init__(self) -> None:
-        self.updated: list[str] = []
-        self.created: list[str] = []
-        self.skipped_project: int = 0
-        self.scaffold_kept: list[str] = []
-        self.merge_warn: list[str] = []
-        self.unclassified: list[str] = []
+def source_identity(upstream: Path) -> dict:
+    """上游 exact identity：优先 Git HEAD SHA，无 Git 时对全部 tracked 文件算 sha256 digest。"""
+    if (upstream / ".git").exists():
+        try:
+            proc = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=upstream,
+                capture_output=True, text=True, timeout=20,
+            )
+            if proc.returncode == 0 and proc.stdout.strip():
+                return {"kind": "git", "git_sha": proc.stdout.strip(), "digest": None}
+        except Exception:  # noqa: BLE001  best-effort，退化到 digest
+            pass
+    h = hashlib.sha256()
+    for rel in sorted(upstream_files(upstream)):
+        h.update(rel.encode("utf-8"))
+        h.update(b"\0")
+        h.update((upstream / rel).read_bytes())
+        h.update(b"\0")
+    return {"kind": "digest", "git_sha": None, "digest": "sha256:" + h.hexdigest()}
 
 
-def sync_files(upstream: Path, rules: list[dict], dry: bool) -> Report:
-    rep = Report()
+# ── plan ────────────────────────────────────────────────────────────────────
+@dataclass
+class PlanItem:
+    path: str
+    kind: str | None
+    action: str
+    writes: bool
+
+
+def plan_sync(upstream: Path, rules: list[dict]) -> list[PlanItem]:
+    """纯计划：只读上下游，决定每条上游文件的动作，不写任何文件。dry-run/apply 共用。"""
+    plan: list[PlanItem] = []
     for rel in upstream_files(upstream):
         kind = classify(rel, rules)
         src = upstream / rel
         dst = DOWNSTREAM / rel
-        if kind in (None,):
-            rep.unclassified.append(rel)
+        if kind is None:
+            plan.append(PlanItem(rel, None, "unclassified", False))
             continue
-        if kind in ("generated", "project"):
-            if kind == "project":
-                rep.skipped_project += 1
+        if kind == "project":
+            plan.append(PlanItem(rel, kind, "skip-project", False))
             continue
-        src_bytes = src.read_bytes()
+        if kind == "generated":
+            plan.append(PlanItem(rel, kind, "skip-generated", False))
+            continue
         exists = dst.exists()
         if kind == "framework":
-            if not exists or dst.read_bytes() != src_bytes:
-                if not dry:
-                    dst.parent.mkdir(parents=True, exist_ok=True)
-                    dst.write_bytes(src_bytes)
-                (rep.created if not exists else rep.updated).append(rel)
-        elif kind == "scaffold":
             if not exists:
-                if not dry:
-                    dst.parent.mkdir(parents=True, exist_ok=True)
-                    dst.write_bytes(src_bytes)
-                rep.created.append(rel)
+                action = "create"
+            elif dst.read_bytes() != src.read_bytes():
+                action = "overwrite"
             else:
-                rep.scaffold_kept.append(rel)
+                action = "unchanged"
+            plan.append(PlanItem(rel, kind, action, action in ("create", "overwrite")))
+        elif kind == "scaffold":
+            plan.append(
+                PlanItem(rel, kind, "create" if not exists else "keep-scaffold", not exists)
+            )
         elif kind == "merge":
             up_block = sentinel_block(src.read_text(encoding="utf-8", errors="replace"))
             if up_block is None:
-                rep.merge_warn.append(f"{rel}（上游无哨兵块，跳过；需人工 reconcile）")
-                continue
-            if not exists:
-                if not dry:
-                    dst.parent.mkdir(parents=True, exist_ok=True)
-                    dst.write_bytes(src_bytes)
-                rep.created.append(rel)
-                continue
-            down_text = dst.read_text(encoding="utf-8", errors="replace")
-            down_block = sentinel_block(down_text)
-            if down_block is None:
-                rep.merge_warn.append(f"{rel}（下游无哨兵块，跳过；需人工 reconcile）")
-                continue
-            if down_block != up_block:
-                if not dry:
-                    # 只替换定位到的那一块（count=1），避免子串在文件他处重复时误伤。
-                    dst.write_text(down_text.replace(down_block, up_block, 1), encoding="utf-8")
-                rep.updated.append(rel)
-    return rep
+                plan.append(PlanItem(rel, kind, "merge-warn-upstream", False))
+            elif not exists:
+                plan.append(PlanItem(rel, kind, "merge-create", True))
+            else:
+                down_block = sentinel_block(dst.read_text(encoding="utf-8", errors="replace"))
+                if down_block is None:
+                    plan.append(PlanItem(rel, kind, "merge-warn-downstream", False))
+                elif down_block != up_block:
+                    plan.append(PlanItem(rel, kind, "merge-update", True))
+                else:
+                    plan.append(PlanItem(rel, kind, "merge-unchanged", False))
+        else:
+            plan.append(PlanItem(rel, kind, "unclassified", False))
+    return plan
+
+
+# ── apply ───────────────────────────────────────────────────────────────────
+@dataclass
+class ApplyResult:
+    written: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+
+
+def apply_plan(plan: list[PlanItem], upstream: Path) -> ApplyResult:
+    """按计划落地文件（非 dry-run 才调用）。逐条捕获 OSError，不让半途异常吞掉证据。"""
+    res = ApplyResult()
+    for item in plan:
+        if not item.writes:
+            continue
+        src = upstream / item.path
+        dst = DOWNSTREAM / item.path
+        try:
+            if item.action == "merge-update":
+                down_text = dst.read_text(encoding="utf-8", errors="replace")
+                up_block = sentinel_block(src.read_text(encoding="utf-8", errors="replace"))
+                down_block = sentinel_block(down_text)
+                # 只替换定位到的那一块（count=1），避免子串在文件他处重复时误伤。
+                dst.write_text(down_text.replace(down_block, up_block, 1), encoding="utf-8")
+            else:
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                dst.write_bytes(src.read_bytes())
+            res.written.append(item.path)
+        except OSError as e:
+            res.errors.append(f"{item.path}: {e}")
+    return res
+
+
+def verify_manifest(plan: list[PlanItem], applied: ApplyResult, upstream: Path) -> dict:
+    """回读校验：每个计划写入是否确实落地（missing），以及是否有计划外写入（unexpected）。"""
+    expected = [p.path for p in plan if p.writes]
+    expected_set = set(expected)
+    missing: list[str] = []
+    for item in plan:
+        if not item.writes:
+            continue
+        dst = DOWNSTREAM / item.path
+        src = upstream / item.path
+        if item.path not in applied.written or not dst.exists():
+            missing.append(item.path)
+            continue
+        if item.action == "merge-update":
+            up_block = sentinel_block(src.read_text(encoding="utf-8", errors="replace"))
+            if up_block is None or up_block not in dst.read_text(encoding="utf-8", errors="replace"):
+                missing.append(item.path)
+        elif dst.read_bytes() != src.read_bytes():
+            missing.append(item.path)
+    unexpected = [p for p in applied.written if p not in expected_set]
+    return {
+        "expected": expected,
+        "actual": list(applied.written),
+        "missing": sorted(set(missing)),
+        "unexpected": sorted(set(unexpected)),
+    }
+
+
+def classification_summary(plan: list[PlanItem]) -> dict:
+    out: dict[str, list[str]] = {
+        "framework": [], "generated": [], "project": [], "scaffold": [], "merge": [],
+        "unclassified": [],
+    }
+    for p in plan:
+        key = p.kind if p.kind in out else "unclassified"
+        out[key].append(p.path)
+    return {k: sorted(v) for k, v in out.items()}
+
+
+# ── atomic version write ─────────────────────────────────────────────────────
+def render_template_toml(origin: str, version: str, extra: dict) -> str:
+    # 用 json.dumps 生成带正确转义的 TOML basic string（引号/反斜杠安全）。
+    lines = ["[template]", f"origin = {json.dumps(origin, ensure_ascii=False)}",
+             f"version = {json.dumps(version, ensure_ascii=False)}"]
+    for k, v in extra.items():
+        if k in ("origin", "version"):
+            continue
+        lines.append(f"{k} = {json.dumps(str(v), ensure_ascii=False)}")
+    return "\n".join(lines) + "\n"
+
+
+def atomic_write_text(path: Path, text: str) -> None:
+    """同目录临时文件 + fsync + os.replace 原子替换。
+
+    replace 之前进程中断 → 只留孤儿 .tmp，目标文件字节未动（不会半行/不可解析）；
+    replace 抛错 → finally 清掉 .tmp，同样保证目标文件保持旧内容。
+    """
+    path = Path(path)
+    tmp = path.with_name(f"{path.name}.tmp-{os.getpid()}")
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    finally:
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+
+
+def write_template_version(origin: str, version: str, extra: dict, target: Path | None = None) -> None:
+    atomic_write_text(target or (DOWNSTREAM / ".template.toml"),
+                      render_template_toml(origin, version, extra))
 
 
 def read_template_toml() -> dict:
@@ -163,15 +307,19 @@ def read_template_toml() -> dict:
     return tomllib.loads(f.read_text(encoding="utf-8")).get("template", {})
 
 
-def write_template_version(origin: str, version: str, extra: dict) -> None:
-    # 用 json.dumps 生成带正确转义的 TOML basic string（引号/反斜杠安全）。
-    lines = ["[template]", f"origin = {json.dumps(origin, ensure_ascii=False)}",
-             f"version = {json.dumps(version, ensure_ascii=False)}"]
-    for k, v in extra.items():
-        if k in ("origin", "version"):
-            continue
-        lines.append(f"{k} = {json.dumps(str(v), ensure_ascii=False)}")
-    (DOWNSTREAM / ".template.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")
+# ── external stages ──────────────────────────────────────────────────────────
+def run_stage(argv: list[str], cwd: Path, timeout: int) -> tuple[str, str]:
+    """跑外部阶段脚本。返回 (status, detail)：ok / fail / timeout / error。
+
+    timeout/error 表示无法判定结果（不能判成功也不能判失败）→ 上层记 unknown。
+    """
+    try:
+        proc = subprocess.run(argv, cwd=cwd, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return "timeout", f"超过 {timeout}s 未返回"
+    except Exception as e:  # noqa: BLE001
+        return "error", str(e)
+    return ("ok" if proc.returncode == 0 else "fail"), f"exit {proc.returncode}"
 
 
 def closed_downstream_issues(origin: str) -> None:
@@ -192,15 +340,34 @@ def closed_downstream_issues(origin: str) -> None:
         return
 
 
-def run_validator(dry: bool) -> int:
-    if dry:
-        print("\n[dry-run] 跳过 validate-governance")
-        return 0
-    print("\n=== validate-governance（追平后验收）===", flush=True)
-    return subprocess.run(
-        [sys.executable, str(DOWNSTREAM / "scripts" / "validate-governance.py")],
-        cwd=DOWNSTREAM,
-    ).returncode
+# ── receipt ──────────────────────────────────────────────────────────────────
+def receipt_path(args: argparse.Namespace) -> Path | None:
+    if args.receipt:
+        return Path(args.receipt)
+    if args.dry_run:
+        return None  # dry-run 默认不落地 receipt 文件（无副作用），只打印
+    return DEFAULT_RECEIPT
+
+
+def emit_receipt(receipt: dict, args: argparse.Namespace) -> None:
+    path = receipt_path(args)
+    text = json.dumps(receipt, ensure_ascii=False, indent=2) + "\n"
+    if path is not None:
+        atomic_write_text(path, text)
+        print(f"\n[receipt] result={receipt['result']} → {path}")
+    else:
+        print("\n[receipt] (dry-run，未落盘)\n" + text)
+
+
+def rerun_command(args: argparse.Namespace) -> str:
+    parts = ["python scripts/template-sync.py", f"--from {args.upstream}"]
+    if args.allow_major:
+        parts.append("--allow-major")
+    if args.no_verify:
+        parts.append("--no-verify")
+    if args.receipt:
+        parts.append(f"--receipt {args.receipt}")
+    return " ".join(parts)
 
 
 def main() -> int:
@@ -208,8 +375,13 @@ def main() -> int:
     p.add_argument("--from", dest="upstream", required=True,
                    help="上游 template 的本地 checkout 路径")
     p.add_argument("--allow-major", action="store_true", help="接受 MAJOR 破坏性追平")
-    p.add_argument("--dry-run", action="store_true", help="只报告不落地")
-    p.add_argument("--no-verify", action="store_true", help="跳过 validate-governance")
+    p.add_argument("--dry-run", action="store_true", help="只报告不落地、不推进版本")
+    p.add_argument("--no-verify", action="store_true",
+                   help="跳过 validate-governance（版本仍会推进，但 receipt 记为 partial，不显示 pass）")
+    p.add_argument("--receipt", default=None,
+                   help="sync receipt 落盘路径（默认 .template-sync-receipt.json；dry-run 默认只打印）")
+    p.add_argument("--timeout", type=int, default=STAGE_TIMEOUT_DEFAULT,
+                   help="生成器 / validator 每步超时秒数（默认 600）")
     args = p.parse_args()
 
     upstream = Path(args.upstream).resolve()
@@ -218,6 +390,7 @@ def main() -> int:
     if upstream == DOWNSTREAM:
         raise SystemExit("ERROR --from 指向了当前 repo 自身")
 
+    # ── preflight ────────────────────────────────────────────────────────────
     meta = read_template_toml()
     origin = meta.get("origin", "")
     cur_raw = meta.get("version", "v0.0.0")
@@ -231,6 +404,7 @@ def main() -> int:
     print(f"[template-sync] 下游 {cur_raw} → 上游 {up_raw}"
           + (f"（跨 {level.upper()}）" if level else "（版本相同，仍会对齐文件）"))
     if level == "major" and not args.allow_major:
+        # MAJOR STOP 发生在任何写动作之前（含 receipt 落盘），保证严格 no-op。
         print(
             "\nSTOP：这是 MAJOR 追平，定义上需人工 reconcile（见 template-versioning-policy）。\n"
             "先读上游 CHANGELOG.md，确认破坏性变更点，再加 --allow-major 重跑。"
@@ -242,42 +416,158 @@ def main() -> int:
         raise SystemExit("ERROR 上游缺少 template-manifest.toml")
     rules = tomllib.loads(manifest_f.read_text(encoding="utf-8")).get("rule", [])
 
-    rep = sync_files(upstream, rules, args.dry_run)
+    src_id = source_identity(upstream)
 
-    print(f"\n覆盖(framework/merge 更新) {len(rep.updated)} · 新建 {len(rep.created)}"
-          f" · 保护(project) {rep.skipped_project} · scaffold 保留 {len(rep.scaffold_kept)}")
-    for f in rep.updated:
-        print(f"  ~ {f}")
-    for f in rep.created:
-        print(f"  + {f}")
-    for w in rep.merge_warn:
-        print(f"  WARN merge: {w}")
-    for u in rep.unclassified:
+    # ── plan ───────────────────────────────────────────────────────────────
+    plan = plan_sync(upstream, rules)
+    warn_merge = [pi.path for pi in plan if pi.action in ("merge-warn-upstream", "merge-warn-downstream")]
+    warn_unclassified = [pi.path for pi in plan if pi.action == "unclassified"]
+    n_overwrite = sum(1 for pi in plan if pi.action == "overwrite")
+    n_create = sum(1 for pi in plan if pi.action in ("create", "merge-create"))
+    n_merge = sum(1 for pi in plan if pi.action == "merge-update")
+    n_project = sum(1 for pi in plan if pi.action == "skip-project")
+    n_scaffold_kept = sum(1 for pi in plan if pi.action == "keep-scaffold")
+
+    print(f"\n计划：覆盖(framework) {n_overwrite} · 新建 {n_create} · merge 换块 {n_merge}"
+          f" · 保护(project) {n_project} · scaffold 保留 {n_scaffold_kept}")
+    for pi in plan:
+        if pi.action in ("overwrite", "merge-update"):
+            print(f"  ~ {pi.path}")
+        elif pi.action in ("create", "merge-create"):
+            print(f"  + {pi.path}")
+    for w in warn_merge:
+        print(f"  WARN merge: {w}（哨兵块缺失，跳过；需人工 reconcile）")
+    for u in warn_unclassified:
         print(f"  WARN 未分类(补 template-manifest.toml): {u}")
 
-    # 生成层：覆盖完 canonical 后重建 codex 适配。
-    codex_rc = 0
-    if not args.dry_run:
-        print("\n=== 重建 Codex 适配 ===", flush=True)
-        codex_rc = subprocess.run(
-            [sys.executable, str(DOWNSTREAM / "scripts" / "sync-codex-adapters.py")],
-            cwd=DOWNSTREAM,
-        ).returncode
-        if codex_rc != 0:
-            print(f"ERROR Codex 适配重建失败（exit {codex_rc}）：.codex/.agents 可能已 stale，"
-                  "别信任本次同步。检查 scripts/sync-codex-adapters.py。")
-        write_template_version(origin, up_raw, meta)
-        print(f"[template-sync] .template.toml version → {up_raw}")
+    receipt: dict = {
+        "schema": RECEIPT_SCHEMA,
+        "result": "unknown",
+        "dry_run": bool(args.dry_run),
+        "from_version": cur_raw,
+        "target_version": up_raw,
+        "committed_version": cur_raw,
+        "version_advanced": False,
+        "level": level,
+        "origin": origin,
+        "source": {"path": str(upstream), **src_id},
+        "classification": classification_summary(plan),
+        "stages": {
+            "preflight": "ok", "plan": "ok", "apply": "pending",
+            "generated_rebuild": "skipped", "validate": "skipped", "commit_version": "skipped",
+        },
+        "manifest": {"expected": [pi.path for pi in plan if pi.writes],
+                     "actual": [], "missing": [], "unexpected": []},
+        "warnings": ([f"merge:{w}" for w in warn_merge]
+                     + [f"unclassified:{w}" for w in warn_unclassified]),
+        "failure": None,
+    }
 
-    rc = 0 if args.no_verify else run_validator(args.dry_run)
+    # ── dry-run 早退：不写任何文件、不推进版本、不验证 ──────────────────────
+    if args.dry_run:
+        receipt["stages"]["apply"] = "planned"
+        receipt["result"] = "dry-run"
+        print("\n[dry-run] 未落地任何文件、未推进版本、未验证。")
+        emit_receipt(receipt, args)
+        return 0
+
+    # ── apply ──────────────────────────────────────────────────────────────
+    applied = apply_plan(plan, upstream)
+    manifest = verify_manifest(plan, applied, upstream)
+    receipt["manifest"] = manifest
+    apply_ok = not applied.errors and not manifest["missing"]
+    receipt["stages"]["apply"] = "ok" if apply_ok else "fail"
+    print(f"\n已落地 {len(applied.written)} 个文件"
+          + (f"；apply 错误 {applied.errors}" if applied.errors else "")
+          + (f"；未生效 {manifest['missing']}" if manifest["missing"] else ""))
+
+    # ── verify：生成器 + validator（任一失败/超时都不推进版本）─────────────
+    print("\n=== 重建 Codex 适配 ===", flush=True)
+    gen_status, gen_detail = run_stage(
+        [sys.executable, str(DOWNSTREAM / "scripts" / "sync-codex-adapters.py")], DOWNSTREAM, args.timeout)
+    receipt["stages"]["generated_rebuild"] = gen_status
+    if gen_status != "ok":
+        print(f"ERROR Codex 适配重建 {gen_status}（{gen_detail}）：.codex/.agents 可能 stale，"
+              "本次不推进版本。")
+
+    if args.no_verify:
+        val_status, val_detail = "skipped", "--no-verify"
+        print("\n[--no-verify] 跳过 validate-governance")
+    else:
+        print("\n=== validate-governance（追平后验收）===", flush=True)
+        val_status, val_detail = run_stage(
+            [sys.executable, str(DOWNSTREAM / "scripts" / "validate-governance.py")], DOWNSTREAM, args.timeout)
+    receipt["stages"]["validate"] = val_status
+
+    indeterminate = gen_status in ("timeout", "error") or val_status in ("timeout", "error")
+    version_ok = apply_ok and gen_status == "ok" and val_status in ("ok", "skipped")
+
+    # ── failure paths：绝不推进版本 ────────────────────────────────────────
+    if not version_ok:
+        if indeterminate:
+            receipt["result"] = "unknown"
+            if gen_status in ("timeout", "error"):
+                stage, detail = "generated_rebuild", gen_detail
+            else:
+                stage, detail = "validate", val_detail
+        else:
+            # 干净失败：已改过文件 → partial（下游处于半同步态，可重跑恢复）；否则 fail。
+            receipt["result"] = "partial" if applied.written else "fail"
+            if not apply_ok:
+                stage = "apply"
+                detail = "; ".join(applied.errors + [f"missing:{m}" for m in manifest["missing"]])
+            elif gen_status == "fail":
+                stage, detail = "generated_rebuild", gen_detail
+            else:
+                stage, detail = "validate", val_detail
+        receipt["failure"] = {
+            "stage": stage, "detail": detail,
+            "version_kept": cur_raw,
+            "touched_paths": list(applied.written),
+            "rerun_command": rerun_command(args),
+        }
+        emit_receipt(receipt, args)
+        print(f"\n[template-sync] {receipt['result'].upper()} — 版本保持 {cur_raw}，"
+              f"失败阶段 {stage}（{detail}）。修复后重跑：{receipt['failure']['rerun_command']}")
+        return 1
+
+    # ── commit-version：原子推进（仅在全部成功后）────────────────────────
+    try:
+        write_template_version(origin, up_raw, meta)
+    except OSError as e:
+        receipt["stages"]["commit_version"] = "fail"
+        receipt["result"] = "partial" if applied.written else "fail"
+        receipt["failure"] = {
+            "stage": "commit_version", "detail": str(e),
+            "version_kept": cur_raw,
+            "touched_paths": list(applied.written),
+            "rerun_command": rerun_command(args),
+        }
+        emit_receipt(receipt, args)
+        print(f"\n[template-sync] 版本原子写入失败（{e}）：.template.toml 仍是 {cur_raw}。")
+        return 1
+
+    receipt["stages"]["commit_version"] = "ok"
+    receipt["committed_version"] = up_raw
+    receipt["version_advanced"] = up_raw != cur_raw
+    print(f"\n[template-sync] .template.toml version → {up_raw}（同目录临时文件 + 原子替换）")
+
+    warnings = list(receipt["warnings"])
+    if val_status == "skipped":
+        warnings.append("validation-skipped:--no-verify 已跳过 validate-governance，"
+                        "版本已推进但未验证")
+    receipt["warnings"] = warnings
+    receipt["result"] = "pass" if not warnings else "partial"
+
+    emit_receipt(receipt, args)
     if origin:
         closed_downstream_issues(origin)
 
-    if rep.unclassified:
+    if warn_unclassified:
         print("\n提醒：有未分类文件，请在上游 template-manifest.toml 补规则后再发下一版。")
-    ok = rc == 0 and codex_rc == 0
-    print(f"\n[template-sync] {'OK' if ok else 'FAIL（codex 重建或 validator 未过，需修）'}")
-    return 0 if ok else 1
+    print(f"\n[template-sync] {receipt['result'].upper()}"
+          + ("" if receipt["result"] == "pass" else "（有 warning，见 receipt）"))
+    return 0
 
 
 if __name__ == "__main__":

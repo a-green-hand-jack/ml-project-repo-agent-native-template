@@ -54,7 +54,7 @@ Codex adapter 同步脚本把 `.claude/` canonical 能力生成到 `.codex/` 与
 | `_agent_surface.py` | 非独立脚本（无 `__main__`）：`bootstrap-project.py`（A4）与 `adopt-existing-repo.py`（B6）共用的 Claude/Codex postflight 渲染函数，避免两套加载清单文案/判定漂移 | `plans/20260712-bootstrap-adoption-proof.zh.md`（D2c） |
 | `sync-codex-adapters.py` | 从 `.claude/agents` / `skills` / `commands` 生成并校验 Codex adapters | `.agent/tool-skill-interface.md` |
 | `bump-template-version.py` | 按 agent 判定的 level 递增 `VERSION`、更 `CHANGELOG.md`、打本地 git tag | `.agent/template-versioning-policy.md` |
-| `template-sync.py` | 下游按 `template-manifest.toml` 追平上游框架层：覆盖/保护/scaffold/merge + 重建适配 + 验收 | `.agent/template-versioning-policy.md` · `template-manifest.toml` |
+| `template-sync.py` | 下游按 `template-manifest.toml` 追平上游框架层，分阶段事务：preflight/plan/apply/verify/commit-version。dry-run 与 apply 共用同一 plan parser；版本只在 apply+生成器+validator 全成功后用「同目录 temp + 原子替换」推进，失败/超时保持旧版本；无论成败写结构化 receipt（`result` pass/partial/fail/unknown + exact source SHA/digest + from/to version + expected/actual manifest + 逐阶段状态 + 失败阶段/可重跑命令） | `.agent/template-versioning-policy.md` · `template-manifest.toml` |
 | `agent-state.py` | 多 agent 控制面状态文件（`memory/agents/<name>.yaml`）写侧 + 格式唯一 owner（解析/staleness/root 锚定 helpers） | `.agent/multi-agent-control-plane.md` |
 | `agent-status.py` | 只读 list/status：roster + 状态 yaml + 可选 `paseo ls` presence，30min TTL 派生 stale | `.agent/multi-agent-control-plane.md` |
 | `agent-mailbox.py` | agent 间消息/handoff 落盘（inbox/outbox 对、decision/handoff 强制 ref、ack 转移 ownership） | `.agent/multi-agent-control-plane.md` |
@@ -71,6 +71,9 @@ Inbound:
   同时覆盖 B 的语义归类/安全边界与 C 的结构化 smoke 合同。
 - `.claude/skills/bootstrap-project/SKILL.md` 调用 `bootstrap-project.py`；
   `lab/evals/bootstrap/run-bootstrap-smoke.py` 是它的 synthetic fixture。
+- `lab/evals/template-sync/run-template-sync-smoke.py` 是 `template-sync.py` 的故障注入 fixture
+  （generator fail / validator fail / 原子 version-write fail / 未分类/无哨兵 warning / MAJOR gate /
+  成功幂等重跑；五类路径正负例）；它把本脚本复制进合成下游、用 stub 生成器/validator 端到端驱动。
 - `.codex/agents/*.toml` 与 `.agents/skills/*/SKILL.md` 由 `sync-codex-adapters.py` 生成。
 
 Outbound:
