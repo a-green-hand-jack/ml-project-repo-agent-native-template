@@ -26,20 +26,18 @@
 
 ## 当前 objective
 
-九个 human 指定 feature 的本地集成已完成八个：#12/#12b/#12c/#13/#14/#15/#16/#17 均有 fresh
-`APPROVE` 并已进入本地 `main`。早先七个 feature branch/worktree 已删除；#13 worktree 暂留，等待
-单独的清理授权。当前只剩 #18 的最终 runtime/隔离证据与 fresh review；禁止伪造证据。冻结快照见
-`memory/handoffs/20260713-local-issue-integration-codex.md`，最新进度以本文件为准。
+2026-07-14 human 明确授权发布当前本地 `main`：#18 的 fresh runtime 证据证伪 Codex hook
+enforcement，已关闭并延期，未合入本次发布。当前发布只包含 #12/#12b/#12c/#13/#14/#15/#16/#17
+八项已 fresh-approved 且本地集成的能力；按既有“每项一个 PATCH”覆盖，版本为 `v1.3.8`。
 
-## 最终 release gate（human 明确授权，尚未满足）
+八项本地集成能力均有 fresh `APPROVE`：#12/#12b/#12c/#13/#14/#15/#16/#17。#18 未满足真实
+runtime enforcement 契约，关闭并延期，保留分支/worktree 作为复现证据；不将其计入本次发布。
 
-- 只有上述九个 feature 全部实现、fresh APPROVE、合入本地 `main` 后，才运行逐 feature 回归、
-  跨 feature integration/smoke、全部相关 self-test、adapter sync、strict harness/anatomy/governance、
-  diff/clean 的发布级矩阵。
-- semver 判级由 human 覆盖：从 `v1.3.0` 起每个 feat 计一个 PATCH，最终目标 `v1.3.9`。
-- 仅在发布级矩阵全绿后更新 `VERSION/CHANGELOG`，并只对最终 release commit 创建一个本地
-  annotated tag `v1.3.9`；不建中间 tag，不 push main/tag，不建 release。
-- 当前 `VERSION` 仍为 `v1.3.0`，HEAD 无 tag；#18 blocker 未清除前不得发版或打 tag。
+## 发布状态（human 明确授权）
+
+- 发布级矩阵仅覆盖已合入的八项能力；#18 明确延期，不作为阻塞条件。
+- 版本覆盖为从 `v1.3.0` 跳至 `v1.3.8`；本次只创建一个本地 annotated tag `v1.3.8`，随后按 human
+  授权 push `main`、tag 并创建 GitHub release。
 
 ## #13 本地集成（2026-07-14）
 
