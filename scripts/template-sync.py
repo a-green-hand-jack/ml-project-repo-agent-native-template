@@ -41,6 +41,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -111,24 +112,61 @@ def sentinel_block(text: str) -> str | None:
 
 
 def source_identity(upstream: Path) -> dict:
-    """上游 exact identity：优先 Git HEAD SHA，无 Git 时对全部 tracked 文件算 sha256 digest。"""
-    if (upstream / ".git").exists():
-        try:
-            proc = subprocess.run(
-                ["git", "rev-parse", "HEAD"], cwd=upstream,
-                capture_output=True, text=True, timeout=20,
-            )
-            if proc.returncode == 0 and proc.stdout.strip():
-                return {"kind": "git", "git_sha": proc.stdout.strip(), "digest": None}
-        except Exception:  # noqa: BLE001  best-effort，退化到 digest
-            pass
+    """上游 exact identity。**始终**记录对实际复制字节（working-tree bytes of the synced
+    files）算出的 content_digest；有 Git 时**额外**记录 HEAD SHA 与 dirty 状态。
+
+    这样 dirty source 的 receipt 不会只声称一个 clean SHA —— content_digest 反映真正被拷的
+    字节，dirty=true 显式暴露 working tree 与 HEAD 的偏离。
+    """
     h = hashlib.sha256()
     for rel in sorted(upstream_files(upstream)):
         h.update(rel.encode("utf-8"))
         h.update(b"\0")
         h.update((upstream / rel).read_bytes())
         h.update(b"\0")
-    return {"kind": "digest", "git_sha": None, "digest": "sha256:" + h.hexdigest()}
+    info = {"kind": "digest", "git_sha": None, "dirty": None,
+            "content_digest": "sha256:" + h.hexdigest()}
+    if (upstream / ".git").exists():
+        try:
+            sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=upstream,
+                                 capture_output=True, text=True, timeout=20)
+            status = subprocess.run(["git", "status", "--porcelain"], cwd=upstream,
+                                    capture_output=True, text=True, timeout=20)
+            if sha.returncode == 0 and sha.stdout.strip():
+                info["kind"] = "git"
+                info["git_sha"] = sha.stdout.strip()
+                info["dirty"] = bool(status.stdout.strip()) if status.returncode == 0 else None
+        except Exception:  # noqa: BLE001  best-effort：Git 信息缺失不影响 content_digest
+            pass
+    return info
+
+
+def snapshot_tree(root: Path, exclude: set[str]) -> dict[str, str]:
+    """下游整棵树的 path→content 快照（regular file 记 sha256，symlink 记 target）。
+
+    排除 `.git/**`、version 控制的原子临时文件、以及 receipt 文件（exclude 里给出），
+    使 apply/generator 前后的真实 changed-path 计算不被这些带外文件污染。
+    """
+    snap: dict[str, str] = {}
+    for p in root.rglob("*"):
+        parts = p.relative_to(root).parts
+        if parts and parts[0] == ".git":
+            continue
+        rel = "/".join(parts)
+        if rel in exclude:
+            continue
+        if p.name.startswith(".template.toml.") and p.name.endswith(".tmp"):
+            continue
+        if p.is_symlink():
+            snap[rel] = "L:" + os.readlink(p)
+        elif p.is_file():
+            snap[rel] = hashlib.sha256(p.read_bytes()).hexdigest()
+    return snap
+
+
+def diff_snap(before: dict[str, str], after: dict[str, str]) -> list[str]:
+    keys = set(before) | set(after)
+    return sorted(k for k in keys if before.get(k) != after.get(k))
 
 
 # ── plan ────────────────────────────────────────────────────────────────────
@@ -219,31 +257,47 @@ def apply_plan(plan: list[PlanItem], upstream: Path) -> ApplyResult:
     return res
 
 
-def verify_manifest(plan: list[PlanItem], applied: ApplyResult, upstream: Path) -> dict:
-    """回读校验：每个计划写入是否确实落地（missing），以及是否有计划外写入（unexpected）。"""
-    expected = [p.path for p in plan if p.writes]
-    expected_set = set(expected)
+def build_manifest(plan: list[PlanItem], applied: ApplyResult, upstream: Path,
+                   apply_changed: list[str], generated_outputs: list[str],
+                   excluded: list[str]) -> dict:
+    """基于**真实**磁盘快照的 manifest。
+
+    - expected：plan 里 writes=True 的路径（我们打算改的）。
+    - apply_changed / generated_outputs：apply 前后、generator 前后由 snapshot 算出的真实
+      changed path（后者单列，代表生成器产物，不被吞掉、也不算 unexpected）。
+    - missing：expected 里内容没真正落地的（回读内容校验 + 磁盘未变化的双重判据）。
+    - unexpected：apply 阶段真实变化但不在 expected 里的带外改动。
+    - excluded：快照显式排除的带外类别（.git、临时文件、receipt/version 控制文件）。
+    """
+    planned = [p.path for p in plan if p.writes]
+    planned_set = set(planned)
+    changed_set = set(apply_changed)
     missing: list[str] = []
     for item in plan:
         if not item.writes:
             continue
         dst = DOWNSTREAM / item.path
         src = upstream / item.path
+        landed = True
         if item.path not in applied.written or not dst.exists():
-            missing.append(item.path)
-            continue
-        if item.action == "merge-update":
+            landed = False
+        elif item.action == "merge-update":
             up_block = sentinel_block(src.read_text(encoding="utf-8", errors="replace"))
             if up_block is None or up_block not in dst.read_text(encoding="utf-8", errors="replace"):
-                missing.append(item.path)
+                landed = False
         elif dst.read_bytes() != src.read_bytes():
+            landed = False
+        # 磁盘快照必须也见证到这条计划写入真的改变了下游。
+        if not landed or item.path not in changed_set:
             missing.append(item.path)
-    unexpected = [p for p in applied.written if p not in expected_set]
+    unexpected = sorted(p for p in apply_changed if p not in planned_set)
     return {
-        "expected": expected,
-        "actual": list(applied.written),
+        "expected": planned,
+        "apply_changed": apply_changed,
+        "generated_outputs": generated_outputs,
         "missing": sorted(set(missing)),
-        "unexpected": sorted(set(unexpected)),
+        "unexpected": unexpected,
+        "excluded": excluded,
     }
 
 
@@ -271,21 +325,34 @@ def render_template_toml(origin: str, version: str, extra: dict) -> str:
 
 
 def atomic_write_text(path: Path, text: str) -> None:
-    """同目录临时文件 + fsync + os.replace 原子替换。
+    """同目录唯一临时文件（mkstemp）+ fsync + os.replace 原子替换 + parent dir fsync。
 
-    replace 之前进程中断 → 只留孤儿 .tmp，目标文件字节未动（不会半行/不可解析）；
-    replace 抛错 → finally 清掉 .tmp，同样保证目标文件保持旧内容。
+    - 用 tempfile.mkstemp 生成唯一名，绝不与并发写者的临时文件撞名。
+    - replace 之前中断/抛错 → 只影响本次自己的 tmp，finally 只删本次的 tmp，
+      不会误删他人临时文件；目标文件字节始终未动（不会半行/不可解析）。
+    - replace 成功后 fsync 父目录，确保重命名本身落盘。
     """
     path = Path(path)
-    tmp = path.with_name(f"{path.name}.tmp-{os.getpid()}")
+    directory = path.parent
+    fd, tmpname = tempfile.mkstemp(dir=directory, prefix=path.name + ".", suffix=".tmp")
+    tmp: Path | None = Path(tmpname)
     try:
-        with open(tmp, "w", encoding="utf-8") as fh:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(text)
             fh.flush()
             os.fsync(fh.fileno())
         os.replace(tmp, path)
+        tmp = None  # 已重命名到目标，不再是「我们的临时文件」
+        try:
+            dfd = os.open(directory, os.O_RDONLY)
+            try:
+                os.fsync(dfd)
+            finally:
+                os.close(dfd)
+        except OSError:
+            pass  # 目录 fsync 失败不致命（replace 已完成）
     finally:
-        if tmp.exists():
+        if tmp is not None and tmp.exists():
             try:
                 tmp.unlink()
             except OSError:
@@ -309,14 +376,17 @@ def read_template_toml() -> dict:
 
 # ── external stages ──────────────────────────────────────────────────────────
 def run_stage(argv: list[str], cwd: Path, timeout: int) -> tuple[str, str]:
-    """跑外部阶段脚本。返回 (status, detail)：ok / fail / timeout / error。
+    """跑外部阶段脚本。返回 (status, detail)：ok / fail / timeout / interrupt / error。
 
-    timeout/error 表示无法判定结果（不能判成功也不能判失败）→ 上层记 unknown。
+    timeout/interrupt/error 表示无法判定结果（不能判成功也不能判失败）→ 上层记 unknown。
+    KeyboardInterrupt 在此 stage boundary 捕获，绝不让中断被误当成成功继续到 commit。
     """
     try:
         proc = subprocess.run(argv, cwd=cwd, timeout=timeout)
     except subprocess.TimeoutExpired:
         return "timeout", f"超过 {timeout}s 未返回"
+    except KeyboardInterrupt:
+        return "interrupt", "被中断 (KeyboardInterrupt)"
     except Exception as e:  # noqa: BLE001
         return "error", str(e)
     return ("ok" if proc.returncode == 0 else "fail"), f"exit {proc.returncode}"
@@ -349,6 +419,19 @@ def receipt_path(args: argparse.Namespace) -> Path | None:
     return DEFAULT_RECEIPT
 
 
+def snapshot_exclusions(args: argparse.Namespace) -> set[str]:
+    """快照要显式排除的下游相对路径（receipt 文件 + version 控制文件），避免带外文件
+    污染真实 changed-path。`.git` 与原子临时文件由 snapshot_tree 本身排除。"""
+    ex: set[str] = {".template.toml"}  # 版本控制文件由 commit 阶段单独原子写
+    rp = receipt_path(args)
+    if rp is not None:
+        try:
+            ex.add(rp.resolve().relative_to(DOWNSTREAM).as_posix())
+        except ValueError:
+            pass  # receipt 落在下游之外，无需排除
+    return ex
+
+
 def emit_receipt(receipt: dict, args: argparse.Namespace) -> None:
     path = receipt_path(args)
     text = json.dumps(receipt, ensure_ascii=False, indent=2) + "\n"
@@ -377,7 +460,8 @@ def main() -> int:
     p.add_argument("--allow-major", action="store_true", help="接受 MAJOR 破坏性追平")
     p.add_argument("--dry-run", action="store_true", help="只报告不落地、不推进版本")
     p.add_argument("--no-verify", action="store_true",
-                   help="跳过 validate-governance（版本仍会推进，但 receipt 记为 partial，不显示 pass）")
+                   help="跳过 validate-governance（保留 CLI 兼容；但按合同**绝不推进版本**："
+                        "receipt=partial、commit_version=skipped、进程非零、旧版本保持）")
     p.add_argument("--receipt", default=None,
                    help="sync receipt 落盘路径（默认 .template-sync-receipt.json；dry-run 默认只打印）")
     p.add_argument("--timeout", type=int, default=STAGE_TIMEOUT_DEFAULT,
@@ -457,7 +541,8 @@ def main() -> int:
             "generated_rebuild": "skipped", "validate": "skipped", "commit_version": "skipped",
         },
         "manifest": {"expected": [pi.path for pi in plan if pi.writes],
-                     "actual": [], "missing": [], "unexpected": []},
+                     "apply_changed": [], "generated_outputs": [],
+                     "missing": [], "unexpected": [], "excluded": []},
         "warnings": ([f"merge:{w}" for w in warn_merge]
                      + [f"unclassified:{w}" for w in warn_unclassified]),
         "failure": None,
@@ -471,53 +556,73 @@ def main() -> int:
         emit_receipt(receipt, args)
         return 0
 
-    # ── apply ──────────────────────────────────────────────────────────────
+    # ── apply（先给下游拍前快照，用于基于真实磁盘的 changed-path 证据）──────
+    excluded = snapshot_exclusions(args)
+    before_apply = snapshot_tree(DOWNSTREAM, excluded)
     applied = apply_plan(plan, upstream)
-    manifest = verify_manifest(plan, applied, upstream)
-    receipt["manifest"] = manifest
-    apply_ok = not applied.errors and not manifest["missing"]
-    receipt["stages"]["apply"] = "ok" if apply_ok else "fail"
-    print(f"\n已落地 {len(applied.written)} 个文件"
-          + (f"；apply 错误 {applied.errors}" if applied.errors else "")
-          + (f"；未生效 {manifest['missing']}" if manifest["missing"] else ""))
+    after_apply = snapshot_tree(DOWNSTREAM, excluded)
 
-    # ── verify：生成器 + validator（任一失败/超时都不推进版本）─────────────
+    # ── verify：生成器（其产物计入真实 changed-path，单列 generated_outputs）──
     print("\n=== 重建 Codex 适配 ===", flush=True)
-    gen_status, gen_detail = run_stage(
-        [sys.executable, str(DOWNSTREAM / "scripts" / "sync-codex-adapters.py")], DOWNSTREAM, args.timeout)
+    try:
+        gen_status, gen_detail = run_stage(
+            [sys.executable, str(DOWNSTREAM / "scripts" / "sync-codex-adapters.py")], DOWNSTREAM, args.timeout)
+    except KeyboardInterrupt:
+        gen_status, gen_detail = "interrupt", "被中断 (KeyboardInterrupt)"
     receipt["stages"]["generated_rebuild"] = gen_status
     if gen_status != "ok":
         print(f"ERROR Codex 适配重建 {gen_status}（{gen_detail}）：.codex/.agents 可能 stale，"
               "本次不推进版本。")
+    after_gen = snapshot_tree(DOWNSTREAM, excluded)
 
+    apply_changed = diff_snap(before_apply, after_apply)
+    generated_outputs = diff_snap(after_apply, after_gen)
+    manifest = build_manifest(plan, applied, upstream, apply_changed, generated_outputs, sorted(excluded))
+    receipt["manifest"] = manifest
+    apply_ok = not applied.errors and not manifest["missing"] and not manifest["unexpected"]
+    receipt["stages"]["apply"] = "ok" if apply_ok else "fail"
+    print(f"\n真实变更：apply={apply_changed} · generator={generated_outputs}"
+          + (f"；未生效 {manifest['missing']}" if manifest["missing"] else "")
+          + (f"；计划外 {manifest['unexpected']}" if manifest["unexpected"] else ""))
+
+    # ── validator（--no-verify 保留 CLI 兼容，但按合同不推进版本）──────────
     if args.no_verify:
         val_status, val_detail = "skipped", "--no-verify"
-        print("\n[--no-verify] 跳过 validate-governance")
+        print("\n[--no-verify] 跳过 validate-governance —— 按合同版本不会推进")
     else:
         print("\n=== validate-governance（追平后验收）===", flush=True)
-        val_status, val_detail = run_stage(
-            [sys.executable, str(DOWNSTREAM / "scripts" / "validate-governance.py")], DOWNSTREAM, args.timeout)
+        try:
+            val_status, val_detail = run_stage(
+                [sys.executable, str(DOWNSTREAM / "scripts" / "validate-governance.py")], DOWNSTREAM, args.timeout)
+        except KeyboardInterrupt:
+            val_status, val_detail = "interrupt", "被中断 (KeyboardInterrupt)"
     receipt["stages"]["validate"] = val_status
 
-    indeterminate = gen_status in ("timeout", "error") or val_status in ("timeout", "error")
-    version_ok = apply_ok and gen_status == "ok" and val_status in ("ok", "skipped")
+    indeterminate = (gen_status in ("timeout", "error", "interrupt")
+                     or val_status in ("timeout", "error", "interrupt"))
+    # 版本推进的唯一条件：apply 干净 + 生成器成功 + validator **真的通过**（skipped 不算）。
+    version_ok = apply_ok and gen_status == "ok" and val_status == "ok"
 
     # ── failure paths：绝不推进版本 ────────────────────────────────────────
     if not version_ok:
         if indeterminate:
             receipt["result"] = "unknown"
-            if gen_status in ("timeout", "error"):
+            if gen_status in ("timeout", "error", "interrupt"):
                 stage, detail = "generated_rebuild", gen_detail
             else:
                 stage, detail = "validate", val_detail
         else:
-            # 干净失败：已改过文件 → partial（下游处于半同步态，可重跑恢复）；否则 fail。
+            # 干净失败/跳过验收：已改过文件 → partial（半同步态，可重跑恢复）；否则 fail。
             receipt["result"] = "partial" if applied.written else "fail"
             if not apply_ok:
                 stage = "apply"
-                detail = "; ".join(applied.errors + [f"missing:{m}" for m in manifest["missing"]])
+                detail = "; ".join(applied.errors
+                                   + [f"missing:{m}" for m in manifest["missing"]]
+                                   + [f"unexpected:{u}" for u in manifest["unexpected"]])
             elif gen_status == "fail":
                 stage, detail = "generated_rebuild", gen_detail
+            elif val_status == "skipped":
+                stage, detail = "validate", "--no-verify：跳过验收，按合同不推进版本"
             else:
                 stage, detail = "validate", val_detail
         receipt["failure"] = {
@@ -534,6 +639,17 @@ def main() -> int:
     # ── commit-version：原子推进（仅在全部成功后）────────────────────────
     try:
         write_template_version(origin, up_raw, meta)
+    except KeyboardInterrupt:
+        receipt["stages"]["commit_version"] = "interrupt"
+        receipt["result"] = "unknown"
+        receipt["failure"] = {
+            "stage": "commit_version", "detail": "被中断 (KeyboardInterrupt)",
+            "version_kept": cur_raw, "touched_paths": list(applied.written),
+            "rerun_command": rerun_command(args),
+        }
+        emit_receipt(receipt, args)
+        print(f"\n[template-sync] UNKNOWN — 版本写入被中断，.template.toml 仍是 {cur_raw}。")
+        return 1
     except OSError as e:
         receipt["stages"]["commit_version"] = "fail"
         receipt["result"] = "partial" if applied.written else "fail"
@@ -550,15 +666,9 @@ def main() -> int:
     receipt["stages"]["commit_version"] = "ok"
     receipt["committed_version"] = up_raw
     receipt["version_advanced"] = up_raw != cur_raw
-    print(f"\n[template-sync] .template.toml version → {up_raw}（同目录临时文件 + 原子替换）")
+    print(f"\n[template-sync] .template.toml version → {up_raw}（mkstemp + 原子替换 + parent fsync）")
 
-    warnings = list(receipt["warnings"])
-    if val_status == "skipped":
-        warnings.append("validation-skipped:--no-verify 已跳过 validate-governance，"
-                        "版本已推进但未验证")
-    receipt["warnings"] = warnings
-    receipt["result"] = "pass" if not warnings else "partial"
-
+    receipt["result"] = "pass" if not receipt["warnings"] else "partial"
     emit_receipt(receipt, args)
     if origin:
         closed_downstream_issues(origin)

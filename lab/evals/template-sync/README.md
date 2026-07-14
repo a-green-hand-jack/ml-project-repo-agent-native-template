@@ -16,6 +16,15 @@ python lab/evals/template-sync/run-template-sync-smoke.py
   版本原子推进到上游版本，receipt `result=pass`；紧接着重跑幂等（仍 pass、版本不动、零写入）。
 - **generator_fail / validator_fail**：进程非零、`result=partial`、`.template.toml` 仍是旧版本
   （这正是本 issue 修复的 bug：版本不得在生成器/validator 成功前推进），failure 段给出可重跑命令。
+- **no_verify**：`--no-verify` 保留 CLI 兼容但**绝不推进版本** → `result=partial`、`validate=skipped`、
+  `commit_version=skipped`、进程非零、旧版本保持。
+- **dirty_upstream**：git 上游同时记录 git SHA + working-tree `content_digest` + `dirty=true`，
+  且被同步下去的是 dirty（未提交）字节——dirty source 不会只声称 clean SHA。
+- **interrupt**：进程内 stage 边界注入 `KeyboardInterrupt`，被捕获为 `interrupt` 状态并映射到
+  `result=unknown`（永不 pass）。
+- **generated_outputs 证据**：生成器额外产出的文件（`.codex/generated.txt`）落在 manifest 的
+  `generated_outputs`（单列），既不被吞掉也不算 `unexpected`；`missing`/`unexpected` 用 apply 前后、
+  generator 前后的真实磁盘快照计算，不靠 planned/applied 自证。
 - **warnings**：未分类上游文件 + 无哨兵 merge 文件 → `result=partial`（永不 pass），validator 通过
   时版本仍推进但如实标 partial；无哨兵文件不被误建。
 - **timeout_unknown**：validator 在 `--timeout` 内不返回 → `result=unknown`（永不 pass）、版本不动、
