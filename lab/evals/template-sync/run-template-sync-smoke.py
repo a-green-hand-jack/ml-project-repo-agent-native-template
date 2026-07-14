@@ -34,6 +34,11 @@ Scenarios (each asserts the P0 transactional contract of issue #35):
   block -> receipt result=partial (never pass) with explicit warnings; version
   still advances because the validator passed, but the honest signal is
   partial, not pass;
+- generated_stale_rogue: a rogue generated-namespace file that already existed
+  BEFORE the run, untouched by this run's generator, still surfaces as
+  generated.unexpected -- generated.actual is the full post-generator governed
+  set (classify() applied to the complete downstream snapshot), not just this
+  run's generator delta;
 - timeout_unknown: a validator that never returns within --timeout yields
   receipt result=unknown (never pass), keeps the old version, and exits
   non-zero;
@@ -210,6 +215,8 @@ def check_happy_and_idempotent(tmp: Path) -> int:
         return fail(f"expected generated set should come from kind=generated paths, got {gm}", proc)
     if "gen/adapter.txt" not in gm["actual_changed"]:
         return fail(f"generator should (re)produce the expected generated file, got {gm}", proc)
+    if "gen/adapter.txt" not in gm["actual"]:
+        return fail(f"generated.actual must be the full post-generator governed set, got {gm}", proc)
     if gm["missing"] or gm["unexpected"]:
         return fail(f"happy generated manifest should have no missing/unexpected, got {gm}", proc)
 
@@ -457,6 +464,46 @@ def check_generated_missing(tmp: Path) -> int:
     return 0
 
 
+def check_generated_stale_rogue_unexpected(tmp: Path) -> int:
+    """A rogue generated-namespace file that already existed on disk BEFORE
+    this run -- and that this run's generator never touches -- must still be
+    reported as generated.unexpected. generated.actual is the full
+    post-generator governed set (same classify()/generated glob rules applied
+    to the complete downstream snapshot), not just this run's generator delta
+    -- otherwise a pre-existing stale file is invisible and the version could
+    wrongly advance (the exact P0 gap issue #35's second round closes)."""
+    up = tmp / "up-gsr"
+    down = tmp / "down-gsr"
+    receipt = tmp / "receipt-gsr.json"
+    build_upstream(up, "v1.1.0")
+    build_downstream(down, "v1.0.0", gen=GEN_OK, val=VAL_OK)
+    # Pre-seed a stale rogue file under the generated root BEFORE the run;
+    # GEN_OK only (re)writes gen/adapter.txt and never touches/removes this one.
+    write(down / "gen" / "rogue-stale.txt", "pre-existing stale generated file\n")
+
+    proc = run_sync(down, up, receipt)
+    if proc.returncode == 0:
+        return fail("a pre-existing untouched rogue generated file must fail the sync", proc)
+    if version_of(down) != "v1.0.0":
+        return fail(f"stale rogue generated file must NOT advance version, got {version_of(down)}", proc)
+    r = read_json(receipt)
+    gm = r["manifest"]["generated"]
+    if "gen/rogue-stale.txt" in gm.get("actual_changed", []):
+        return fail(f"the rogue file was never touched by the generator this run, so it must NOT "
+                    f"appear in actual_changed (the delta), got {gm}", proc)
+    if "gen/rogue-stale.txt" not in gm.get("actual", []):
+        return fail(f"generated.actual must be the full post-generator set, including an untouched "
+                    f"pre-existing rogue file, got {gm}", proc)
+    if "gen/rogue-stale.txt" not in gm["unexpected"]:
+        return fail(f"pre-existing untouched rogue file must be listed in generated.unexpected, got {gm}", proc)
+    if r["failure"]["stage"] != "generated_rebuild":
+        return fail(f"failure stage should be generated_rebuild, got {r.get('failure')}", proc)
+    # detect-and-report only: the sync must not silently delete/touch the rogue file.
+    if (down / "gen" / "rogue-stale.txt").read_text() != "pre-existing stale generated file\n":
+        return fail("pre-existing rogue file bytes must be left untouched by the sync")
+    return 0
+
+
 def _load_downstream_module(down: Path, name: str):
     spec = importlib.util.spec_from_file_location(name, down / "scripts" / "template-sync.py")
     mod = importlib.util.module_from_spec(spec)
@@ -676,6 +723,7 @@ def main() -> int:
             check_warnings_partial,
             check_generated_arbitrary_unexpected,
             check_generated_missing,
+            check_generated_stale_rogue_unexpected,
             check_interrupt_unknown,
             check_commit_interrupt,
             check_timeout_unknown,

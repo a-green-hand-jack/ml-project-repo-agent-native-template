@@ -259,15 +259,19 @@ def apply_plan(plan: list[PlanItem], upstream: Path) -> ApplyResult:
 
 def build_manifest(plan: list[PlanItem], applied: ApplyResult, upstream: Path,
                    apply_changed: list[str], generated_outputs: list[str],
-                   excluded: list[str]) -> dict:
+                   excluded: list[str], after_gen: dict[str, str],
+                   rules: list[dict]) -> dict:
     """基于**真实**磁盘快照的 manifest。
 
     - expected：plan 里 writes=True 的路径（我们打算改的）。
     - apply_changed / generated_outputs：apply 前后、generator 前后由 snapshot 算出的真实
-      changed path（后者单列，代表生成器产物，不被吞掉、也不算 unexpected）。
+      changed path（后者单列，代表生成器产物 delta，不被吞掉、也不直接等同 actual）。
     - missing：expected 里内容没真正落地的（回读内容校验 + 磁盘未变化的双重判据）。
     - unexpected：apply 阶段真实变化但不在 expected 里的带外改动。
     - excluded：快照显式排除的带外类别（.git、临时文件、receipt/version 控制文件）。
+    - after_gen / rules：generator 完成后的完整下游快照 + 上游 classify 规则，用于按同一
+      generated classification 对**全量**磁盘状态重新分类（而非只看本次 generator delta），
+      见下方 generated.actual。
     """
     planned = [p.path for p in plan if p.writes]
     planned_set = set(planned)
@@ -293,10 +297,12 @@ def build_manifest(plan: list[PlanItem], applied: ApplyResult, upstream: Path,
     unexpected = sorted(p for p in apply_changed if p not in planned_set)
 
     # generated exact manifest：canonical expected set = 同一 plan 中 kind=generated 的上游路径
-    # （单一真源，不新增清单）。post-generator 校验每个 expected generated path 存在且内容与
-    # 上游生成物一致；生成器 delta 中不在 expected set 的路径是 generated.unexpected。
+    # （单一真源，不新增清单）。actual 是对 post-generator **完整**下游快照应用同一
+    # classify()/generated glob rules 得到的全量集合——不是本次 generator 改动的 delta，
+    # 因此运行前已存在、本次未变化的 rogue/stale generated 文件也会出现在 actual 里。
     gen_expected = [p.path for p in plan if p.kind == "generated"]
     gen_expected_set = set(gen_expected)
+    gen_actual = sorted(p for p in after_gen if classify(p, rules) == "generated")
     gen_missing: list[str] = []
     for gp in gen_expected:
         dstg = DOWNSTREAM / gp
@@ -304,7 +310,7 @@ def build_manifest(plan: list[PlanItem], applied: ApplyResult, upstream: Path,
         # unchanged-but-content-correct 不算 missing；缺失或内容错算 missing。
         if not dstg.exists() or (srcg.exists() and dstg.read_bytes() != srcg.read_bytes()):
             gen_missing.append(gp)
-    gen_unexpected = sorted(p for p in generated_outputs if p not in gen_expected_set)
+    gen_unexpected = sorted(p for p in gen_actual if p not in gen_expected_set)
     return {
         "expected": planned,
         "apply_changed": apply_changed,
@@ -314,6 +320,7 @@ def build_manifest(plan: list[PlanItem], applied: ApplyResult, upstream: Path,
         "excluded": excluded,
         "generated": {
             "expected": gen_expected,
+            "actual": gen_actual,
             "actual_changed": generated_outputs,
             "missing": sorted(set(gen_missing)),
             "unexpected": gen_unexpected,
@@ -564,7 +571,8 @@ def main() -> int:
                      "apply_changed": [], "generated_outputs": [],
                      "missing": [], "unexpected": [], "excluded": [],
                      "generated": {"expected": [pi.path for pi in plan if pi.kind == "generated"],
-                                   "actual_changed": [], "missing": [], "unexpected": []}},
+                                   "actual": [], "actual_changed": [], "missing": [],
+                                   "unexpected": []}},
         "warnings": ([f"merge:{w}" for w in warn_merge]
                      + [f"unclassified:{w}" for w in warn_unclassified]),
         "failure": None,
@@ -599,7 +607,8 @@ def main() -> int:
 
     apply_changed = diff_snap(before_apply, after_apply)
     generated_outputs = diff_snap(after_apply, after_gen)
-    manifest = build_manifest(plan, applied, upstream, apply_changed, generated_outputs, sorted(excluded))
+    manifest = build_manifest(plan, applied, upstream, apply_changed, generated_outputs,
+                              sorted(excluded), after_gen, rules)
     receipt["manifest"] = manifest
     apply_ok = not applied.errors and not manifest["missing"] and not manifest["unexpected"]
     receipt["stages"]["apply"] = "ok" if apply_ok else "fail"
