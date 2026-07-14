@@ -63,3 +63,19 @@ lab/infra/   lab/research/   lab/artifacts/   memory/   deliverables/   scripts/
 
 - 只对 agent 可读、对 human 不可读 → 补 README。
 - 只对 human 友好、agent 找不到边界 → 补 AGENTS / ANATOMY。
+
+## Truth direction 与规则单一 owner（见 issue #33）
+
+先把要写的事实分类，再决定唯一 owner，不要同一条规则抄两份：
+
+| 事实类型 | 唯一 owner | 冲突时的 truth direction |
+| --- | --- | --- |
+| 结构现实：文件在哪、谁调用谁、状态归谁 | `ANATOMY.md` | 现实与地图不一致 → 现实为准，同 commit 修 ANATOMY |
+| 已获批的可观察行为承诺：输入输出、错误、顺序、兼容性、breaking 判级 | 该边界的 `.agent/` policy 文件（例：`template-sync` 见 `.agent/template-versioning-policy.md`） | 实现与已获批承诺不一致 → 承诺为规范，实现视为 bug；不得为让实现变绿而弱化承诺，改承诺需 human 批准 |
+| 怎么跑、怎么排障 | README / skill / manual | 操作已失效 → 判断是操作违规还是流程该更新，不能自动二选一 |
+| 为什么这样选、历史权衡 | `human/decisions/` | 与当前方案不符 → 新增 superseding 决策，不改写旧记录 |
+| 当前任务状态、进度、阻塞 | issue / `memory/current-status.md` | — |
+
+`ANATOMY.md` 与承诺 owner 之间只做双向链接（ANATOMY 正向链接 owner，owner 反向链接
+implementation/manifest/evidence），不复制正文。只在真实、已出问题的边界建立行为承诺 owner；
+出现第二个真实边界前不建根级承诺 registry（见 `.agent/anatomy-protocol.md` 同一原则）。

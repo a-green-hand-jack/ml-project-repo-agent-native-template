@@ -78,3 +78,44 @@
 框架层 = `.agent/`、`.claude/{agents,skills,commands,hooks,settings}`、`scripts/` validator、
 `.githooks/`、`.github/` CI/模板、以及混合文件里的 `template:` 哨兵块。项目层 =
 `lab/`、`memory/`、`deliverables/`、`plans/`、`human/`、`PROJECT.md`、`DECISIONS.md`。
+
+## template-sync 可观察 Contract（本节是规范 owner，见 issue #33）
+
+本节是 `scripts/template-sync.py`（④ 同步站）可观察行为的**唯一规范正文 owner**。
+`scripts/ANATOMY.md` 的 `template-sync.py` 行只反向链接本节，不复制规则正文；
+`scripts/README.md` / `lab/evals/template-sync/README.md` 只描述运行入口与命令，不重写下列规则。
+反向链接：implementation `scripts/template-sync.py`；分类真源 `template-manifest.toml`；
+production-path fault-injection evidence `lab/evals/template-sync/run-template-sync-smoke.py`
+（`python3 lab/evals/template-sync/run-template-sync-smoke.py`，复制真实脚本驱动，非 fake/parser-only）。
+
+规则 id 稳定、粗粒度（不拆成微规则）；每条给出 evidence kind 与具体 scenario/function，
+不接受「见测试文件」这类无具体指向的引用。
+
+| id | 规则（可观察义务） | evidence kind | evidence |
+| --- | --- | --- | --- |
+| **TS-1** source-input | 每次 sync 的 `source` 必含 sha256 `content_digest`；上游若是 git 仓库，额外记录 40 位 HEAD SHA 与如实的 `dirty` 标记，且被同步的是当前工作树（含未提交改动）字节，不是「假装 clean 的 SHA」 | production-path positive | `check_dirty_upstream_source`（git+dirty 分支）、`check_happy_and_idempotent`（`source.content_digest` 断言，非 git 分支） |
+| **TS-2** major-gate | MAJOR 跨越且无 `--allow-major` 是严格 pre-write no-op：exit 2、版本不动、不写任何文件、不写 receipt；带 `--allow-major` 才推进 | production-path positive + forbidden | `check_major_gate`（阻断分支断言零写入/无 receipt；放行分支断言推进） |
+| **TS-3** five-path-classes | 五类 ownership：framework 仅在字节不同才覆盖（相同则不重写）；project 永不触碰；scaffold 缺失才建、已存在则保留；generated 在 apply 阶段绝不裸拷贝，只由下游生成器重建；merge 文件只替换 `template:begin/end` 哨兵块内，块外内容保留 | production-path positive + forbidden | `check_happy_and_idempotent` 的五类正/负断言段 |
+| **TS-4** dry-run-shares-plan | `--dry-run` 与 `apply` 走同一条 `plan_sync()`/classify 路径计算计划，不存在会漂移的第二套「预览」实现；dry-run 只在写文件/跑生成器/跑 validator/推进版本之前提前退出 | code invariant citation | `scripts/template-sync.py:181-186`（`plan_sync()` 单一实现）与 `:587-600`（`main()` 里 `--dry-run` 早退分支复用同一 `plan_sync()` 结果，不重新分类） |
+| **TS-5** generated-full-set | 上报的 `generated` manifest（`expected`/`actual`/`actual_changed`/`missing`/`unexpected`/`content_mismatches`）是**完整 post-generator 下游快照**的分类结果，不是本次生成器 delta；路径存在但字节错 → `content_mismatches`，永不算 `missing`；运行前已存在、本次生成器未触碰的 rogue 文件仍算 `unexpected` | production-path positive + forbidden | `check_generated_missing`、`check_generated_wrong_bytes_content_mismatch`、`check_generated_arbitrary_unexpected`、`check_generated_stale_rogue_unexpected` |
+| **TS-6** validate-before-commit | 阶段固定顺序 apply → generated_rebuild → validate → commit_version；仅当前面全部 `ok` 时 `commit_version` 才可能 `ok`；生成器/validator 失败或 `--no-verify` 跳过时版本必须保持旧值，`commit_version` 为 `skipped` 或非 `ok` | production-path positive + forbidden | `check_generator_fail`、`check_validator_fail`、`check_no_verify_no_advance` |
+| **TS-7** receipt-result-states | receipt `result` 只有四态：`pass`（全部阶段 ok 且无 warning）、`partial`（某阶段失败/跳过，或 validator 通过但有 warning——未分类路径/无哨兵 merge 文件）、`unknown`（超时/中断等不确定结果，永不显示为 `pass`）——`fail` 与 `unknown` 均不得被误记为 `pass` | production-path positive | `check_happy_and_idempotent`（pass）、`check_warnings_partial`（validator 通过但 partial）、`check_generator_fail`/`check_validator_fail`（阶段失败 partial）、`check_timeout_unknown`/`check_interrupt_unknown`/`check_commit_interrupt`（unknown） |
+| **TS-8** atomic-commit-and-interrupt-honesty | 版本文件用「同目录临时文件 + `os.replace`」写入；替换前失败/中断保持旧值、无孤儿临时文件、旧值仍可解析；替换后中断必须如实报告 `version_advanced=true` 且 `result=unknown`，不得声称 `version_kept`/伪造 rollback | production-path positive + forbidden | `check_atomic_write_fail`、`check_commit_interrupt`（before/after 两支） |
+| **TS-9** idempotent-rerun | 对已追平的下游立即重跑是真正 no-op：`result` 仍 `pass`、版本不动、`apply_changed` 为空 | production-path positive | `check_happy_and_idempotent` 的幂等重跑段 |
+
+### template-sync Contract 变更矩阵（breaking vs non-breaking）
+
+沿用上方 semver 判级表，针对本节规则细化：
+
+| 变更 | 判级 | 说明 |
+| --- | --- | --- |
+| 弱化/删除 TS-1..TS-9 任一规则（如允许版本在 validator 成功前推进、允许 generated 裸拷贝、放宽 MAJOR gate、伪造 rollback） | **MAJOR** | 默认视为实现 bug，不得为让测试变绿而改弱本节；改变承诺需 human 在 issue/PR 明确批注批准 |
+| receipt schema 增字段（向后兼容，既有字段语义不变） | MINOR | 下游读取代码通常无需改造 |
+| receipt schema 删除/重命名既有字段、`result` 枚举增删值 | **MAJOR** | 下游解析 receipt 的代码可能失败 |
+| 五类 ownership 语义变化（如 scaffold 改为总是覆盖、merge 哨兵约定改变） | **MAJOR** | 直接影响下游文件的实际落地结果 |
+| CLI/manifest 输入收紧（新增必填参数、manifest 新增必填字段） | **MAJOR** | 下游需人工改造调用方式 |
+| CLI/manifest 输入放宽（新增可选参数、manifest 新增可选 kind） | MINOR | 向后兼容 |
+| 文案/内部重构、无表面行为变化的 bugfix | PATCH | — |
+
+发现实现偏离本节任一规则：默认判定为 correctness bug，走 `.agent/human-gates.md` 另开 bug issue 修复
+production 实现；不得反向弱化本节规则去匹配当前实现的意外行为。
