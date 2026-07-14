@@ -7,16 +7,18 @@
 
 - 当前活跃 plan：`plans/20260712-plan-lifecycle-state.zh.md`（issue #13）· status: **implementing** ·
   branch `feat/13-plan-lifecycle-state`（worktree `.claude/worktrees/13-plan-lifecycle-state`）。
-- C1-C3/X1-X3 的真实 continuity/context runtime evidence 仍有效；G1/G2 已在多个精确代码
-  target 上由独立顶层 Claude sessions 证明 default deny、显式 SKIP allow 与 registry delete
-  deny。raw 转录、debug log 与 SHA256 见
-  `lab/evals/doc-lifecycle/evidence-20260713-runtime-probes.md`。
-- exact evidence HEAD `9dfc432` 的独立 final review 所报 GNU `cp` 长选项缩写与活动 shell 展开
-  MAJOR 已在 code target `821350a` 修复。normal/`python -S` self-test 与真实 hook regression 已补
-  `--t`/`--pa`/`--no-t`、`$PWD`/`${PWD}`、literal/external controls 并全绿；四个独立顶层
-  Claude sessions 又在该精确 target 完成 G1 default deny + SKIP allow、G2 opaque delete +
-  原始 `cp --t=$PWD/memory` deny，raw gzip+SHA256 已落盘。当前 direct evidence child 待提交；
-  随后须跑全 strict gates 与独立 exact-HEAD final review，APPROVE 前保持 implementing、不得合入。
+- 2026-07-14 主控审计确认：原 issue 是轻量生命周期/审批证据；注册表 Bash 删除 guard 是初审后
+  追加的防御性扩展，逐命令完备化导致非收敛 review/evidence 循环。旧执行 agent 已中断，保持 idle。
+- human 随后明确回复“ok do it”，首次真实批准冻结边界：PreToolUse 只拦单次调用可独立判定的局部
+  不完整；文档锚点/注册表跨文件一致性由 commit/治理门禁 validator 权威强制；Bash 删除 guard
+  仅保留现有常见路径尽力拦截，不再扩展 Shell parser。
+- `c9a8bf2` 提交说明及接班 agent 的旧 status 在 human 回答前声称“human 拍板 Option 1”，属于错误
+  provenance；本收口改动显式纠正，不把后续授权追溯成先前授权。
+- 既有 C1-C3/X1-X3 与 G1/G2 runtime 证据仍保留在
+  `lab/evals/doc-lifecycle/evidence-20260713-runtime-probes.md`；本轮不改 hook 行为，只补合同边界与
+  回归。收口候选已通过 lifecycle self-test、真实 hook regression、launch/continuity probes、adapter
+  sync 及 strict harness/anatomy/doc-lifecycle/governance；合并前仍必须把独立 fresh `APPROVE` 绑定到
+  待合入的 exact HEAD。
 - 权威状态注册表：`memory/doc-lifecycle.yaml`（brief/plan/review/decision 四类统一，语义见 `plans/ANATOMY.md`）。
 - 其余存量 plan 均已 `verified`，decisions 均 `approved`（详见注册表）。
 - 本节由 agent 在状态流转时更新；compact/clear 后 `context_continuity.py` 会把本文件回注新上下文。
@@ -49,9 +51,10 @@
 
 ## 未合入 blocker
 
-- #13：C1-C3/X1-X3 真实 runtime evidence 有效；GNU cp 缩写/展开修复 code target `821350a`
-  的 G1/G2 raw-bound runtime 4/4 PASS。当前须提交 evidence-only direct child、跑全 strict gates
-  并取得独立 exact-HEAD fresh `APPROVE`；未获批准前不得合入。
+- #13：2026-07-14 final Codex review 对 `c9a8bf2` 给出 `CHANGES_REQUESTED`（MEDIUM），指出 plan 曾把
+  “状态与注册表矛盾”写成每次工具调用的 hook 责任，而实现有意留给 commit 级 validator。human 已批准
+  按可执行边界收敛合同并停止 Bash parser 扩张；收口门禁已全绿，待合入 exact HEAD 必须有独立 fresh
+  `APPROVE`，否则不得合入。
 - #18 `cebe427`：raw-evidence 绑定 validator 的代码 MAJOR 已修复并获 code APPROVE；仍须纳入
   #13 hook 兼容修复，在最终 exact target 完成 C1-C7/X1-X7、`--require-fresh` exit 0 与 fresh
   final review。未取得这些证据前不得合入。

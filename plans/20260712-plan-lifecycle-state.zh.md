@@ -1,6 +1,6 @@
 # Plan 生命周期状态（issue #13）交互式计划
 
-Status: implementing · 2026-07-12 · human 拍板批准（见「当前决策」1–11 与 Plan revision log）→ 本轮进入实现
+Status: implementing · 2026-07-14 · human 拍板批准（见「当前决策」1–12 与 Plan revision log）→ final review 收口
 
 > 这是 human 与 Claude Code 的协商界面：Claude 写初稿 → human 在「Human 批注区」批注 → Claude 读 diff、收敛 → 每次采纳的修订做一个小 commit。实现只在 scope / forbidden paths / verification 清楚后开始。
 >
@@ -15,7 +15,7 @@ Status: implementing · 2026-07-12 · human 拍板批准（见「当前决策」
 - 四类文档天然相互关联——一条 brief 牵出一个 plan，plan 收敛后有 review，review 产出 decision。分开做各自的状态机反而制造割裂，所以本轮统一为**一套**状态语义与注册表（human 拍板：四类不是相互独立的，要有统一的审核机制防止 human/agent 不断漂移、反复返工）。
 - 每类文档的状态锚点仍是文档正文里一行人类可读的文本（不是 human 要手填的复杂 YAML front-matter）；机器可解析的关联/证据集中在 YAML 注册表里、由 agent 维护。
 - 机器可校验的部分（谁批准的、依据哪份 review/decision、approved 前必填字段是否齐全、注册表里的关联引用是否指向真实存在的实体）由 agent 维护、由 validator 校验，复用本 repo 已有的"结构化 ledger + 占位符容忍校验"范式（见下方「现状盘点」），而不是新发明一套平行机制。
-- **在 validator（事后强制）之外，新增一个机械拦截点（hook）**：当四类文档的状态跃迁到 approved 之类的"进阶"态、但状态/引用完整性不成立（如缺 scope/forbidden/verification、注册表引用悬空）时，在编辑动作阶段就拦下并提示。理由是 template 结构本该稳定，但项目开发中 human 与 agent 出于各种原因总会想去破坏它——防漂移必须有 hook 兜底，不能只靠事后 validator。
+- **在 validator（commit/治理门禁事后强制）之外，新增一个机械拦截点（hook）**：当单次写入可独立判定为不完整（如进阶态缺 scope/forbidden/verification、注册表自身引用悬空）时，在编辑动作阶段就拦下并提示。文档锚点与注册表状态是两个文件的跨文件不变量，状态流转时无法在每个独立 Edit/Write 后都保持一致，因此由 validator 在 commit/门禁粒度权威校验；hook 不阻断两步更新之间的短暂不一致。
 - 最终"是否收敛、是否批准、研究方向/风险是否可接受"仍是 human 判断；机器（无论 hook 还是 validator）只负责**发现遗漏/冲突/过期/悬空引用**这类**可判定的事实**并停下来提示，绝不替 human 做主观判断。
 
 ## 非目标
@@ -24,7 +24,7 @@ Status: implementing · 2026-07-12 · human 拍板批准（见「当前决策」
 - 不新造一套与 `DECISIONS.md` / `memory/change-control.yaml` 平行且语义重复的记录系统——新增的 YAML 注册表要与既有结构衔接（引用而非复制其内容）。**human 已拍板**：注册表落点为新建 `memory/doc-lifecycle.yaml`，不扩展 `memory/change-control.yaml`、不复用 `human/decisions/`（见已决策 3）。
 - 不实现 issue #14（多 agent 状态/通信/handoff 控制面）——本 issue 只给四类文档加"可检查状态"元数据 + 注册表；#14 未来若要跨 agent 消费这些状态，是它自己的范围。**human 已拍板**：`memory/doc-lifecycle.yaml` 就是本 issue 自用的普通文件，不为 #14 预留专用跨 agent 读取接口/协议——#14 需要时自己直接读这份 YAML，不需要 #13 提前设计稳定 schema 或通信协议（见已决策 5）。
 - 不实现 issue #12（bootstrap/adoption proof）——只保证新机制不破坏 `adopt-existing-repo.py` / `check-adoption-integrity.py` 现有校验；不去碰 adoption 自身的 phase 状态设计。**human 已拍板**：#12 的 adoption phase（discover/baseline/scaffold/normalize/prove）与 #13 的文档 lifecycle 状态**各自独立、不强行统一成一套状态机**（语义不同：一个是迁移流程阶段，一个是文档生命周期状态）——见已决策 6、已解决问题 4。
-- **新增的机械拦截 hook 只拦"可判定的事实"，不做主观判断。** hook 会在编辑动作阶段拦截"状态/引用完整性不成立"的写入（如某文档标 approved 前缺 scope/forbidden/verification、注册表里的关联引用指向不存在的实体、状态跃迁与注册表记录矛盾）。但它**绝不**替 human 判断"研究方向对不对、风险能不能接受、计划是否真的收敛"——这类主观判断仍然是 human gate，hook 不碰。这条边界（机器只判事实、不判主观）从头到尾保留；**变化的只是**：此前"本 issue 不加任何阻断类 hook、强制点只放 validator"的表述已被 human 推翻（见已决策 2 中的 hook 决策），改为"新增一个针对状态/引用完整性的有意义拦截点"。
+- **新增的机械拦截 hook 只拦单次工具调用中可判定的事实，不做主观判断，也不承诺跨文件事务。** hook 会拦截某文档标 approved 前缺 scope/forbidden/verification、注册表写入引入悬空引用等局部不完整；文档锚点与注册表的最终一致性由 validator 在 commit/门禁粒度强制。但它**绝不**替 human 判断"研究方向对不对、风险能不能接受、计划是否真的收敛"。Bash 侧防删除只是常见可判定路径的尽力拦截，不是完整 Shell 安全边界，也不再扩展逐命令解析。
 - 不做 NLP/语义分类器去"读懂"人类批注意图。「提取已确认/待修改/未决问题」的辅助能力止步于**格式约定 + 简单模式匹配**（例如可选前缀 `[OK]` / `[改]` / `[?]`），最终判断仍由 human 在批注区写清楚、agent 读 diff 确认，不自动下结论。
 - 本轮（写这份 plan doc）范围只到"方案收敛"，不写实现代码、不改 skill/validator/anatomy/hook 正文。
 
@@ -47,14 +47,14 @@ repo 里已经有好几套相邻但不统一的"状态/审批"机制，设计新
 1. `check_release_gates` / `check_regression_matrix` 的"占位符容忍 + 非默认态需真实证据"模式已经被验证可行、且零依赖，应直接复用到四类文档 lifecycle 校验上（含新 YAML 注册表的引用完整性校验），而不是重新设计一套语义。
 2. `plans/` 目录本身缺路由——这是"fresh session 可能误读阶段"风险的直接成因之一：没有地方明确写"哪个 plan 是当前的、哪个已 superseded"。统一注册表正好补上这个路由（不止 plan，brief/review/decision 同理）。
 3. 四类文档的状态证据/关联落点已由 human 拍板：**新建专属 `memory/doc-lifecycle.yaml`**（不扩展 `change-control.yaml`，不复用 `human/decisions/`）——见已决策 3、未解决问题 2（已决策）。
-4. **状态载体必须是 runtime-neutral 的**（见下节）：本 issue 的核心风险之一就是"不同 runtime 误读阶段"，任何依赖 Claude 专属注入通道的方案都会在 Codex 侧留缺口。**新增的拦截逻辑同样受此约束**：human 已拍板（见已决策 4）把逻辑折进现有 `.claude/hooks/pre_tool_guard.py`，而不是新建独立 hook 文件——`.claude/settings.json` 的 PreToolUse 与 `.codex/config.toml` 的 `[[hooks.PreToolUse]]` **已经**各挂了一份对同一个物理文件的调用（matcher 均覆盖 `Edit|Write`），因此**不需要新增两侧挂载点**，这是相比"独立新建 hook 文件"方案的直接优势：省掉一次"两侧手写挂载点、同 commit 对齐、纳入 harness parity"的工作量。仍需坚持的约束是：doc-lifecycle 的判定逻辑本体要写成一个 runtime-neutral 的 `python scripts/...` 函数，`pre_tool_guard.py` 内部只做薄接线去调它，避免逻辑直接堆进 hook 脚本、在未来演化中失控。
+4. **状态载体必须是 runtime-neutral 的**（见下节）：本 issue 的核心风险之一就是"不同 runtime 误读阶段"，任何依赖 Claude 专属注入通道的方案都会在 Codex 侧留缺口。**新增的拦截逻辑同样受此约束**：human 已拍板（见已决策 4）把逻辑折进现有 `.claude/hooks/pre_tool_guard.py`，而不是新建独立 hook 文件——`.claude/settings.json` 的 PreToolUse 与 `.codex/config.toml` 的 `[[hooks.PreToolUse]]` **已经**各挂了一份对同一个物理文件的调用（matcher 均覆盖 `Edit|Write`），因此**不需要新增两侧挂载点**。doc-lifecycle 的 parser、validator 与 hook 局部判定集中在 runtime-neutral 的 `scripts/check-doc-lifecycle.py`；`pre_tool_guard.py` 只做薄接线，跨文件不变量仍只由 validator 检查。
 
 ### 双 runtime（Claude / Codex）一致性 —— Codex 侧检查
 
 本 issue 原文点名"不同 runtime 或后续 agent 误读阶段"，即 Claude Code 与 Codex 双 runtime 场景。设计时按以下证据处理：
 
 - **状态锚点走纯文本、runtime-neutral。** 四类文档正文里一行 `Status: ...` 是纯 Markdown，Claude 与 Codex 用完全相同的方式（读文件）解析，不依赖任何 runtime 专属的结构化注入。这是刻意选择：任何"靠 hook 往上下文注入当前状态"的方案都要在两侧各配一份，adapter 生成有已知损耗，反而制造分歧。
-- **拦截逻辑折进现有 `pre_tool_guard.py`，判定本体走 runtime-neutral 的 `python scripts/...`。** human 已拍板：(a) 要新增机械拦截（见已决策 2）；(b) 具体实现是扩展现有 `.claude/hooks/pre_tool_guard.py`，不新建独立 hook 文件（见已决策 4）。实测确认 `.claude/settings.json`（PreToolUse，matcher `Bash|Edit|Write`）与 `.codex/config.toml`（`[[hooks.PreToolUse]]`，matcher `^(Bash|apply_patch|Edit|Write)$`）**已经**各自挂了一份对同一物理文件 `.claude/hooks/pre_tool_guard.py` 的调用，因此本轮**不需要新增两侧挂载点**——这是折进既有 hook 相比独立新建 hook 文件的直接优势。仍需做的：把"状态/引用完整性是否成立"的判定收敛成一个可独立调用的 Python 校验函数（与 validator 复用同一份逻辑），`pre_tool_guard.py` 内部新增分支调用它；改动仍要跑 `check-agent-harness.py` 确认双侧 parity 未破坏（两侧共享同一物理文件，理论上天然一致，parity 检查用于兜底确认）。
+- **拦截逻辑折进现有 `pre_tool_guard.py`，判定本体走 runtime-neutral 的 `python scripts/...`。** human 已拍板：(a) 要新增机械拦截（见已决策 2）；(b) 具体实现是扩展现有 `.claude/hooks/pre_tool_guard.py`，不新建独立 hook 文件（见已决策 4）。两侧 runtime 已挂载同一物理 hook；hook 通过 `scripts/check-doc-lifecycle.py` 复用同一 parser 与单文件/注册表局部判定，validator 额外负责 coverage 和锚点/注册表跨文件一致性。改动后仍需跑 `check-agent-harness.py` 确认双侧 parity。
 - **Codex 的 hook 事件存在，但当前接线不覆盖真正的 fresh startup。** 本次 Codex（gpt-5.6-sol, medium）一手读配置并实跑 hook：`.codex/config.toml:53-59` 挂了 `UserPromptSubmit`，`:61-68` 只挂 `SessionStart(clear)`，`:70-77` 另挂 `PostCompact`；并没有 `SessionStart(startup|resume)`。`context_continuity.py:23-25` 唯一读取 `memory/current-status.md`，`:37-42` 只接受 `source ∈ {compact, clear}` 或 `PostCompact`，不会读 `plans/`、`plans/ANATOMY.md`，也不会从 plan doc 提取 `Status`。定向探针进一步确认：`source=startup` 输出 0 bytes，`source=clear` 与 `PostCompact` 会回注 `memory/current-status.md`。因此现状只能保证 **clear/compact 后**的状态恢复，不能声称 fresh session 自动感知当前 plan；而且当前 `memory/current-status.md` 没有本 issue plan 的指针/状态，即使 clear/compact 触发也 surface 不出来。实现应把当前 plan 指针写入 `memory/current-status.md`（由现有共享 hook 回注），或另行明确扩展 startup/读取面；`plans/ANATOMY.md` 仅作为 schema/router 时不会被现有 hook自动读取。
 - **本次会话对 trust / 自动触发的证据边界。** 当前确为真实 Codex `codex exec` 会话（可见 `CODEX_THREAD_ID`、`CODEX_CI=1`，且项目级 AGENTS/skills 已进入会话），但没有可读的“project hook trust 已批准”状态字段，也没有 hook 执行日志；`UserPromptSubmit` 在低占用时本来就静默，故“未看到提示”既不能证明未触发，也不能单独证明已触发。上述结论依赖已加载的项目配置源码与对同一 hook 的定向实跑，不把 trust 状态或本次 startup 自动触发硬写成已证实。
 - **skill / command 是 canonical-in-`.claude/`、sync 到 Codex。** `interactive-plan-doc`、`worktree-pr-flow` 的 canonical 源在 `.claude/skills/`，Codex 侧消费的是 `sync-codex-adapters.py` 生成的 `.agents/skills/<name>/SKILL.md`（见 `scripts/sync-codex-adapters.py:106-115`）。**只要本 issue 改这两个 skill，就必须重跑 sync 并把 `--check` 纳入验证**，否则 Codex 侧拿到的是过期步骤——这是初稿遗漏的一步（已补进任务树与验证收口）。
@@ -119,9 +119,9 @@ repo 里已经有好几套相邻但不统一的"状态/审批"机制，设计新
   - [x] 定义注册表"引用完整性"规则（关联的 issue/branch/worktree/approval/上下游文档必须指向真实存在的实体，悬空即报错）
   - [x] [已决策] 实现"过期 approval"判定 = **仅"引用被标为 superseded 就算过期"**这一种触发（不做时间窗口、不做内容漂移 hash 判定）：某文档引用的 issue/branch/前置 plan/review/decision 被标 superseded 时，级联把本条 approval 判为失效——human 拍板，见已决策 7 / 已解决问题 5
   - [x] 定义"互相冲突批注"时的行为（不自动选边，升级为未解决问题，阻止误判为已收敛）
-  - [x] 仿 `check_release_gates` / `check_regression_matrix` 模式实现四类 doc lifecycle 校验（新脚本 `check-doc-lifecycle.py` 或扩展 `validate-governance.py`）；**判定逻辑抽成可被 hook 复用的函数**
+  - [x] 仿 `check_release_gates` / `check_regression_matrix` 模式实现四类 doc lifecycle 校验；parser 与单次写入局部判定可被 hook 复用，coverage 和跨文件一致性保留在 validator
 - [x] 机械拦截 hook 设计（扩展现有 `.claude/hooks/pre_tool_guard.py`，human 拍板，见已决策 2 / 4）
-  - [x] 定拦截触发面：拦哪个 tool_input 阶段（Write/Edit 目标命中四类文档、或写注册表）、拦什么（状态跃迁到 approved 等进阶态但完整性不成立、注册表引用悬空、状态与注册表矛盾）
+  - [x] 定拦截触发面：Write/Edit/apply_patch 写四类文档或注册表时，拦单次写入可独立判定的局部不完整（进阶态缺必填段、注册表自身引用悬空等）；文档锚点与注册表状态的跨文件一致性由 commit/治理门禁 validator 强制，允许两步更新之间短暂不一致
   - [x] [已决策] 实现方式 = 折进已有 `pre_tool_guard.py`（不新增独立 hook 文件）——human 拍板，见已决策 4；两侧 `.claude/settings.json`/`.codex/config.toml` 已挂载同一物理文件，本轮不需要新增挂载点，这是相比独立新建 hook 方案的优势
   - [x] hook 只调 runtime-neutral 的 `python scripts/...` 判定函数，逻辑不在 hook 内重复实现
   - [x] **双 runtime 挂载纪律（已简化）**：由于折进的是已挂载的 `pre_tool_guard.py`，两侧无需新增挂点；只需确认改动后重跑 `check-agent-harness.py` 确认现有 parity 未被破坏；若未来判定脚本需要新的 `python scripts/*` allowlist 条目，两侧手写同 commit 对齐（这条通用纪律保留，仅本轮触发面缩小）
@@ -185,14 +185,18 @@ repo 里已经有好几套相邻但不统一的"状态/审批"机制，设计新
 10. **状态 `approved→implementing→verified` 由 agent 自主标记，human 审 PR 时复核**。不要求每次流转停下来问 human——`implementing`/`verified` 是可由证据判断的事实（有没有对应 commit、测试是否通过）。`draft→in-review→approved` 仍由 human 批注驱动（approved 本身是 human gate）。理由：把 human gate 集中在 approved 与 PR review 两个真正需要主观判断的点，中间的事实性流转交给 agent + 证据，避免流程过度停顿。对应未解决问题 9。
 11. **fresh session 状态感知修复 = 方案 a+b 两者都做**：(a) 主动入口纪律——CLAUDE.md/AGENTS.md 等入口文档要求 session 开始时主动查当前 approved plan；(b) 同时把当前 approved plan 指针写进 `memory/current-status.md`（`context_continuity.py` 已读此文件），并评估是否扩展 hook 覆盖 `startup` 场景。理由：单靠纪律在 fresh startup 无机械兜底，单靠 hook 又受 Codex startup 未接线约束，两者叠加才能同时覆盖"有 hook 时机械回注、无 hook 时纪律补位"。对应未解决问题 10。
 
+**2026-07-14 human 审计后追加拍板：**
+
+12. **冻结 hook/validator 边界，停止把 #13 扩张成 Shell 安全解析器。** PreToolUse 负责单次工具调用中可独立判定的文档/注册表局部完整性；文档锚点与注册表状态的跨文件一致性由 commit/治理门禁 validator 权威强制。Bash 删除/覆盖拦截保留现有常见路径作为尽力减速带，但解释器、动态命令构造和未枚举写工具不属于 #13 完备性承诺。理由：跨文件状态流转必然经过短暂不一致；任意 Shell 副作用无法由命令字符串完备判定。此前 agent 在未收到 human 回答时把 auto-mode 推荐项写成“human 拍板 Option 1”是错误归因；本条以 human 明确回复“ok do it”为首次真实授权，不追溯伪造先前授权。
+
 **起草时的倾向（仍成立，供 human 推翻或确认的实现细节）：**
 
-- 复用 `check_release_gates` / `check_regression_matrix` 的"占位符容忍 + 非默认态需真实证据"校验范式，而非发明新语义；hook 与 validator 复用同一份判定逻辑。
+- 复用 `check_release_gates` / `check_regression_matrix` 的"占位符容忍 + 非默认态需真实证据"校验范式，而非发明新语义；hook 与 validator 复用同一 parser 和局部判定，validator 额外校验跨文件不变量。
 - 状态锚点走 runtime-neutral 的纯文本 `Status` 行；拦截逻辑的判定本体也走 `python scripts/...`，`pre_tool_guard.py` 内部只做薄接线，刻意不依赖 Claude 专属注入，以消除"不同 runtime 误读阶段"的成因（见现状盘点「双 runtime 一致性」）。
 
 ## 未解决问题
 
-> 编号保持稳定（其他段落按编号引用）。**1–10 全部已被 human 拍板收敛**（1/2/3/6 于首轮，4/5/7/8/9/10 于 2026-07-12 逐条拍板），11 已由真实 Codex 审查收敛为验收纪律。全部保留在此仅作可追溯记录，不再需要拍板——本文件当前无剩余待决 open question。
+> 编号保持稳定（其他段落按编号引用）。1–10 已由 human 于 2026-07-12 拍板，11 由真实 Codex 审查收敛为验收纪律，12 由 human 于 2026-07-14 审计后拍板。全部保留在此仅作可追溯记录；当前无剩余待决 open question。
 
 1. **[已决策——2026-07-12 human 拍板] 覆盖范围**：原问题是"本轮统一四类状态机，还是先只做 plan doc"。**决定：四类（brief/plan/review/decision）都做**，用统一 YAML 注册表登记。理由：四类相互关联，分开做制造割裂；要有统一审核机制防漂移、防返工。详见「当前决策」1。
 2. **[已决策——2026-07-12 human 拍板] 审批证据落地位置**：原三个候选——(a) 扩展 `memory/change-control.yaml`（已存在但目前 validator 不解析其内容）；(b) 复用 `human/decisions/`（已有状态枚举，但语义是"决策"不是"计划审批"，套用牵强）；(c) 新增专属 ledger。**决定：(c) 新建专属 `memory/doc-lifecycle.yaml`**，不扩展 (a)、不复用 (b)。理由：(a) 语义是"变更登记"且当前 validator 未解析其内容；(b) 语义是"决策"，套用到 brief/plan/review 的 lifecycle 状态上牵强；专属新文件语义最干净、由 agent 维护、不要求 human 手填复杂 YAML。详见「当前决策」3。
@@ -208,20 +212,16 @@ repo 里已经有好几套相邻但不统一的"状态/审批"机制，设计新
 
 ## 验证标准（本轮：方案文档本身）
 
-- 本 plan doc 经 human 拍板**完全收敛**：问题 1（覆盖范围）、2（注册表落点）、3（#14 边界）、4（#12 边界）、5（过期 approval 判定）、6（是否要机械拦截）、7（fixtures 落点）、8（存量回填）、9（状态转换 owner）、10（fresh session 状态感知修复）均已由 human 亲自定案；问题 11 已由真实 Codex 审查收敛为"必须做双 runtime、双边界冒烟"。**当前无剩余待拍板 open question。**
+- 本 plan doc 经 human 拍板**完全收敛**：问题 1–10 已定案，问题 11 已由真实 Codex 审查收敛为双 runtime 冒烟纪律，问题 12 冻结 hook/validator 边界并停止开放式 Bash parser 扩张。**当前无剩余待拍板 open question。**
 - Allowed paths / Forbidden paths 从"实现阶段草案"收敛为确定清单（含 Codex 侧生成产物与权限面的处理约定）。
 - （进入实现阶段后追加，见任务树"验证收口"）：`python scripts/validate-governance.py` 通过；新校验对 fixtures 的正向/三类异常各自给出正确结果；`python scripts/check-anatomy-drift.py` 通过；若改了 skill/脚本/权限面，`python scripts/sync-codex-adapters.py --check` 与（视情况）`python scripts/check-agent-harness.py` 通过，Codex adapter 无 stale/漂移。
 
 ## 下一步
 
-- **全部 open question 已收敛，功能实现与 C1-C3/X1-X3 runtime evidence 已完成。** 当前处于
-  final-review 收口，不再等待进入实现的批准。
-- exact evidence HEAD `9dfc432` 的 final review 所报 GNU cp 长选项缩写与活动 shell 展开 MAJOR
-  已在 code target `821350a` 修复；normal/`python -S` 对抗矩阵全绿，且四个独立 disposable
-  clones 的 G1 default deny + SKIP allow、G2 opaque delete + 原始 `cp --t=$PWD/memory` deny
-  已真实 PASS，raw gzip/SHA256 已纳入当前 direct evidence child。
-- 下一步固定为：提交本 evidence-only direct child，跑全 strict gates 与独立 exact-HEAD fresh
-  review。仅 `APPROVE` 后才把本 plan 标为 verified 并本地合入。
+- **全部 open question 已收敛，功能实现与既有 runtime evidence 已完成。** 2026-07-14 审计已冻结
+  验收边界：不再新增 Bash 命令解析；跨文件锚点/注册表一致性由 validator 在 commit 粒度强制。
+- 收口候选必须通过完整门禁并取得独立 exact-HEAD fresh review；只有 verdict 为 `APPROVE`，才可
+  进入本地合并决策。Bash parser 不再作为开放式审查目标。
 
 ## Plan revision log
 
@@ -256,3 +256,4 @@ repo 里已经有好几套相邻但不统一的"状态/审批"机制，设计新
 - 2026-07-13 **最终 code target `654af4c` 修复 cp/durable 两项 MAJOR，G1/G2 exact-target runtime PASS**。GNU cp destination parser 覆盖 direct target、existing directory、`-t`/`--target-directory`、short option bundle 与 `--parents`，normal/`python -S` self-test、真实 hook regression 及 repo 外 controls 全绿；任务树全量勾选，current-status/checklist 与已完成证据一致。四个全新 disposable clones 的独立顶层 Claude Code 2.1.207 / Opus 4.8 sessions 分别证明 default malformed Write deny、仅进程级 `DOC_LIFECYCLE_SKIP=1` allow、opaque registry delete deny、`cp --target-directory` overwrite deny；每份 raw 内嵌 exact HEAD、wrapper 全文+SHA、环境与 pre/post facts，八份 raw/debug gzip+SHA256 纳入 direct evidence child。下一门槛仅为全 strict gates 与独立 exact-HEAD final review。
 - 2026-07-13 **evidence HEAD `9dfc432` 独立 final review：`CHANGES_REQUESTED`（1 MAJOR）**。GNU `cp` 接受 `--target-directory` 的无歧义长选项缩写（`--t` 起）且 Bash 会展开 `$PWD`，旧 parser 只认完整 option 并把 shell word 当字面路径，故 `cp --t=memory ...` 与 `cp --target-directory=$PWD/memory ...` 均可覆盖 registry 而 hook 放行。修复统一解析 `--t`/`--pa`/`--no-t` 及更长合法前缀，确定性展开 `$PWD`/`${PWD}`，对其余活动 shell 展开 fail-closed；normal/`python -S` self-test 与真实 hook regression 补 abbreviation、expansion、quoted/escaped literal、repo 外 controls。新 code target 仍须实际重跑 G1/G2、raw evidence、全 strict gates 与独立 final review。
 - 2026-07-13 **最终 code target `821350a` 的 G1/G2 exact-target runtime PASS**。四个全新 disposable clones 与独立顶层 Claude Code 2.1.207 / Opus 4.8 sessions 分别证明 malformed Write 默认 deny、仅进程级 `DOC_LIFECYCLE_SKIP=1` allow、opaque `git rm --pathspec-from-file` deny、原始 `cp --t=$PWD/memory .../doc-lifecycle.yaml` deny；每份有效 typescript 只有一个 tool call，并内嵌 exact HEAD、wrapper 全文+SHA、环境与 pre/post facts。首次 reject 因网络沙箱 `ConnectionRefused` 且零 tool call，不计 PASS但原文保留。十份 raw/debug 以 `gzip -n` 与 SHA256 纳入 direct evidence child；下一门槛仅为全 strict gates 与独立 exact-HEAD final review。
+- 2026-07-14 **human 审计纠偏并明确回复“ok do it”**。审计确认原 issue 是轻量生命周期/审批证据，Bash 注册表删除 guard 是初审后追加的防御性扩展，逐命令完备化导致非收敛 review/evidence 循环。冻结验收边界：hook 只拦单次调用可独立判定的局部不完整；锚点/注册表跨文件一致性由 commit/治理门禁 validator 强制；Bash 删除 guard 仅保留现有尽力减速带，不再扩张。另纠正 `c9a8bf2` 提交说明及接班 status 在 human 回答前错误声称“human 拍板 Option 1”的 provenance；当前授权不追溯使该旧声明变真。

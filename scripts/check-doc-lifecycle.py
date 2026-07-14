@@ -42,6 +42,10 @@ draft/in-review 天然通过，状态进阶才强制证据。PyYAML 可选：缺
   外无法安全静态求值的活动 shell 展开——目的路径不可核验。
 human 显式绕过：`DOC_LIFECYCLE_SKIP=1`（validator 仍会事后校验）。
 
+文档状态锚点与注册表状态是跨文件不变量：状态流转需要分别写两个文件，PreToolUse 允许两次
+工具调用之间短暂不一致，只校验单次写入可独立判定的局部完整性；最终一致性由本脚本在
+commit/治理门禁粒度权威校验。不要把 hook 扩张成跨文件事务。
+
 **架构边界（Bash 侧注册表删除拦截是「尽力而为的减速带」，不是完备安全边界）**：静态命令分析
 无法可靠拦截解释器（`python`/`perl`/`awk`/`ex` 等，目的路径运行时才构造）、`eval`/命令替换
 `$(...)`、`find -delete`/`-exec`/`xargs` 及无界的写工具尾巴（`install`/`ln -sf`/`rsync`/`sed -i`…）。
@@ -1004,8 +1008,11 @@ def _stale_reason(rel: str, status: str, repo: Path) -> str | None:
 
 
 def _doc_write_reason(rel: str, kind: str, content: str, markers_text: str, repo: Path) -> str | None:
-    """对一次「写入后的文档内容」判定进阶态完整性。content=用于状态/段落检查的全文（或联合语料），
-    markers_text=用于未决批注检查的文本（apply_patch update 只看新增行，避免误拦）。"""
+    """判定单份文档写入后的局部完整性；跨文件锚点/注册表一致性留给 commit 级 validator。
+
+    content=用于状态/段落检查的全文（或联合语料），markers_text=用于未决批注检查的文本
+    （apply_patch update 只看新增行，避免误拦）。
+    """
     status, anchor_error = _parse_status_anchor(content)
     if anchor_error:
         return f"doc-lifecycle: {rel} 的{anchor_error}。{_ESCAPE_HINT}"
@@ -2122,6 +2129,18 @@ def self_test() -> int:
     td, root = fresh({"plans/demo.zh.md": _OK_PLAN, REGISTRY_REL: reg})
     errs, _ = validate_repo(root)
     check("锚点/注册表状态矛盾被报错", any("矛盾" in e for e in errs))
+    check(
+        "hook 允许文档/注册表两步更新之间短暂不一致",
+        pretooluse_reason(
+            "Write", {"file_path": str(root / "plans/demo.zh.md"), "content": _OK_PLAN}, root
+        ) is None,
+    )
+    check(
+        "hook 允许注册表/文档两步更新之间短暂不一致",
+        pretooluse_reason(
+            "Write", {"file_path": str(root / REGISTRY_REL), "content": reg}, root
+        ) is None,
+    )
     td.cleanup()
 
     # 7. 未登记文档（coverage）

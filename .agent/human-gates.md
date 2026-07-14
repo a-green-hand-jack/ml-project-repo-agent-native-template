@@ -31,6 +31,8 @@ brief / plan / review / decision 的 `draft → in-review → approved` 由 huma
   upstream/downstream/path 引用不悬空；上游被 `superseded` 则本条 approval 过期，需重新走 gate。
 - `approved → implementing → verified` 由 agent 据证据自主标记，human 审 PR 时复核。
 - human 明示例外可 `DOC_LIFECYCLE_SKIP=1` 绕过 hook（validator 仍事后校验）。
+- PreToolUse 只拦单次写入可独立判定的局部不完整；文档锚点与注册表状态的跨文件一致性由
+  commit/治理门禁 validator 权威校验，允许两步更新之间短暂不一致。
 
 ## launch 门禁（launch registry）
 

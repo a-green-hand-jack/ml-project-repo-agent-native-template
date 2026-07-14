@@ -46,10 +46,12 @@ draft → in-review → approved → implementing → verified
 
 | 层 | 位置 | 拦什么 |
 | --- | --- | --- |
-| 机械拦截 | `.claude/hooks/pre_tool_guard.py` → `check-doc-lifecycle.py:pretooluse_reason` | 写入使文档进入 approved/implementing 但 scope/forbidden/verification 缺失、批注区残留 `[?]`/`[改]`、上游已 superseded、注册表引用悬空/kind 与路径类别不符（谎报 kind）；活跃 plan 的 issue/branch/worktree 关联不成立；删除/移走/覆盖注册表（含 `command`/`env` wrapper、git 全局选项、`cp`/`dd`/`tee`；GNU cp 长选项缩写与 `$PWD` 展开纳入判定，其余活动展开 fail-closed）；apply_patch Update 尊重 `@@ <anchor>` 重建 patch 后全文，anchor/上下文不能唯一定位时保守拦截（提示改用 Edit） |
-| 事后校验 | `scripts/check-doc-lifecycle.py`（`validate-governance.py` 拉起） | 上述全部 + 锚点/注册表一致 + 四类文档必须登记 + 存在受管文档但注册表缺失 = error（非 strict 也 fail） |
+| 机械拦截 | `.claude/hooks/pre_tool_guard.py` → `check-doc-lifecycle.py:pretooluse_reason` | 单次写入可独立判定的局部不完整：进阶态缺 scope/forbidden/verification、批注区残留 `[?]`/`[改]`、上游已 superseded、注册表自身引用悬空/kind 与路径类别不符、活跃 plan 关联不成立；apply_patch Update 无法可靠重建时保守拦截；删除/移走/覆盖注册表仅对现有常见可判定 Bash 模式尽力拦截，不承诺完备 Shell 副作用分析 |
+| 事后校验 | `scripts/check-doc-lifecycle.py`（`validate-governance.py` 拉起） | 上述结构规则 + 文档锚点/注册表跨文件一致 + 四类文档必须登记 + 存在受管文档但注册表缺失 = error（非 strict 也 fail）；这是 commit/治理门禁粒度的权威保证 |
 
 human 显式绕过 hook：`DOC_LIFECYCLE_SKIP=1`（validator 仍会事后校验）。
+状态流转需要分别更新文档与注册表，允许两个工具调用之间短暂不一致；任何最终提交若仍不一致，
+validator 必须失败。不要为消除该短暂窗口把 hook 扩张成跨文件事务或完整 Shell parser。
 批注收敛辅助只是格式约定：`[OK]` / `[改]` / `[?]` 可选前缀 + 模式匹配，不做语义分类。
 活跃 plan 的 issue 远端存在性不触发网络请求：validator 要求非占位规范 `#N`/GitHub issue URL；
 branch 与 implementing worktree 则分别按本地 Git ref、`git worktree list` 真实核验。`worktree: .`
