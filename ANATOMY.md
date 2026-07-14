@@ -10,6 +10,8 @@ related_files:
   - memory/ANATOMY.md
   - deliverables/ANATOMY.md
   - scripts/ANATOMY.md
+children:
+  - scripts/ANATOMY.md
 maintenance: |
   这是 root router。结构改动必须同 commit 更新本文件与相关子 ANATOMY。
   引用必须 repo-relative 且尽量 line-addressed（path/to/file.py:42 或 :42-90）。
