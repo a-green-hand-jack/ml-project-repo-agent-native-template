@@ -376,6 +376,61 @@ def check_no_verify_no_advance(tmp: Path) -> int:
     return 0
 
 
+# The exact path set that build_upstream()/build_downstream() cause plan_sync()
+# to mark writes=True for (framework create/overwrite + scaffold create +
+# merge-update) -- the same fixture pair check_happy_and_idempotent drives to a
+# real apply of these same five paths. Used here to prove --dry-run's planned
+# set matches the real apply plan, without re-implementing classify()/plan_sync.
+EXPECTED_WRITE_PATHS = {"VERSION", "template-manifest.toml", "fw/tool.txt", "merge.md", "scaf/new.txt"}
+
+
+def check_dry_run_no_side_effect(tmp: Path) -> int:
+    """--dry-run drives the real copied-script CLI end-to-end: it must share the
+    exact same plan/classify surface as apply (planned paths == the real apply's
+    write set), exit 0, report result=dry-run, and cause zero downstream side
+    effects -- except that an explicitly-passed --receipt PATH is written (the
+    one documented exception), never the default receipt path, never the synced
+    files/generator/validator/.template.toml version."""
+    up = tmp / "up-dr"
+    down = tmp / "down-dr"
+    receipt = tmp / "receipt-dr.json"
+    build_upstream(up, "v1.1.0")
+    build_downstream(down, "v1.0.0", gen=GEN_OK, val=VAL_OK)
+
+    proc = run_sync(down, up, receipt, "--dry-run")
+    if proc.returncode != 0:
+        return fail("--dry-run should exit 0", proc)
+    if not receipt.exists():
+        return fail("--dry-run with an explicit --receipt PATH must still write that one file", proc)
+    r = read_json(receipt)
+    if r["result"] != "dry-run":
+        return fail(f"--dry-run receipt result should be 'dry-run', got {r['result']}", proc)
+    if r["stages"]["apply"] != "planned":
+        return fail(f"--dry-run stages.apply should be 'planned', got {r['stages']}", proc)
+    planned = set(r["manifest"]["expected"])
+    if planned != EXPECTED_WRITE_PATHS:
+        return fail(
+            f"--dry-run planned write set must equal the real apply's write set "
+            f"{EXPECTED_WRITE_PATHS}, got {planned} (dry-run and apply must share one plan)",
+            proc,
+        )
+    # zero side effects: no default receipt path, no synced bytes, no generator/
+    # validator run, no version advance.
+    if (down / ".template-sync-receipt.json").exists():
+        return fail("--dry-run must never write the default receipt path when --receipt is given", proc)
+    if version_of(down) != "v1.0.0":
+        return fail(f"--dry-run must not advance the version, got {version_of(down)}", proc)
+    if (down / "fw" / "tool.txt").read_text() != "old-fw\n":
+        return fail("--dry-run must not touch framework files", proc)
+    if (down / "scaf" / "new.txt").exists():
+        return fail("--dry-run must not create scaffold files", proc)
+    if (down / "gen").exists():
+        return fail("--dry-run must never run the generator (gen/ must not exist)", proc)
+    if "DOWN-HEAD" not in (down / "merge.md").read_text() or "UPSTREAM BLOCK v2" in (down / "merge.md").read_text():
+        return fail("--dry-run must not touch merge files", proc)
+    return 0
+
+
 def check_dirty_upstream_source(tmp: Path) -> int:
     """A git upstream must record git SHA + working-tree content digest + dirty
     status; a dirty source must not be reported as a clean SHA only."""
@@ -755,6 +810,7 @@ def main() -> int:
             check_generator_fail,
             check_validator_fail,
             check_no_verify_no_advance,
+            check_dry_run_no_side_effect,
             check_dirty_upstream_source,
             check_warnings_partial,
             check_generated_arbitrary_unexpected,
