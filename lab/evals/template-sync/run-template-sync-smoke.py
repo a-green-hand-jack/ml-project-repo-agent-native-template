@@ -407,6 +407,12 @@ def check_dry_run_no_side_effect(tmp: Path) -> int:
         return fail(f"--dry-run receipt result should be 'dry-run', got {r['result']}", proc)
     if r["stages"]["apply"] != "planned":
         return fail(f"--dry-run stages.apply should be 'planned', got {r['stages']}", proc)
+    if (r["stages"]["generated_rebuild"] != "skipped" or r["stages"]["validate"] != "skipped"
+            or r["stages"]["commit_version"] != "skipped"):
+        return fail(
+            "--dry-run must leave generated_rebuild/validate/commit_version all 'skipped', "
+            f"got {r['stages']}", proc,
+        )
     planned = set(r["manifest"]["expected"])
     if planned != EXPECTED_WRITE_PATHS:
         return fail(
@@ -422,6 +428,10 @@ def check_dry_run_no_side_effect(tmp: Path) -> int:
         return fail(f"--dry-run must not advance the version, got {version_of(down)}", proc)
     if (down / "fw" / "tool.txt").read_text() != "old-fw\n":
         return fail("--dry-run must not touch framework files", proc)
+    if (down / "VERSION").exists():
+        return fail("--dry-run must not create the planned downstream/VERSION target", proc)
+    if (down / "template-manifest.toml").exists():
+        return fail("--dry-run must not create the planned downstream/template-manifest.toml target", proc)
     if (down / "scaf" / "new.txt").exists():
         return fail("--dry-run must not create scaffold files", proc)
     if (down / "gen").exists():
