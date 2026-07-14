@@ -61,6 +61,9 @@ build/
 # 自主窗口档：本机、临时、git-ignored（模板只提供 .example）
 .claude/settings.local.json
 
+# 并行开发的 linked git worktrees（功能分支检出），是操作性 scratch，绝不进 Git
+.claude/worktrees/
+
 # subagent 报告是过程产物，不进 Git（只留说明）
 .claude/agent-reports/*
 !.claude/agent-reports/README.md
