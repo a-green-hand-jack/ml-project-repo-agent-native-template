@@ -58,15 +58,27 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[3]
 SCRIPT = REPO / "scripts" / "template-sync.py"
 
-# GEN_OK writes an EXTRA generated output (.codex/generated.txt) so the fixture
-# can prove generator-created files land in manifest.generated_outputs (single
-# listed, not swallowed, not counted as unexpected).
+# The upstream ships gen/adapter.txt as its committed generated output
+# (kind=generated -> skipped by raw sync, rebuilt by the generator). GEN_CONTENT
+# is the canonical expected content; GEN_OK reproduces it exactly.
+GEN_CONTENT = "GEN-OUT v1\n"
 GEN_OK = (
     "import os, sys\n"
-    "os.makedirs('.codex', exist_ok=True)\n"
-    "open('.codex/generated.txt', 'w').write('adapter output\\n')\n"
+    "os.makedirs('gen', exist_ok=True)\n"
+    "open('gen/adapter.txt', 'w').write('GEN-OUT v1\\n')\n"
     "print('[stub-gen] ok'); sys.exit(0)\n"
 )
+# GEN_EXTRA reproduces the expected file BUT also emits an arbitrary file that is
+# not in the expected generated set -> must become generated.unexpected -> fail.
+GEN_EXTRA = (
+    "import os, sys\n"
+    "os.makedirs('gen', exist_ok=True)\n"
+    "open('gen/adapter.txt', 'w').write('GEN-OUT v1\\n')\n"
+    "open('gen/rogue.txt', 'w').write('surprise\\n')\n"
+    "print('[stub-gen] extra'); sys.exit(0)\n"
+)
+# GEN_MISSING exits 0 but does not produce the expected generated file -> missing.
+GEN_MISSING = "import sys\nprint('[stub-gen] noop'); sys.exit(0)\n"
 GEN_FAIL = "import sys\nprint('[stub-gen] boom')\nsys.exit(1)\n"
 VAL_OK = "import sys\nprint('[stub-val] ok')\nsys.exit(0)\n"
 VAL_FAIL = "import sys\nprint('[stub-val] boom')\nsys.exit(1)\n"
@@ -125,7 +137,7 @@ def build_upstream(root: Path, version: str, *, with_warnings: bool = False) -> 
     write(root / "template-manifest.toml", MANIFEST)
     write(root / "fw" / "tool.txt", "new-fw\n")
     write(root / "fw" / "same.txt", "identical\n")
-    write(root / "gen" / "adapter.txt", "GENERATED upstream, must not be raw-copied\n")
+    write(root / "gen" / "adapter.txt", GEN_CONTENT)  # canonical expected generated content
     write(root / "proj" / "keep.txt", "upstream project content (must be ignored)\n")
     write(root / "scaf" / "new.txt", "scaffold seed\n")
     write(root / "scaf" / "existing.txt", "upstream scaffold seed (must NOT overwrite)\n")
@@ -192,19 +204,24 @@ def check_happy_and_idempotent(tmp: Path) -> int:
         return fail(f"all stages should be ok on happy path, got {stages}", proc)
     if r["manifest"]["missing"] or r["manifest"]["unexpected"]:
         return fail(f"happy manifest should have no missing/unexpected, got {r['manifest']}", proc)
-    # generator-created output is listed under generated_outputs, NOT unexpected.
-    if ".codex/generated.txt" not in r["manifest"]["generated_outputs"]:
-        return fail(f"generator output must be recorded in generated_outputs, got {r['manifest']}", proc)
-    if ".codex/generated.txt" in r["manifest"]["unexpected"]:
-        return fail("generator output must not be counted as unexpected", proc)
+    # generated exact manifest: expected generated set = kind=generated upstream paths.
+    gm = r["manifest"]["generated"]
+    if "gen/adapter.txt" not in gm["expected"]:
+        return fail(f"expected generated set should come from kind=generated paths, got {gm}", proc)
+    if "gen/adapter.txt" not in gm["actual_changed"]:
+        return fail(f"generator should (re)produce the expected generated file, got {gm}", proc)
+    if gm["missing"] or gm["unexpected"]:
+        return fail(f"happy generated manifest should have no missing/unexpected, got {gm}", proc)
 
     # five-class assertions
     if (down / "fw" / "tool.txt").read_text() != "new-fw\n":
         return fail("framework positive: fw/tool.txt should be overwritten")
     if "fw/same.txt" in r["manifest"]["apply_changed"]:
         return fail("framework negative: identical fw/same.txt should not be rewritten")
-    if (down / "gen" / "adapter.txt").exists():
-        return fail("generated negative: gen/adapter.txt must NOT be raw-copied downstream")
+    if "gen/adapter.txt" in r["manifest"]["apply_changed"]:
+        return fail("generated negative: gen/adapter.txt must NOT be raw-copied during apply")
+    if (down / "gen" / "adapter.txt").read_text() != GEN_CONTENT:
+        return fail("generated positive: generator should reproduce gen/adapter.txt content")
     if (down / "proj" / "keep.txt").read_text() != "DOWNSTREAM OWNED — do not touch\n":
         return fail("project negative: downstream proj/keep.txt bytes must be preserved")
     if not (down / "scaf" / "new.txt").exists():
@@ -398,6 +415,139 @@ def check_interrupt_unknown(tmp: Path) -> int:
     return 0
 
 
+def check_generated_arbitrary_unexpected(tmp: Path) -> int:
+    """A generator that emits a file outside the expected generated set -> that
+    path is generated.unexpected, overall not success, version not advanced."""
+    up = tmp / "up-gx"
+    down = tmp / "down-gx"
+    receipt = tmp / "receipt-gx.json"
+    build_upstream(up, "v1.1.0")
+    build_downstream(down, "v1.0.0", gen=GEN_EXTRA, val=VAL_OK)
+
+    proc = run_sync(down, up, receipt)
+    if proc.returncode == 0:
+        return fail("arbitrary generator output must fail the sync", proc)
+    if version_of(down) != "v1.0.0":
+        return fail(f"arbitrary generator output must NOT advance version, got {version_of(down)}", proc)
+    r = read_json(receipt)
+    if "gen/rogue.txt" not in r["manifest"]["generated"]["unexpected"]:
+        return fail(f"rogue generator file must be listed in generated.unexpected, got {r['manifest']['generated']}", proc)
+    if r["failure"]["stage"] != "generated_rebuild":
+        return fail(f"failure stage should be generated_rebuild, got {r.get('failure')}", proc)
+    return 0
+
+
+def check_generated_missing(tmp: Path) -> int:
+    """A generator that fails to (re)produce an expected generated file -> that
+    path is generated.missing, sync fails, version not advanced."""
+    up = tmp / "up-gm"
+    down = tmp / "down-gm"
+    receipt = tmp / "receipt-gm.json"
+    build_upstream(up, "v1.1.0")
+    build_downstream(down, "v1.0.0", gen=GEN_MISSING, val=VAL_OK)
+
+    proc = run_sync(down, up, receipt)
+    if proc.returncode == 0:
+        return fail("a missing expected generated file must fail the sync", proc)
+    if version_of(down) != "v1.0.0":
+        return fail(f"missing generated file must NOT advance version, got {version_of(down)}", proc)
+    r = read_json(receipt)
+    if "gen/adapter.txt" not in r["manifest"]["generated"]["missing"]:
+        return fail(f"expected generated file must be listed in generated.missing, got {r['manifest']['generated']}", proc)
+    return 0
+
+
+def _load_downstream_module(down: Path, name: str):
+    spec = importlib.util.spec_from_file_location(name, down / "scripts" / "template-sync.py")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _drive_main(mod, up: Path, receipt: Path) -> int:
+    argv = sys.argv
+    sys.argv = ["template-sync.py", "--from", str(up), "--receipt", str(receipt)]
+    try:
+        return mod.main()
+    finally:
+        sys.argv = argv
+
+
+def check_commit_interrupt(tmp: Path) -> int:
+    """End-to-end (in-process) commit interruption at two points: BEFORE the
+    atomic replace (old version stays) and AFTER the replace (new version is
+    already on disk). Both must produce an unknown, non-zero receipt whose
+    committed_version / version_advanced match the ACTUAL on-disk state — no
+    hard-coded version_kept=old, no fake rollback."""
+    # Case A: interrupt before replace -> disk keeps old version.
+    upA, downA, recA = tmp / "up-ciA", tmp / "down-ciA", tmp / "rec-ciA.json"
+    build_upstream(upA, "v1.1.0")
+    build_downstream(downA, "v1.0.0", gen=GEN_OK, val=VAL_OK)
+    modA = _load_downstream_module(downA, "ts_ciA")
+    real_a = modA.os.replace
+    fired_a = {"v": False}
+
+    def before_replace(src: object, dst: object) -> None:
+        if not fired_a["v"]:
+            fired_a["v"] = True
+            raise KeyboardInterrupt
+        return real_a(src, dst)  # later writes (receipt) proceed normally
+
+    modA.os.replace = before_replace
+    try:
+        rcA = _drive_main(modA, upA, recA)
+    except KeyboardInterrupt:
+        return fail("before-replace interrupt must be caught inside main, not propagate")
+    finally:
+        modA.os.replace = real_a
+    if rcA == 0:
+        return fail("commit interrupt must exit non-zero")
+    if version_of(downA) != "v1.0.0":
+        return fail(f"before-replace interrupt must leave old version on disk, got {version_of(downA)}")
+    rA = read_json(recA)
+    if rA["result"] != "unknown" or rA["stages"]["commit_version"] != "interrupt":
+        return fail(f"before-replace receipt must be unknown/interrupt, got {rA['result']}/{rA['stages']}")
+    if rA["committed_version"] != "v1.0.0" or rA["version_advanced"]:
+        return fail(f"before-replace receipt must reflect version NOT advanced, got {rA}")
+    if rA["failure"]["actual_version"] != "v1.0.0":
+        return fail(f"before-replace actual_version must match disk, got {rA['failure']}")
+
+    # Case B: interrupt after replace -> disk already shows the new version.
+    upB, downB, recB = tmp / "up-ciB", tmp / "down-ciB", tmp / "rec-ciB.json"
+    build_upstream(upB, "v1.1.0")
+    build_downstream(downB, "v1.0.0", gen=GEN_OK, val=VAL_OK)
+    modB = _load_downstream_module(downB, "ts_ciB")
+    real_b = modB.os.replace
+    fired_b = {"v": False}
+
+    def after_replace(src: object, dst: object) -> None:
+        real_b(src, dst)
+        if not fired_b["v"]:
+            fired_b["v"] = True
+            raise KeyboardInterrupt
+
+    modB.os.replace = after_replace
+    try:
+        rcB = _drive_main(modB, upB, recB)
+    except KeyboardInterrupt:
+        return fail("after-replace interrupt must be caught inside main, not propagate")
+    finally:
+        modB.os.replace = real_b
+    if rcB == 0:
+        return fail("after-replace interrupt must still exit non-zero (unknown)")
+    if version_of(downB) != "v1.1.0":
+        return fail(f"after-replace interrupt: disk must show advanced version, got {version_of(downB)}")
+    rB = read_json(recB)
+    if rB["result"] != "unknown":
+        return fail(f"after-replace receipt must be unknown, got {rB['result']}")
+    if rB["committed_version"] != "v1.1.0" or not rB["version_advanced"]:
+        return fail(f"after-replace receipt must honestly report advanced under interrupt, got {rB}")
+    if rB["failure"]["version_kept"] is not None:
+        return fail("after-replace must NOT claim version_kept=old (no fake rollback)")
+    return 0
+
+
 def check_timeout_unknown(tmp: Path) -> int:
     """A validator that never returns within --timeout must yield result=unknown
     (never pass), keep the old version, and exit non-zero (issue #35: timeout /
@@ -524,7 +674,10 @@ def main() -> int:
             check_no_verify_no_advance,
             check_dirty_upstream_source,
             check_warnings_partial,
+            check_generated_arbitrary_unexpected,
+            check_generated_missing,
             check_interrupt_unknown,
+            check_commit_interrupt,
             check_timeout_unknown,
             check_major_gate,
             check_atomic_write_fail,

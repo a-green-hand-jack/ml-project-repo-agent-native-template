@@ -291,6 +291,20 @@ def build_manifest(plan: list[PlanItem], applied: ApplyResult, upstream: Path,
         if not landed or item.path not in changed_set:
             missing.append(item.path)
     unexpected = sorted(p for p in apply_changed if p not in planned_set)
+
+    # generated exact manifest：canonical expected set = 同一 plan 中 kind=generated 的上游路径
+    # （单一真源，不新增清单）。post-generator 校验每个 expected generated path 存在且内容与
+    # 上游生成物一致；生成器 delta 中不在 expected set 的路径是 generated.unexpected。
+    gen_expected = [p.path for p in plan if p.kind == "generated"]
+    gen_expected_set = set(gen_expected)
+    gen_missing: list[str] = []
+    for gp in gen_expected:
+        dstg = DOWNSTREAM / gp
+        srcg = upstream / gp
+        # unchanged-but-content-correct 不算 missing；缺失或内容错算 missing。
+        if not dstg.exists() or (srcg.exists() and dstg.read_bytes() != srcg.read_bytes()):
+            gen_missing.append(gp)
+    gen_unexpected = sorted(p for p in generated_outputs if p not in gen_expected_set)
     return {
         "expected": planned,
         "apply_changed": apply_changed,
@@ -298,6 +312,12 @@ def build_manifest(plan: list[PlanItem], applied: ApplyResult, upstream: Path,
         "missing": sorted(set(missing)),
         "unexpected": unexpected,
         "excluded": excluded,
+        "generated": {
+            "expected": gen_expected,
+            "actual_changed": generated_outputs,
+            "missing": sorted(set(gen_missing)),
+            "unexpected": gen_unexpected,
+        },
     }
 
 
@@ -542,7 +562,9 @@ def main() -> int:
         },
         "manifest": {"expected": [pi.path for pi in plan if pi.writes],
                      "apply_changed": [], "generated_outputs": [],
-                     "missing": [], "unexpected": [], "excluded": []},
+                     "missing": [], "unexpected": [], "excluded": [],
+                     "generated": {"expected": [pi.path for pi in plan if pi.kind == "generated"],
+                                   "actual_changed": [], "missing": [], "unexpected": []}},
         "warnings": ([f"merge:{w}" for w in warn_merge]
                      + [f"unclassified:{w}" for w in warn_unclassified]),
         "failure": None,
@@ -598,10 +620,13 @@ def main() -> int:
             val_status, val_detail = "interrupt", "被中断 (KeyboardInterrupt)"
     receipt["stages"]["validate"] = val_status
 
+    gen_manifest = manifest["generated"]
+    generated_ok = not gen_manifest["missing"] and not gen_manifest["unexpected"]
     indeterminate = (gen_status in ("timeout", "error", "interrupt")
                      or val_status in ("timeout", "error", "interrupt"))
-    # 版本推进的唯一条件：apply 干净 + 生成器成功 + validator **真的通过**（skipped 不算）。
-    version_ok = apply_ok and gen_status == "ok" and val_status == "ok"
+    # 版本推进的唯一条件：apply 干净 + 生成器成功 + generated exact manifest 干净 +
+    # validator **真的通过**（skipped 不算）。
+    version_ok = apply_ok and gen_status == "ok" and generated_ok and val_status == "ok"
 
     # ── failure paths：绝不推进版本 ────────────────────────────────────────
     if not version_ok:
@@ -621,6 +646,10 @@ def main() -> int:
                                    + [f"unexpected:{u}" for u in manifest["unexpected"]])
             elif gen_status == "fail":
                 stage, detail = "generated_rebuild", gen_detail
+            elif not generated_ok:
+                stage = "generated_rebuild"
+                detail = "; ".join([f"gen-missing:{m}" for m in gen_manifest["missing"]]
+                                   + [f"gen-unexpected:{u}" for u in gen_manifest["unexpected"]])
             elif val_status == "skipped":
                 stage, detail = "validate", "--no-verify：跳过验收，按合同不推进版本"
             else:
@@ -640,15 +669,26 @@ def main() -> int:
     try:
         write_template_version(origin, up_raw, meta)
     except KeyboardInterrupt:
+        # 原子替换要么发生要么没发生：重新读盘取**事实**版本，绝不硬写 version_kept=old，
+        # 也不做危险 rollback。若 replace 已发生就诚实报告「中断下已推进」。
+        actual = read_template_toml().get("version", cur_raw)
+        advanced = actual != cur_raw
         receipt["stages"]["commit_version"] = "interrupt"
         receipt["result"] = "unknown"
+        receipt["committed_version"] = actual
+        receipt["version_advanced"] = advanced
         receipt["failure"] = {
-            "stage": "commit_version", "detail": "被中断 (KeyboardInterrupt)",
-            "version_kept": cur_raw, "touched_paths": list(applied.written),
+            "stage": "commit_version",
+            "detail": (f"replace 已发生：版本在中断下已推进到 {actual}（非 rollback）"
+                       if advanced else "replace 前中断：版本未变"),
+            "actual_version": actual,
+            "version_kept": None if advanced else cur_raw,
+            "touched_paths": list(applied.written),
             "rerun_command": rerun_command(args),
         }
         emit_receipt(receipt, args)
-        print(f"\n[template-sync] UNKNOWN — 版本写入被中断，.template.toml 仍是 {cur_raw}。")
+        print(f"\n[template-sync] UNKNOWN — 版本写入被中断；.template.toml 现为 {actual}"
+              + ("（中断下已推进，非 rollback）" if advanced else "（保持旧值）") + "。")
         return 1
     except OSError as e:
         receipt["stages"]["commit_version"] = "fail"
