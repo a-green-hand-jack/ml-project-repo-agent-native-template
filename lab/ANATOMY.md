@@ -33,7 +33,8 @@ maintenance: |
 `runs/`、`traces/human-cc/`、`recipes/claude-code/`、`evals/cc-workflow/`、
 `evals/adoption/`、`evals/doc-lifecycle/`（issue #13 synthetic 探针 + runtime 冒烟记录；`raw/`
 保存隔离 CLI 原始转录/debug log 的无时间戳 gzip 与 sha256）、
-`evals/bootstrap/`、`reports/cc-workflow/`、`docs/{reference,research-narrative,audits}/`
+`evals/bootstrap/`、`evals/template-sync/`（`template-sync.py` 的故障注入 smoke，无独立 anatomy）、
+`reports/cc-workflow/`、`docs/{reference,research-narrative,audits}/`
 为 leaf/scaffold，只有 `README.md` 或单脚本 smoke，无独立 anatomy（`docs/` 三个子目录的用途见
 `human/decisions/20260709-lab-docs-reference-and-external-vendor-placement.md`；`reference/`、
 `research-narrative/` 目前无真实内容，暂未物理创建，仅 `audits/` 已落地）。
