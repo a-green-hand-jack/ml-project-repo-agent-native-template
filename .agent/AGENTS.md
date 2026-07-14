@@ -32,6 +32,9 @@ doctrine 是分文件的，每个文件一个关注点，短而稳定、可 revi
 
 - `.agent/templates/` — launch packet、experiment card、run summary、plan doc、branch status、handoff。
 - `.agent/checklists/` — compact 前、并行前、session 边界、每周维护。
+- `.agent/capability-catalog.toml` — 声明式能力目录（canonical）：所有正式
+  agent/skill/command/hook 的 contract 登记与 adapter parity，由
+  `scripts/check-capability-catalog.py`（并入 `validate-governance`）强制，见 issue #28。
 
 ## 与其他平面的关系
 

@@ -1,0 +1,722 @@
+# capability-catalog.toml — Research 能力面的声明式 canonical 目录
+#
+# 这是什么：把散落在 DESIGN §10 / doctrine / skills / adapters 里的能力表面收敛成
+# 一份**声明式、可机器校验**的 contract。每个正式 capability（agent / skill /
+# command / hook）在此登记（或标 exempt），并声明它的契约维度。校验器
+# `scripts/check-capability-catalog.py`（并入 validate-governance）强制：
+#   - 登记齐全：`.claude/{agents,skills,commands,hooks}` 里每个能力都在此登记或 exempt；
+#   - 无幽灵条目：registered 能力必须有对应 canonical 文件；
+#   - adapter parity：声明的 adapters 与 sync-codex-adapters.py 的映射一致且文件存在。
+#
+# canonical 是 `.claude/` 下的实现文件；本目录是它们的索引与契约声明，不是第二处实现。
+# DESIGN §10 的能力清单表退化为本目录的**人读派生摘要**，不再是唯一不可执行清单。
+# 见 issue #28（父 tracker #24）。改能力面时同 commit 更新本目录并跑校验器。
+
+schema_version = 1
+profile = "research"
+
+# 消费 research-writing-bridge 的 chassis-spec（尚未发布，先声明 pin/compatibility 意图）。
+[chassis_spec]
+source = "a-green-hand-jack/research-writing-bridge"
+spec_issue = 3
+version_pins_issue = 6
+promotion_lifecycle_issue = 7
+pin = "unpinned"                 # Bridge chassis-spec published 后填具体版本；升级走 pin/compatibility gate
+compatibility = ">=0 <1"         # 接受 pre-1.0 chassis schema major
+status = "pending-upstream"      # Bridge 侧 spec 未定版，本 repo 只提名成熟机制、不强迫下游复制实现
+
+# ============================ agents（16）============================
+
+[[capability]]
+id = "agent.artifact-librarian"
+kind = "agent"
+name = "artifact-librarian"
+path = ".claude/agents/artifact-librarian.md"
+status = "registered"
+inputs = "新增/盘点 asset 请求（dataset/checkpoint/table/figure/result/document）"
+outputs = "更新后的 artifact 索引 + stale asset 报告"
+validators = ["scripts/check-provenance-chain.py", "scripts/validate-governance.py"]
+human_gates = []
+path_boundaries = "只写 lab/artifacts 等索引；绝不删除或移动 bytes"
+adapters = [".codex/agents/artifact-librarian.toml"]
+completion_contract = "索引状态与 stale 报告落盘，无 bytes 变更"
+
+[[capability]]
+id = "agent.branch-reporter"
+kind = "agent"
+name = "branch-reporter"
+path = ".claude/agents/branch-reporter.md"
+status = "registered"
+inputs = "当前 active branch/worktree 集合"
+outputs = "worktree/branch 状态与依赖关系报告"
+validators = []
+human_gates = []
+path_boundaries = "只读 git，绝不做写动作"
+adapters = [".codex/agents/branch-reporter.toml"]
+completion_contract = "结构化 branch 报告，无仓库写入"
+
+[[capability]]
+id = "agent.checkpoint-writer"
+kind = "agent"
+name = "checkpoint-writer"
+path = ".claude/agents/checkpoint-writer.md"
+status = "registered"
+inputs = "compact/clear/handoff 前的当前工作状态"
+outputs = "更新的 memory/current-status.md"
+validators = []
+human_gates = []
+path_boundaries = "只写 memory/ 活状态文件"
+adapters = [".codex/agents/checkpoint-writer.toml"]
+completion_contract = "current-status.md 可让 fresh session 接续"
+
+[[capability]]
+id = "agent.experiment-monitor"
+kind = "agent"
+name = "experiment-monitor"
+path = ".claude/agents/experiment-monitor.md"
+status = "registered"
+inputs = "运行中实验的只读状态快照"
+outputs = "结构化 health alert"
+validators = ["scripts/validate-experiment-state.py"]
+human_gates = []
+path_boundaries = "只读监控；绝不 kill/restart/改 config"
+adapters = [".codex/agents/experiment-monitor.toml"]
+completion_contract = "alert 落盘，实验未被干预"
+
+[[capability]]
+id = "agent.experiment-orchestrator"
+kind = "agent"
+name = "experiment-orchestrator"
+path = ".claude/agents/experiment-orchestrator.md"
+status = "registered"
+inputs = "实验 claim→artifact 证据链、状态机 ledger、alert、human 恢复提案"
+outputs = "实验卡片 + 状态机 ledger + 校验过的恢复交接"
+validators = ["scripts/validate-experiment-state.py", "scripts/check-provenance-chain.py"]
+human_gates = ["实验恢复执行"]
+path_boundaries = "写 lab/ 实验台账；agent 内恢复执行 fail-closed"
+adapters = [".codex/agents/experiment-orchestrator.toml"]
+completion_contract = "状态机 ledger 与证据链一致，恢复提案交 human"
+
+[[capability]]
+id = "agent.feature-worker"
+kind = "agent"
+name = "feature-worker"
+path = ".claude/agents/feature-worker.md"
+status = "registered"
+inputs = "单个清晰 feature/bugfix 任务包 + owned/forbidden 路径"
+outputs = "隔离 worktree 内的实现 diff + 定向测试证据"
+validators = ["scripts/validate-governance.py"]
+human_gates = ["push", "PR", "merge"]
+path_boundaries = "只改 owned scope；触及相邻 issue 路径即停止上报"
+adapters = [".codex/agents/feature-worker.toml"]
+completion_contract = "REVIEW_READY 报告：base/commit SHA、changed paths、测试命令与结果"
+
+[[capability]]
+id = "agent.hook-maker-agent"
+kind = "agent"
+name = "hook-maker-agent"
+path = ".claude/agents/hook-maker-agent.md"
+status = "registered"
+inputs = "反复出现的安全/状态/格式化动作轨迹"
+outputs = "repo-local hook 草稿"
+validators = ["scripts/check-agent-harness.py"]
+human_gates = ["hook 启用（human review）"]
+path_boundaries = "只产出草稿，不自行启用"
+adapters = [".codex/agents/hook-maker-agent.toml"]
+completion_contract = "hook 草稿待 human review，未接入 settings"
+
+[[capability]]
+id = "agent.interactive-plan-writer"
+kind = "agent"
+name = "interactive-plan-writer"
+path = ".claude/agents/interactive-plan-writer.md"
+status = "registered"
+inputs = "当前阶段 scope + human 批注"
+outputs = "可批注的中文 plan doc（收敛后的计划）"
+validators = ["scripts/check-doc-lifecycle.py"]
+human_gates = ["plan 批准"]
+path_boundaries = "只写 plans/"
+adapters = [".codex/agents/interactive-plan-writer.toml"]
+completion_contract = "plan doc 状态锚点与 doc-lifecycle 注册表一致"
+
+[[capability]]
+id = "agent.repo-doc-steward"
+kind = "agent"
+name = "repo-doc-steward"
+path = ".claude/agents/repo-doc-steward.md"
+status = "registered"
+inputs = "结构改动 + 导航四件套/DESIGN 现状"
+outputs = "同步后的 README/AGENTS/CLAUDE/ANATOMY 与 DESIGN 能力清单"
+validators = ["scripts/check-anatomy-drift.py", "scripts/check-agent-harness.py"]
+human_gates = []
+path_boundaries = "维护导航四件套与 DESIGN 派生摘要"
+adapters = [".codex/agents/repo-doc-steward.toml"]
+completion_contract = "anatomy 无漂移、DESIGN 清单与实际一致"
+
+[[capability]]
+id = "agent.repo-researcher"
+kind = "agent"
+name = "repo-researcher"
+path = ".claude/agents/repo-researcher.md"
+status = "registered"
+inputs = "只读探索目标 + 待验假设"
+outputs = "证据 + 假设（定位实现）"
+validators = []
+human_gates = []
+path_boundaries = "只读；绝不修改文件"
+adapters = [".codex/agents/repo-researcher.toml"]
+completion_contract = "带证据坐标的调查结论，无写入"
+
+[[capability]]
+id = "agent.session-boundary-agent"
+kind = "agent"
+name = "session-boundary-agent"
+path = ".claude/agents/session-boundary-agent.md"
+status = "registered"
+inputs = "当前 context 占用 + 任务树状态"
+outputs = "continue/compact/clear/branch 决策 + 更新的 session-tree"
+validators = []
+human_gates = []
+path_boundaries = "只写 memory/ session 树"
+adapters = [".codex/agents/session-boundary-agent.toml"]
+completion_contract = "session 边界决策落盘，session-tree 更新"
+
+[[capability]]
+id = "agent.sub-agent-maker-agent"
+kind = "agent"
+name = "sub-agent-maker-agent"
+path = ".claude/agents/sub-agent-maker-agent.md"
+status = "registered"
+inputs = "重复出现的 human-cc 轨迹"
+outputs = "窄边界 subagent 草稿"
+validators = ["scripts/check-agent-harness.py"]
+human_gates = ["subagent 启用"]
+path_boundaries = "只产出 draft，不自行启用"
+adapters = [".codex/agents/sub-agent-maker-agent.toml"]
+completion_contract = "subagent 草稿待 human 采纳"
+
+[[capability]]
+id = "agent.subagent-router-agent"
+kind = "agent"
+name = "subagent-router-agent"
+path = ".claude/agents/subagent-router-agent.md"
+status = "registered"
+inputs = "child task 描述 + quota snapshot"
+outputs = "launch packet（agent 类型/预算/模型/边界/停止条件）"
+validators = []
+human_gates = []
+path_boundaries = "只读、只产出 packet"
+adapters = [".codex/agents/subagent-router-agent.toml"]
+completion_contract = "launch packet 含 provider/model/effort 推荐"
+
+[[capability]]
+id = "agent.test-runner"
+kind = "agent"
+name = "test-runner"
+path = ".claude/agents/test-runner.md"
+status = "registered"
+inputs = "指定的定向测试命令"
+outputs = "测试结果与失败摘要"
+validators = []
+human_gates = []
+path_boundaries = "只跑指定定向测试，不擅自全量、不粘完整日志"
+adapters = [".codex/agents/test-runner.toml"]
+completion_contract = "确切命令 + pass/fail 摘要"
+
+[[capability]]
+id = "agent.workflow-recipe-harvester"
+kind = "agent"
+name = "workflow-recipe-harvester"
+path = ".claude/agents/workflow-recipe-harvester.md"
+status = "registered"
+inputs = "human-cc 会话 trace"
+outputs = "带行为证据的候选 workflow recipe"
+validators = []
+human_gates = ["recipe 采纳"]
+path_boundaries = "只提炼结构片段，不总结主观好用"
+adapters = [".codex/agents/workflow-recipe-harvester.toml"]
+completion_contract = "recipe 草稿 + 复测绑定，待 human review"
+
+[[capability]]
+id = "agent.zh-review-gate"
+kind = "agent"
+name = "zh-review-gate"
+path = ".claude/agents/zh-review-gate.md"
+status = "registered"
+inputs = "即将面向 human 的说明性文字"
+outputs = "原地翻译改写后的中文正文"
+validators = []
+human_gates = []
+path_boundaries = "只做语言翻译，不判断内容对错；锁定 haiku 廉价兜底"
+adapters = [".codex/agents/zh-review-gate.toml"]
+completion_contract = "非中文大段正文被翻译为中文"
+
+# ============================ skills（14）============================
+
+[[capability]]
+id = "skill.adopt-existing-repo"
+kind = "skill"
+name = "adopt-existing-repo"
+path = ".claude/skills/adopt-existing-repo/SKILL.md"
+status = "registered"
+inputs = "一个已有 Git repo"
+outputs = "收敛成模板形态的 repo + adoption proof"
+validators = ["scripts/check-adoption-integrity.py", "scripts/validate-governance.py"]
+human_gates = ["push", "PR", "merge"]
+path_boundaries = "phase gate 内迁移；受保护路径 blocker fail-closed"
+adapters = [".agents/skills/adopt-existing-repo/SKILL.md"]
+completion_contract = "adoption integrity OK + 结构化 smoke 合同"
+
+[[capability]]
+id = "skill.anatomy-drift-control"
+kind = "skill"
+name = "anatomy-drift-control"
+path = ".claude/skills/anatomy-drift-control/SKILL.md"
+status = "registered"
+inputs = "结构改动（新增/改名/移动文件）前后状态"
+outputs = "同 commit 更新的 anatomy + 引用 grep 结果"
+validators = ["scripts/check-anatomy-drift.py", "scripts/check-same-commit.py"]
+human_gates = []
+path_boundaries = "只更新 anatomy 与引用，不改实现语义"
+adapters = [".agents/skills/anatomy-drift-control/SKILL.md"]
+completion_contract = "结构改动与 anatomy 同变更集、无引用漂移"
+
+[[capability]]
+id = "skill.artifact-indexing"
+kind = "skill"
+name = "artifact-indexing"
+path = ".claude/skills/artifact-indexing/SKILL.md"
+status = "registered"
+inputs = "新增/待盘点 asset"
+outputs = "更新的 artifact 索引 + stale asset report"
+validators = ["scripts/check-provenance-chain.py"]
+human_gates = []
+path_boundaries = "只维护索引；绝不删或移动 bytes"
+adapters = [".agents/skills/artifact-indexing/SKILL.md"]
+completion_contract = "索引更新 + stale 报告，无 bytes 变更"
+
+[[capability]]
+id = "skill.bootstrap-project"
+kind = "skill"
+name = "bootstrap-project"
+path = ".claude/skills/bootstrap-project/SKILL.md"
+status = "registered"
+inputs = "刚从模板派生的新 repo"
+outputs = "落地成自洽状态的 repo（版本锚点/hooksPath/adapters/governance）"
+validators = ["scripts/validate-governance.py", "scripts/check-agent-harness.py"]
+human_gates = []
+path_boundaries = "写目标 repo 落地文件；需 human 信息的步骤只报告不代做"
+adapters = [".agents/skills/bootstrap-project/SKILL.md"]
+completion_contract = "三 validator 全绿 + human_todo 清单"
+
+[[capability]]
+id = "skill.coding-agent-quota"
+kind = "skill"
+name = "coding-agent-quota"
+path = ".claude/skills/coding-agent-quota/SKILL.md"
+status = "registered"
+inputs = "本地 Codex/Claude quota 快照 + outcome ledger"
+outputs = "路由证据 + route recommendation"
+validators = ["scripts/check-outcome-ledger-schema.py"]
+human_gates = []
+path_boundaries = "只读 quota；ledger 写 canonical .outcome-ledger/ 或 /tmp"
+adapters = [".agents/skills/coding-agent-quota/SKILL.md"]
+completion_contract = "quota + outcome 证据下的 provider/model/effort 推荐"
+
+[[capability]]
+id = "skill.experiment-workflow"
+kind = "skill"
+name = "experiment-workflow"
+path = ".claude/skills/experiment-workflow/SKILL.md"
+status = "registered"
+inputs = "要跑的实验或待复现 paper"
+outputs = "experiment card + 状态机 ledger + run summary + evidence"
+validators = ["scripts/validate-experiment-state.py", "scripts/check-provenance-chain.py"]
+human_gates = ["实验 launch", "结果 promote"]
+path_boundaries = "登记台账、准备但不擅自运行 launch；只读监控"
+adapters = [".agents/skills/experiment-workflow/SKILL.md"]
+completion_contract = "达标结果收进 evidence，run id/config/commit 可追溯"
+
+[[capability]]
+id = "skill.interactive-plan-doc"
+kind = "skill"
+name = "interactive-plan-doc"
+path = ".claude/skills/interactive-plan-doc/SKILL.md"
+status = "registered"
+inputs = "一个待与人对齐 scope 的阶段"
+outputs = "中文 plan doc + 收敛后的 plan revision commit"
+validators = ["scripts/check-doc-lifecycle.py"]
+human_gates = ["plan 批准（human gate）"]
+path_boundaries = "只写 plans/ 与 doc-lifecycle 注册表"
+adapters = [".agents/skills/interactive-plan-doc/SKILL.md"]
+completion_contract = "plan 状态锚点↔注册表一致，human 批注已收敛"
+
+[[capability]]
+id = "skill.session-boundary-control"
+kind = "skill"
+name = "session-boundary-control"
+path = ".claude/skills/session-boundary-control/SKILL.md"
+status = "registered"
+inputs = "阶段切换 / context 占用 / 任务树分叉信号"
+outputs = "continue/compact/clear/branch/fresh-reviewer 决策 + session 树"
+validators = []
+human_gates = []
+path_boundaries = "只维护 memory/ session 树"
+adapters = [".agents/skills/session-boundary-control/SKILL.md"]
+completion_contract = "session 边界决策与树落盘"
+
+[[capability]]
+id = "skill.spawn"
+kind = "skill"
+name = "spawn"
+path = ".claude/skills/spawn/SKILL.md"
+status = "registered"
+inputs = "要唤起的 subagent 任务"
+outputs = "in-session 报告或持久 Paseo 标签页 agent（入 roster）"
+validators = []
+human_gates = []
+path_boundaries = "按选型/packet 起 agent；出生即命名并入 roster"
+adapters = [".agents/skills/spawn/SKILL.md"]
+completion_contract = "agent 已命名、已登记 roster/控制面"
+
+[[capability]]
+id = "skill.subagent-routing"
+kind = "skill"
+name = "subagent-routing"
+path = ".claude/skills/subagent-routing/SKILL.md"
+status = "registered"
+inputs = "child task + quota snapshot"
+outputs = "选定 model/effort/tools 的 launch packet"
+validators = []
+human_gates = []
+path_boundaries = "只产出 packet，不凭直觉开 general-purpose"
+adapters = [".agents/skills/subagent-routing/SKILL.md"]
+completion_contract = "launch packet 含 tier/model/effort/边界/停止条件"
+
+[[capability]]
+id = "skill.template-feedback"
+kind = "skill"
+name = "template-feedback"
+path = ".claude/skills/template-feedback/SKILL.md"
+status = "registered"
+inputs = "下游发现的模板能力缺口"
+outputs = "上游 template repo 的 from-downstream issue"
+validators = []
+human_gates = ["issue 提交（外部副作用）"]
+path_boundaries = "只打包 issue；带模板版本/路径/复现"
+adapters = [".agents/skills/template-feedback/SKILL.md"]
+completion_contract = "issue 草稿含版本锚点与复现，走 human 提交"
+
+[[capability]]
+id = "skill.template-stress-test"
+kind = "skill"
+name = "template-stress-test"
+path = ".claude/skills/template-stress-test/SKILL.md"
+status = "registered"
+inputs = "一个真实非平凡 case"
+outputs = "模板 validators/hooks/skills 的压力测试记录"
+validators = ["scripts/validate-governance.py"]
+human_gates = []
+path_boundaries = "测试记录与修复实现分离；不在 case 分支顺手改模板"
+adapters = [".agents/skills/template-stress-test/SKILL.md"]
+completion_contract = "压力测试记录登记账 + 缺陷上报，无 case 内偷改"
+
+[[capability]]
+id = "skill.workflow-recipe-harvesting"
+kind = "skill"
+name = "workflow-recipe-harvesting"
+path = ".claude/skills/workflow-recipe-harvesting/SKILL.md"
+status = "registered"
+inputs = "human-cc 会话 trace"
+outputs = "可复测的 workflow recipe + practices 索引"
+validators = []
+human_gates = ["recipe 采纳"]
+path_boundaries = "只提炼结构片段，绑复测任务"
+adapters = [".agents/skills/workflow-recipe-harvesting/SKILL.md"]
+completion_contract = "recipe + 复测报告，practices 索引更新"
+
+[[capability]]
+id = "skill.worktree-pr-flow"
+kind = "skill"
+name = "worktree-pr-flow"
+path = ".claude/skills/worktree-pr-flow/SKILL.md"
+status = "registered"
+inputs = "一处要落地的代码改动"
+outputs = "issue→branch→worktree→实现→测试→PR→review→merge→归档 全流程"
+validators = ["scripts/validate-governance.py", "scripts/check-same-commit.py"]
+human_gates = ["push", "PR", "merge"]
+path_boundaries = "push/PR/merge 走 human gate"
+adapters = [".agents/skills/worktree-pr-flow/SKILL.md"]
+completion_contract = "改动经定向测试+validator，PR/merge 由 human 触发"
+
+# ============================ commands（8）============================
+
+[[capability]]
+id = "command.adopt-existing-repo"
+kind = "command"
+name = "adopt-existing-repo"
+path = ".claude/commands/adopt-existing-repo.md"
+status = "registered"
+inputs = "一个已有 Git repo 路径"
+outputs = "分 phase 迁移 + adoption proof 汇报"
+validators = ["scripts/check-adoption-integrity.py"]
+human_gates = ["push", "PR", "merge"]
+path_boundaries = "phase gate；integrity/blocker 非 0，smoke 走 warning"
+adapters = [".agents/skills/command-adopt-existing-repo/SKILL.md"]
+completion_contract = "integrity/blocker 与 smoke warning 分别汇报"
+
+[[capability]]
+id = "command.checkpoint"
+kind = "command"
+name = "checkpoint"
+path = ".claude/commands/checkpoint.md"
+status = "registered"
+inputs = "compact/clear/handoff 前的 session 状态"
+outputs = "落盘的 memory/current-status.md"
+validators = []
+human_gates = []
+path_boundaries = "只写 memory/ 活状态"
+adapters = [".agents/skills/command-checkpoint/SKILL.md"]
+completion_contract = "current-status.md 可接续"
+
+[[capability]]
+id = "command.experiment-watch"
+kind = "command"
+name = "experiment-watch"
+path = ".claude/commands/experiment-watch.md"
+status = "registered"
+inputs = "一个长实验"
+outputs = "只读监控快照"
+validators = ["scripts/validate-experiment-state.py"]
+human_gates = []
+path_boundaries = "只读；不 kill/restart/改 config"
+adapters = [".agents/skills/command-experiment-watch/SKILL.md"]
+completion_contract = "监控快照，实验未被干预"
+
+[[capability]]
+id = "command.feature-split"
+kind = "command"
+name = "feature-split"
+path = ".claude/commands/feature-split.md"
+status = "registered"
+inputs = "一个待拆分的任务"
+outputs = "带清晰文件所有权的并行 worker packet"
+validators = []
+human_gates = []
+path_boundaries = "只产出 packet，先定义 ownership 再并行"
+adapters = [".agents/skills/command-feature-split/SKILL.md"]
+completion_contract = "worker packet 含 owned/forbidden/merge target"
+
+[[capability]]
+id = "command.paper-reproduce"
+kind = "command"
+name = "paper-reproduce"
+path = ".claude/commands/paper-reproduce.md"
+status = "registered"
+inputs = "paper claim"
+outputs = "claim→代码映射 + 最小可复现路径"
+validators = ["scripts/check-provenance-chain.py"]
+human_gates = []
+path_boundaries = "只映射与定位，不擅自跑训练"
+adapters = [".agents/skills/command-paper-reproduce/SKILL.md"]
+completion_contract = "claim 到最小复现路径的映射"
+
+[[capability]]
+id = "command.pr-review"
+kind = "command"
+name = "pr-review"
+path = ".claude/commands/pr-review.md"
+status = "registered"
+inputs = "当前 diff"
+outputs = "fresh reviewer 审查（correctness/回归/测试/复现/数据安全）"
+validators = ["scripts/validate-governance.py"]
+human_gates = []
+path_boundaries = "只读审查，与实现分离 lane"
+adapters = [".agents/skills/command-pr-review/SKILL.md"]
+completion_contract = "结构化 review verdict"
+
+[[capability]]
+id = "command.result-promote"
+kind = "command"
+name = "result-promote"
+path = ".claude/commands/result-promote.md"
+status = "registered"
+inputs = "一个实验结果"
+outputs = "升级为 evidence / paper claim（经证据门槛 + fresh verifier）"
+validators = ["scripts/check-provenance-chain.py", "scripts/validate-governance.py"]
+human_gates = ["promote 为 paper claim"]
+path_boundaries = "只在满足证据门槛时 promote，走 human gate"
+adapters = [".agents/skills/command-result-promote/SKILL.md"]
+completion_contract = "evidence 门槛满足 + fresh verifier 通过"
+
+[[capability]]
+id = "command.weekly-maintenance"
+kind = "command"
+name = "weekly-maintenance"
+path = ".claude/commands/weekly-maintenance.md"
+status = "registered"
+inputs = "每周维护触发"
+outputs = "治理门禁 + memory/worktree/artifact/hook 状态检查"
+validators = ["scripts/validate-governance.py"]
+human_gates = []
+path_boundaries = "跑清单化检查，不擅自修复越界"
+adapters = [".agents/skills/command-weekly-maintenance/SKILL.md"]
+completion_contract = "维护清单逐项检查结果"
+
+# ============================ hooks（11）============================
+# hook 是 Claude/Codex 共享的强制/提醒地板，两边由各自 config 调用同一脚本，
+# 不生成独立 adapter，故 adapters 一律为空（parity 校验会强制这一点）。
+
+[[capability]]
+id = "hook.pre_tool_guard"
+kind = "hook"
+name = "pre_tool_guard"
+path = ".claude/hooks/pre_tool_guard.py"
+status = "registered"
+inputs = "PreToolUse：Bash/Edit/Write/apply_patch 调用"
+outputs = "拦截危险命令/受保护路径写入的 exit 2（安全地板）"
+validators = ["scripts/check-agent-harness.py"]
+human_gates = []
+path_boundaries = "只读判定；拦受保护路径/提权/远程执行/push main + 多 agent 冲突"
+adapters = []
+completion_contract = "红线动作被 fail-closed 拦截"
+
+[[capability]]
+id = "hook.format_changed_python"
+kind = "hook"
+name = "format_changed_python"
+path = ".claude/hooks/format_changed_python.py"
+status = "registered"
+inputs = "PostToolUse：变更的 .py 文件"
+outputs = "ruff format 尝试（advisory）"
+validators = ["scripts/check-agent-harness.py"]
+human_gates = []
+path_boundaries = "只格式化变更文件，advisory 不阻断"
+adapters = []
+completion_contract = "变更 Python 尝试格式化，失败仅提醒"
+
+[[capability]]
+id = "hook.pre_compact_memory_check"
+kind = "hook"
+name = "pre_compact_memory_check"
+path = ".claude/hooks/pre_compact_memory_check.py"
+status = "registered"
+inputs = "PreCompact：current-status.md 新鲜度"
+outputs = "checkpoint 提醒（advisory）"
+validators = ["scripts/check-agent-harness.py"]
+human_gates = []
+path_boundaries = "只读检查 + 提醒，不写状态"
+adapters = []
+completion_contract = "陈旧 status 时提醒 checkpoint"
+
+[[capability]]
+id = "hook.subagent_report_index"
+kind = "hook"
+name = "subagent_report_index"
+path = ".claude/hooks/subagent_report_index.py"
+status = "registered"
+inputs = "SubagentStop 事件"
+outputs = "agent-reports/index.md 时间线追加（advisory）"
+validators = ["scripts/check-agent-harness.py"]
+human_gates = []
+path_boundaries = "只写 gitignored 报告索引"
+adapters = []
+completion_contract = "subagent 结束时间线已记录"
+
+[[capability]]
+id = "hook.zh_review_advisory"
+kind = "hook"
+name = "zh_review_advisory"
+path = ".claude/hooks/zh_review_advisory.py"
+status = "registered"
+inputs = "PostToolUse(Edit|Write/apply_patch)：human 面向文档"
+outputs = "疑似非中文正文的中文兜底提醒（advisory）"
+validators = ["scripts/check-agent-harness.py"]
+human_gates = []
+path_boundaries = "只做便宜启发提醒，不改内容"
+adapters = []
+completion_contract = "疑似忘用中文时提醒派发 zh-review-gate"
+
+[[capability]]
+id = "hook.context_threshold_notice"
+kind = "hook"
+name = "context_threshold_notice"
+path = ".claude/hooks/context_threshold_notice.py"
+status = "registered"
+inputs = "context 占用阈值（40/60/70/80%）"
+outputs = "阈值注入提醒（advisory）"
+validators = ["scripts/check-agent-harness.py"]
+human_gates = []
+path_boundaries = "只注入提醒，不改状态"
+adapters = []
+completion_contract = "越阈值时注入 checkpoint/compact 提示"
+
+[[capability]]
+id = "hook.context_continuity"
+kind = "hook"
+name = "context_continuity"
+path = ".claude/hooks/context_continuity.py"
+status = "registered"
+inputs = "compact 后的新上下文"
+outputs = "回注 current-status.md 到新上下文"
+validators = ["scripts/check-agent-harness.py"]
+human_gates = []
+path_boundaries = "只读回注，不写仓库"
+adapters = []
+completion_contract = "compact 后关键状态被回注"
+
+[[capability]]
+id = "hook.agent_identity_hook"
+kind = "hook"
+name = "agent_identity_hook"
+path = ".claude/hooks/agent_identity_hook.py"
+status = "registered"
+inputs = "UserPromptSubmit：无身份 agent"
+outputs = "自命名指令 + 自知注入（advisory）"
+validators = ["scripts/check-agent-harness.py"]
+human_gates = []
+path_boundaries = "只注入命名指令/身份，不写仓库状态"
+adapters = []
+completion_contract = "无名 agent 收到命名指令与自知"
+
+[[capability]]
+id = "hook.context_usage"
+kind = "hook"
+name = "context_usage"
+path = ".claude/hooks/context_usage.py"
+status = "registered"
+inputs = "context 占用计算入参"
+outputs = "context 用量 helper（供其他 hook/statusline 调用）"
+validators = ["scripts/check-agent-harness.py"]
+human_gates = []
+path_boundaries = "纯 helper，只读计算"
+adapters = []
+completion_contract = "返回 context 用量供上层消费"
+
+[[capability]]
+id = "hook.agent_identity"
+kind = "hook"
+name = "agent_identity"
+path = ".claude/hooks/agent_identity.py"
+status = "registered"
+inputs = ".agent-identity 身份文件"
+outputs = "身份解析结果（helper）"
+validators = ["scripts/check-agent-harness.py"]
+human_gates = []
+path_boundaries = "纯 helper，只读解析身份"
+adapters = []
+completion_contract = "返回当前 agent 身份供上层消费"
+
+[[capability]]
+id = "hook.agent_name_set"
+kind = "hook"
+name = "agent_name_set"
+path = ".claude/hooks/agent_name_set.py"
+status = "registered"
+inputs = "agent 选定的身份名"
+outputs = "写 .agent-identity + paseo rename + roster + 控制面状态"
+validators = ["scripts/check-agent-harness.py"]
+human_gates = []
+path_boundaries = "写身份文件/roster/控制面状态（gitignored runtime）"
+adapters = []
+completion_contract = "身份名已落盘、rename、登记 roster 与控制面"
