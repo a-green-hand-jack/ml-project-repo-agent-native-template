@@ -84,6 +84,14 @@ GEN_EXTRA = (
 )
 # GEN_MISSING exits 0 but does not produce the expected generated file -> missing.
 GEN_MISSING = "import sys\nprint('[stub-gen] noop'); sys.exit(0)\n"
+# GEN_WRONG_BYTES writes the expected path (present in actual) but with the
+# wrong content -> generated.content_mismatches, NOT generated.missing.
+GEN_WRONG_BYTES = (
+    "import os, sys\n"
+    "os.makedirs('gen', exist_ok=True)\n"
+    "open('gen/adapter.txt', 'w').write('WRONG BYTES\\n')\n"
+    "print('[stub-gen] wrong-bytes'); sys.exit(0)\n"
+)
 GEN_FAIL = "import sys\nprint('[stub-gen] boom')\nsys.exit(1)\n"
 VAL_OK = "import sys\nprint('[stub-val] ok')\nsys.exit(0)\n"
 VAL_FAIL = "import sys\nprint('[stub-val] boom')\nsys.exit(1)\n"
@@ -464,6 +472,34 @@ def check_generated_missing(tmp: Path) -> int:
     return 0
 
 
+def check_generated_wrong_bytes_content_mismatch(tmp: Path) -> int:
+    """An expected generated path that IS present (in actual) but whose bytes
+    don't match the canonical upstream generated output -> content_mismatches,
+    NEVER missing (missing is pure path-set semantics: expected - actual)."""
+    up = tmp / "up-gwb"
+    down = tmp / "down-gwb"
+    receipt = tmp / "receipt-gwb.json"
+    build_upstream(up, "v1.1.0")
+    build_downstream(down, "v1.0.0", gen=GEN_WRONG_BYTES, val=VAL_OK)
+
+    proc = run_sync(down, up, receipt)
+    if proc.returncode == 0:
+        return fail("wrong-bytes expected generated output must fail the sync", proc)
+    if version_of(down) != "v1.0.0":
+        return fail(f"wrong-bytes generated output must NOT advance version, got {version_of(down)}", proc)
+    r = read_json(receipt)
+    gm = r["manifest"]["generated"]
+    if "gen/adapter.txt" not in gm["actual"]:
+        return fail(f"the wrong-bytes path exists on disk, so it must be in generated.actual, got {gm}", proc)
+    if "gen/adapter.txt" not in gm["content_mismatches"]:
+        return fail(f"wrong bytes must be listed in generated.content_mismatches, got {gm}", proc)
+    if "gen/adapter.txt" in gm["missing"]:
+        return fail(f"a present-but-wrong-bytes path must NEVER be counted as missing, got {gm}", proc)
+    if r["failure"]["stage"] != "generated_rebuild":
+        return fail(f"failure stage should be generated_rebuild, got {r.get('failure')}", proc)
+    return 0
+
+
 def check_generated_stale_rogue_unexpected(tmp: Path) -> int:
     """A rogue generated-namespace file that already existed on disk BEFORE
     this run -- and that this run's generator never touches -- must still be
@@ -723,6 +759,7 @@ def main() -> int:
             check_warnings_partial,
             check_generated_arbitrary_unexpected,
             check_generated_missing,
+            check_generated_wrong_bytes_content_mismatch,
             check_generated_stale_rogue_unexpected,
             check_interrupt_unknown,
             check_commit_interrupt,

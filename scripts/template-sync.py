@@ -303,13 +303,18 @@ def build_manifest(plan: list[PlanItem], applied: ApplyResult, upstream: Path,
     gen_expected = [p.path for p in plan if p.kind == "generated"]
     gen_expected_set = set(gen_expected)
     gen_actual = sorted(p for p in after_gen if classify(p, rules) == "generated")
-    gen_missing: list[str] = []
+    gen_actual_set = set(gen_actual)
+    # missing 是纯路径集合语义：expected - actual（路径根本不在 post-generator 全量集合里）。
+    # 内容正确性单独归入 content_mismatches，不混进 missing。
+    gen_missing = sorted(gp for gp in gen_expected if gp not in gen_actual_set)
+    gen_content_mismatches: list[str] = []
     for gp in gen_expected:
+        if gp not in gen_actual_set:
+            continue  # 路径本身缺失已计入 missing，内容判定只看 expected ∩ actual。
         dstg = DOWNSTREAM / gp
         srcg = upstream / gp
-        # unchanged-but-content-correct 不算 missing；缺失或内容错算 missing。
-        if not dstg.exists() or (srcg.exists() and dstg.read_bytes() != srcg.read_bytes()):
-            gen_missing.append(gp)
+        if srcg.exists() and dstg.read_bytes() != srcg.read_bytes():
+            gen_content_mismatches.append(gp)
     gen_unexpected = sorted(p for p in gen_actual if p not in gen_expected_set)
     return {
         "expected": planned,
@@ -322,8 +327,9 @@ def build_manifest(plan: list[PlanItem], applied: ApplyResult, upstream: Path,
             "expected": gen_expected,
             "actual": gen_actual,
             "actual_changed": generated_outputs,
-            "missing": sorted(set(gen_missing)),
+            "missing": gen_missing,
             "unexpected": gen_unexpected,
+            "content_mismatches": sorted(set(gen_content_mismatches)),
         },
     }
 
@@ -572,7 +578,7 @@ def main() -> int:
                      "missing": [], "unexpected": [], "excluded": [],
                      "generated": {"expected": [pi.path for pi in plan if pi.kind == "generated"],
                                    "actual": [], "actual_changed": [], "missing": [],
-                                   "unexpected": []}},
+                                   "unexpected": [], "content_mismatches": []}},
         "warnings": ([f"merge:{w}" for w in warn_merge]
                      + [f"unclassified:{w}" for w in warn_unclassified]),
         "failure": None,
@@ -630,7 +636,8 @@ def main() -> int:
     receipt["stages"]["validate"] = val_status
 
     gen_manifest = manifest["generated"]
-    generated_ok = not gen_manifest["missing"] and not gen_manifest["unexpected"]
+    generated_ok = (not gen_manifest["missing"] and not gen_manifest["unexpected"]
+                    and not gen_manifest["content_mismatches"])
     indeterminate = (gen_status in ("timeout", "error", "interrupt")
                      or val_status in ("timeout", "error", "interrupt"))
     # 版本推进的唯一条件：apply 干净 + 生成器成功 + generated exact manifest 干净 +
@@ -658,7 +665,9 @@ def main() -> int:
             elif not generated_ok:
                 stage = "generated_rebuild"
                 detail = "; ".join([f"gen-missing:{m}" for m in gen_manifest["missing"]]
-                                   + [f"gen-unexpected:{u}" for u in gen_manifest["unexpected"]])
+                                   + [f"gen-unexpected:{u}" for u in gen_manifest["unexpected"]]
+                                   + [f"gen-content-mismatch:{c}"
+                                      for c in gen_manifest["content_mismatches"]])
             elif val_status == "skipped":
                 stage, detail = "validate", "--no-verify：跳过验收，按合同不推进版本"
             else:
