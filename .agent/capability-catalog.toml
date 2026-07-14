@@ -15,15 +15,27 @@
 schema_version = 1
 profile = "research"
 
-# 消费 research-writing-bridge 的 chassis-spec（尚未发布，先声明 pin/compatibility 意图）。
+# 消费 research-writing-bridge 的 chassis-spec：绑定不可变 commit + v1 spec 文件 blob digest。
+# Bridge issue #3/#6 虽仍 OPEN，但 chassis/v1 与 compatibility/matrix 的 repo bytes 已存在，
+# 以 commit/bytes 为事实。升级 chassis 走本 pin/compatibility gate（见 check-capability-catalog.py）。
 [chassis_spec]
 source = "a-green-hand-jack/research-writing-bridge"
 spec_issue = 3
 version_pins_issue = 6
 promotion_lifecycle_issue = 7
-pin = "unpinned"                 # Bridge chassis-spec published 后填具体版本；升级走 pin/compatibility gate
-compatibility = ">=0 <1"         # 接受 pre-1.0 chassis schema major
-status = "pending-upstream"      # Bridge 侧 spec 未定版，本 repo 只提名成熟机制、不强迫下游复制实现
+status = "pinned"
+spec_version = "v1"
+pin = "5e02b52e6026a0581b6fa33987ce997f52b547a3"   # Bridge main 不可变 commit
+# pinned spec 文件 → git blob digest（gh api contents .sha @ pin，可离线判定的固定 ref）
+[chassis_spec.spec_files]
+"chassis/v1/spec.md" = "c444645e44411ffb6e87086c8744f5e622e95d56"
+"chassis/v1/capability.schema.json" = "a99e120560703f0a0ddf80d25adfb12709a7c0b2"
+"compatibility/matrix.json" = "7bc86077ebf61cef826c098028d6821351d57101"
+# 本地按 compatibility/matrix.json 的 supported 条目消费 chassis 1.0.0（major 必须在本地支持范围）。
+[chassis_spec.compatibility]
+chassis = "1.0.0"
+protocol = "1.0.0"
+status = "supported"
 
 # ============================ agents（16）============================
 
@@ -563,9 +575,11 @@ path_boundaries = "跑清单化检查，不擅自修复越界"
 adapters = [".agents/skills/command-weekly-maintenance/SKILL.md"]
 completion_contract = "维护清单逐项检查结果"
 
-# ============================ hooks（11）============================
-# hook 是 Claude/Codex 共享的强制/提醒地板，两边由各自 config 调用同一脚本，
-# 不生成独立 adapter，故 adapters 一律为空（parity 校验会强制这一点）。
+# ============================ hooks（8）============================
+# 正式 hook = 真实被 .claude/settings.json / .codex/config.toml 挂载为 hook command 的脚本
+# （校验器 _discover_hooks 以注册表面为 canonical）。helper/setter（context_usage /
+# agent_identity / agent_name_set）不是正式 hook capability，故不登记、不豁免——它们不在
+# discovered 集合内。hook 两边由各自 config 调用同一脚本，不生成独立 adapter，故 adapters 一律为空。
 
 [[capability]]
 id = "hook.pre_tool_guard"
@@ -678,45 +692,3 @@ human_gates = []
 path_boundaries = "只注入命名指令/身份，不写仓库状态"
 adapters = []
 completion_contract = "无名 agent 收到命名指令与自知"
-
-[[capability]]
-id = "hook.context_usage"
-kind = "hook"
-name = "context_usage"
-path = ".claude/hooks/context_usage.py"
-status = "registered"
-inputs = "context 占用计算入参"
-outputs = "context 用量 helper（供其他 hook/statusline 调用）"
-validators = ["scripts/check-agent-harness.py"]
-human_gates = []
-path_boundaries = "纯 helper，只读计算"
-adapters = []
-completion_contract = "返回 context 用量供上层消费"
-
-[[capability]]
-id = "hook.agent_identity"
-kind = "hook"
-name = "agent_identity"
-path = ".claude/hooks/agent_identity.py"
-status = "registered"
-inputs = ".agent-identity 身份文件"
-outputs = "身份解析结果（helper）"
-validators = ["scripts/check-agent-harness.py"]
-human_gates = []
-path_boundaries = "纯 helper，只读解析身份"
-adapters = []
-completion_contract = "返回当前 agent 身份供上层消费"
-
-[[capability]]
-id = "hook.agent_name_set"
-kind = "hook"
-name = "agent_name_set"
-path = ".claude/hooks/agent_name_set.py"
-status = "registered"
-inputs = "agent 选定的身份名"
-outputs = "写 .agent-identity + paseo rename + roster + 控制面状态"
-validators = ["scripts/check-agent-harness.py"]
-human_gates = []
-path_boundaries = "写身份文件/roster/控制面状态（gitignored runtime）"
-adapters = []
-completion_contract = "身份名已落盘、rename、登记 roster 与控制面"

@@ -8,24 +8,31 @@ exemption），并声明 inputs / outputs / validators / human gates / path boun
 adapters / completion contract。见 issue #28 与 DESIGN.md §10。
 
 校验项（结构性、机器可判定；不判断字段语义是否"写得对"）：
-1. 顶层 schema：`schema_version`（int≥1）、`profile == "research"`、`chassis_spec`
-   带 Bridge pin / compatibility 字段（消费 research-writing-bridge chassis-spec）。
-2. 每条 capability：必填字段齐全且非占位、`id` 唯一、`kind`/`status` 合法。
-3. **登记齐全**（missing）：`.claude/{agents,skills,commands,hooks}` 下每个正式能力
-   都必须在目录里登记或标 exempt——canonical 存在但目录漏登 → 失败。
-4. **无幽灵条目**（unexpected）：目录里登记的 registered 能力必须有对应 canonical 文件
-   ——目录写了但 canonical 不存在 → 失败。
-5. **adapter parity**：目录声明的 adapters 必须与 `scripts/sync-codex-adapters.py` 的
-   canonical→adapter 映射一致，且 adapter 文件真实存在（agent→`.codex/agents/<name>.toml`、
-   skill→`.agents/skills/<name>/SKILL.md`、command→`.agents/skills/command-<name>/SKILL.md`、
-   hook→无 adapter，`adapters` 必须为空）。
+1. 顶层 schema：`schema_version` 只接受当前支持版本（future version fail loud）、
+   `profile == "research"`、`[chassis_spec]` 是**可执行 pin/compatibility gate**——绑定
+   research-writing-bridge 的不可变 commit + v1 spec 文件 blob digest，且 compatibility
+   必须落在本地支持的 chassis major 上（pending-upstream / unpinned 在 strict 下失败）。
+2. 每条 capability：必填字段齐全且非占位、`id` 唯一、`kind:name` 全局唯一（registered 与
+   exempt 之间也不许重复）、`kind`/`status` 合法。
+3. **登记齐全**（missing）：真实能力面（agent/skill/command/hook）里每个正式能力都必须在
+   目录里登记或标 exempt。hook 的正式面**以实际注册表面为准**——只算被
+   `.claude/settings.json` / `.codex/config.toml` 真正挂载为 hook command 的脚本，helper/
+   setter（context_usage / agent_identity / agent_name_set 等）不算正式 hook capability。
+4. **无幽灵条目**（unexpected）：registered 能力必须有对应 canonical 文件；exempt 也必须
+   对应一个真实 discovered canonical capability（ghost exemption 失败）。
+5. **adapter 内容 parity**：直接复用 `scripts/sync-codex-adapters.py` 的 `expected_files()`
+   真实生成内容——目录声明的 adapters 必须存在、在 sync 预期集内、且**内容逐字一致**
+   （stale 生成内容失败），不只是路径存在。
 
 对应 doctrine：`.agent/tool-skill-interface.md`（"没有索引的能力不算正式 surface"）。
-无第三方依赖（仅用 stdlib `tomllib`）。退出码 0 = 通过，1 = 有 error。
+无第三方依赖（仅用 stdlib）。退出码 0 = 通过，1 = 有 error。
 用法：python scripts/check-capability-catalog.py [--strict] [--self-test]
 """
 from __future__ import annotations
 
+import importlib.util
+import json
+import re
 import sys
 import tomllib
 from pathlib import Path
@@ -33,9 +40,14 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 CATALOG_REL = ".agent/capability-catalog.toml"
 
+# 本地当前只支持这一版 catalog schema；更高版本必须 fail loud（不静默降级）。
+SUPPORTED_SCHEMA_VERSION = 1
+# 本地当前支持消费的 Bridge chassis-spec：commit（不可变 ref）+ major。
+SUPPORTED_CHASSIS_MAJOR = 1
+SUPPORTED_CHASSIS_SPEC_VERSION = "v1"
+
 VALID_KINDS = {"agent", "skill", "command", "hook"}
 VALID_STATUS = {"registered", "exempt"}
-# 每条 capability 必须声明的 7 个契约维度（见 issue #28 验收）。
 DECLARATION_FIELDS = [
     "inputs", "outputs", "validators", "human_gates",
     "path_boundaries", "adapters", "completion_contract",
@@ -44,9 +56,25 @@ STRING_FIELDS = ["id", "kind", "name", "path", "status",
                  "inputs", "outputs", "path_boundaries", "completion_contract"]
 LIST_FIELDS = ["validators", "human_gates", "adapters"]
 
+HOOK_REF_RE = re.compile(r"\.claude/hooks/([A-Za-z0-9_]+)\.py")
+SHA1_RE = re.compile(r"^[0-9a-f]{40}$")
+SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+
 
 def _is_placeholder(value: str) -> bool:
-    return not value.strip() or value.strip().startswith(("<", "TODO", "TBD"))
+    return not value.strip() or value.strip().startswith(("<", "TODO", "TBD", "unpinned"))
+
+
+def _discover_hooks(repo: Path) -> dict[str, str]:
+    """正式 hook = 真实被 settings.json / codex config 挂载为 hook command 的脚本。"""
+    refs: set[str] = set()
+    for cfg in (repo / ".claude" / "settings.json", repo / ".codex" / "config.toml"):
+        if cfg.exists():
+            for m in HOOK_REF_RE.finditer(cfg.read_text(encoding="utf-8", errors="replace")):
+                stem = m.group(1)
+                if (repo / ".claude" / "hooks" / f"{stem}.py").exists():
+                    refs.add(stem)
+    return {f"hook:{s}": f".claude/hooks/{s}.py" for s in refs}
 
 
 def discover_canonical(repo: Path) -> dict[str, str]:
@@ -61,8 +89,7 @@ def discover_canonical(repo: Path) -> dict[str, str]:
                 found[f"skill:{d.name}"] = f".claude/skills/{d.name}/SKILL.md"
     for md in sorted((repo / ".claude" / "commands").glob("*.md")):
         found[f"command:{md.stem}"] = f".claude/commands/{md.name}"
-    for py in sorted((repo / ".claude" / "hooks").glob("*.py")):
-        found[f"hook:{py.stem}"] = f".claude/hooks/{py.name}"
+    found.update(_discover_hooks(repo))
     return found
 
 
@@ -77,24 +104,91 @@ def expected_adapters(kind: str, name: str) -> list[str]:
     return []  # hook：共享地板，两边由 config 调用同一脚本，无生成 adapter
 
 
-def _check_top_level(data: dict, errors: list[str], warnings: list[str]) -> None:
+def _canonical_path_for(kind: str, name: str) -> str:
+    if kind == "agent":
+        return f".claude/agents/{name}.md"
+    if kind == "skill":
+        return f".claude/skills/{name}/SKILL.md"
+    if kind == "command":
+        return f".claude/commands/{name}.md"
+    return f".claude/hooks/{name}.py"
+
+
+def load_sync_expected(repo: Path) -> dict[str, str] | None:
+    """复用 sync-codex-adapters.expected_files() 的**真实生成内容**，键为 repo-relative posix。"""
+    spec_path = repo / "scripts" / "sync-codex-adapters.py"
+    if not spec_path.exists():
+        return None
+    spec = importlib.util.spec_from_file_location("_sync_codex_adapters_probe", spec_path)
+    if spec is None or spec.loader is None:
+        return None
+    mod = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(mod)
+        expected = mod.expected_files()
+        base = mod.REPO
+        return {p.relative_to(base).as_posix(): c for p, c in expected.items()}
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _check_top_level(data: dict, errors: list[str]) -> None:
     ver = data.get("schema_version")
-    if not isinstance(ver, int) or ver < 1:
-        errors.append("顶层 schema_version 缺失或非法（应为 int≥1）")
+    if not isinstance(ver, int):
+        errors.append("顶层 schema_version 缺失或非整数")
+    elif ver != SUPPORTED_SCHEMA_VERSION:
+        errors.append(
+            f"schema_version={ver} 非本地支持版本 {SUPPORTED_SCHEMA_VERSION}"
+            "（future version fail loud，需升级 check-capability-catalog.py）"
+        )
     if data.get("profile") != "research":
         errors.append(f"顶层 profile 必须为 'research'，实际：{data.get('profile')!r}")
-    chassis = data.get("chassis_spec")
+    _check_chassis(data.get("chassis_spec"), errors)
+
+
+def _check_chassis(chassis, errors: list[str]) -> None:
     if not isinstance(chassis, dict):
-        errors.append("缺少 [chassis_spec]（应声明 Bridge chassis-spec pin/compatibility）")
+        errors.append("缺少 [chassis_spec]（应声明 Bridge chassis-spec 可执行 pin/compatibility）")
         return
-    for key in ("source", "pin", "compatibility", "status"):
-        val = chassis.get(key)
-        if not isinstance(val, str) or _is_placeholder(val):
-            errors.append(f"[chassis_spec].{key} 缺失或为占位")
+    status = chassis.get("status")
+    if status != "pinned":
+        errors.append(
+            f"[chassis_spec].status 必须为 'pinned'，实际 {status!r}"
+            "（pending-upstream/unpinned 在本 gate 下失败，不许伪装通过）"
+        )
+    pin = chassis.get("pin")
+    if not isinstance(pin, str) or not SHA1_RE.match(pin):
+        errors.append("[chassis_spec].pin 必须是 40 位不可变 commit SHA")
+    if chassis.get("spec_version") != SUPPORTED_CHASSIS_SPEC_VERSION:
+        errors.append(
+            f"[chassis_spec].spec_version 必须为 {SUPPORTED_CHASSIS_SPEC_VERSION!r}"
+            f"，实际 {chassis.get('spec_version')!r}"
+        )
+    files = chassis.get("spec_files")
+    if not isinstance(files, dict) or not files:
+        errors.append("[chassis_spec].spec_files 必须列出 pinned spec 文件及其 blob digest")
+    else:
+        for rel, digest in files.items():
+            if not isinstance(digest, str) or not SHA1_RE.match(digest):
+                errors.append(f"[chassis_spec].spec_files['{rel}'] 的 blob digest 非 40 位 hex")
+    compat = chassis.get("compatibility")
+    if not isinstance(compat, dict):
+        errors.append("[chassis_spec].compatibility 必须是可判定的表（chassis/status 等）")
+        return
+    ch = compat.get("chassis")
+    m = SEMVER_RE.match(ch) if isinstance(ch, str) else None
+    if not m:
+        errors.append("[chassis_spec].compatibility.chassis 必须是 semver（x.y.z）")
+    elif int(m.group(1)) != SUPPORTED_CHASSIS_MAJOR:
+        errors.append(
+            f"[chassis_spec].compatibility.chassis major={m.group(1)} 不在本地支持范围"
+            f"（当前支持 chassis major {SUPPORTED_CHASSIS_MAJOR}）"
+        )
+    if compat.get("status") != "supported":
+        errors.append("[chassis_spec].compatibility.status 必须为 'supported' 才算可消费")
 
 
 def _check_entry(cap: dict, idx: int, errors: list[str]) -> tuple[str, str, str] | None:
-    """校验单条 capability 的字段完整性，返回 (kind, name, status) 供 parity 用。"""
     tag = cap.get("id") or f"#{idx}"
     ok = True
     for field in STRING_FIELDS:
@@ -116,10 +210,10 @@ def _check_entry(cap: dict, idx: int, errors: list[str]) -> tuple[str, str, str]
             ok = False
     kind, name, status = cap.get("kind"), cap.get("name"), cap.get("status")
     if kind not in VALID_KINDS:
-        errors.append(f"capability {tag}: kind 非法（应 ∈ {sorted(VALID_KINDS)}）：{kind!r}")
+        errors.append(f"capability {tag}: kind 非法：{kind!r}")
         ok = False
     if status not in VALID_STATUS:
-        errors.append(f"capability {tag}: status 非法（应 ∈ {sorted(VALID_STATUS)}）：{status!r}")
+        errors.append(f"capability {tag}: status 非法：{status!r}")
         ok = False
     if status == "exempt":
         reason = cap.get("exemption_reason")
@@ -131,18 +225,62 @@ def _check_entry(cap: dict, idx: int, errors: list[str]) -> tuple[str, str, str]
     return kind, name, status
 
 
-def validate(repo: Path, data: dict) -> tuple[list[str], list[str]]:
+def _check_adapter_parity(
+    repo: Path, key: str, kind: str, name: str, cap: dict,
+    expected_content: dict[str, str] | None, errors: list[str],
+) -> None:
+    declared = [a for a in cap.get("adapters", []) if isinstance(a, str)]
+    expected = expected_adapters(kind, name)
+    if sorted(declared) != sorted(expected):
+        errors.append(f"capability {key}: adapters 声明 {declared} 与预期映射 {expected} 不一致")
+    for adapter in expected:
+        path = repo / adapter
+        if not path.exists():
+            errors.append(f"capability {key}: 预期 adapter 文件不存在：{adapter}")
+            continue
+        if expected_content is not None:
+            want = expected_content.get(adapter)
+            if want is None:
+                errors.append(f"capability {key}: adapter 不在 sync 预期生成集：{adapter}")
+            elif path.read_text(encoding="utf-8", errors="replace") != want:
+                errors.append(f"capability {key}: adapter 生成内容 stale/不一致：{adapter}")
+
+
+def _check_registry_parity(
+    repo: Path, registered: dict, exempt_keys: set[str], errors: list[str]
+) -> None:
+    canonical = discover_canonical(repo)
+    for key, path in canonical.items():
+        if key not in registered and key not in exempt_keys:
+            errors.append(f"能力未登记进目录（missing）：{key}（{path}）—— 登记或标 exempt")
+    for key in registered:
+        if key not in canonical:
+            errors.append(f"registered 能力无对应 canonical 文件（unexpected）：{key}")
+    for key in exempt_keys:
+        if key not in canonical:
+            errors.append(f"exempt 无对应 discovered canonical（ghost exemption）：{key}")
+
+
+def validate(repo: Path, data: dict, expected_content: dict[str, str] | None = None
+             ) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
-    _check_top_level(data, errors, warnings)
+    _check_top_level(data, errors)
 
     caps = data.get("capability") or []
     if not isinstance(caps, list):
         errors.append("[[capability]] 必须是表数组")
         return errors, warnings
 
+    if expected_content is None:
+        expected_content = load_sync_expected(repo)
+        if expected_content is None:
+            errors.append("无法复用 sync-codex-adapters.expected_files() 做内容 parity")
+
     seen_ids: set[str] = set()
-    registered: dict[str, dict] = {}   # "<kind>:<name>" -> cap
+    seen_keys: set[str] = set()
+    registered: dict[str, dict] = {}
+    exempt_keys: set[str] = set()
     for idx, cap in enumerate(caps):
         if not isinstance(cap, dict):
             errors.append(f"capability #{idx}: 不是表")
@@ -157,7 +295,10 @@ def validate(repo: Path, data: dict) -> tuple[list[str], list[str]]:
             continue
         kind, name, status = parsed
         key = f"{kind}:{name}"
-        # path 必须与 kind/name 推出的 canonical 路径一致（防 typo / 张冠李戴）。
+        # registered 与 exempt 之间也不许 duplicate kind:name。
+        if key in seen_keys:
+            errors.append(f"capability kind:name 重复（registered/exempt 均不许）：{key}")
+        seen_keys.add(key)
         expected_path = _canonical_path_for(kind, name)
         if cap.get("path") != expected_path:
             errors.append(
@@ -166,53 +307,12 @@ def validate(repo: Path, data: dict) -> tuple[list[str], list[str]]:
             )
         if status == "registered":
             registered[key] = cap
-            _check_adapter_parity(repo, key, kind, name, cap, errors)
+            _check_adapter_parity(repo, key, kind, name, cap, expected_content, errors)
+        elif status == "exempt":
+            exempt_keys.add(key)
 
-    _check_registry_parity(repo, caps, registered, errors)
+    _check_registry_parity(repo, registered, exempt_keys, errors)
     return errors, warnings
-
-
-def _canonical_path_for(kind: str, name: str) -> str:
-    if kind == "agent":
-        return f".claude/agents/{name}.md"
-    if kind == "skill":
-        return f".claude/skills/{name}/SKILL.md"
-    if kind == "command":
-        return f".claude/commands/{name}.md"
-    return f".claude/hooks/{name}.py"
-
-
-def _check_adapter_parity(
-    repo: Path, key: str, kind: str, name: str, cap: dict, errors: list[str]
-) -> None:
-    declared = [a for a in cap.get("adapters", []) if isinstance(a, str)]
-    expected = expected_adapters(kind, name)
-    if sorted(declared) != sorted(expected):
-        errors.append(
-            f"capability {key}: adapters 声明 {declared} 与预期映射 {expected} 不一致"
-        )
-    for adapter in expected:
-        if not (repo / adapter).exists():
-            errors.append(f"capability {key}: 预期 adapter 文件不存在：{adapter}")
-
-
-def _check_registry_parity(
-    repo: Path, caps: list, registered: dict[str, dict], errors: list[str]
-) -> None:
-    canonical = discover_canonical(repo)
-    exempt_keys = {
-        f"{c.get('kind')}:{c.get('name')}"
-        for c in caps
-        if isinstance(c, dict) and c.get("status") == "exempt"
-    }
-    # missing：真实能力未登记（既没 registered 也没 exempt）。
-    for key, path in canonical.items():
-        if key not in registered and key not in exempt_keys:
-            errors.append(f"能力未登记进目录（missing）：{key}（{path}）—— 登记或标 exempt")
-    # unexpected：目录登记了 registered 条目但 canonical 文件不存在。
-    for key in registered:
-        if key not in canonical:
-            errors.append(f"目录登记的 registered 能力无对应 canonical 文件（unexpected）：{key}")
 
 
 def load_catalog(path: Path) -> dict:
@@ -244,11 +344,13 @@ def _run_real(strict: bool) -> int:
 
 
 # --------------------------------------------------------------------------- #
-# 自测：用临时 repo 树 + 合成目录跑对抗 fixture，确认 missing/unexpected/字段缺失/
-# adapter 不符/profile 错误/exempt 无理由 都会失败，good fixture 通过。
+# 自测：临时 repo 树 + 合成目录跑对抗 fixture。
 # --------------------------------------------------------------------------- #
 def _self_test() -> int:
     import tempfile
+
+    ADAPTER = ".codex/agents/demo.toml"
+    GOOD_CONTENT = {ADAPTER: "GENERATED-GOOD\n"}
 
     def good_cap(**over):
         cap = {
@@ -256,8 +358,7 @@ def _self_test() -> int:
             "path": ".claude/agents/demo.md", "status": "registered",
             "inputs": "x", "outputs": "y", "validators": ["scripts/v.py"],
             "human_gates": [], "path_boundaries": "owned only",
-            "adapters": [".codex/agents/demo.toml"],
-            "completion_contract": "report",
+            "adapters": [ADAPTER], "completion_contract": "report",
         }
         cap.update(over)
         return cap
@@ -265,55 +366,65 @@ def _self_test() -> int:
     def base_doc(caps):
         return {
             "schema_version": 1, "profile": "research",
-            "chassis_spec": {"source": "org/bridge", "pin": "unpinned",
-                             "compatibility": ">=0 <1", "status": "pending"},
+            "chassis_spec": {
+                "source": "org/bridge", "status": "pinned", "spec_version": "v1",
+                "pin": "0" * 40, "spec_files": {"chassis/v1/spec.md": "a" * 40},
+                "compatibility": {"chassis": "1.0.0", "status": "supported"},
+            },
             "capability": caps,
         }
 
     failures: list[str] = []
-
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         (root / ".claude" / "agents").mkdir(parents=True)
         (root / ".codex" / "agents").mkdir(parents=True)
         (root / ".claude" / "agents" / "demo.md").write_text("---\nname: demo\n---\n", "utf-8")
-        (root / ".codex" / "agents" / "demo.toml").write_text("name='demo'\n", "utf-8")
+        (root / ".codex" / "agents" / "demo.toml").write_text("GENERATED-GOOD\n", "utf-8")
 
-        def expect(label, doc, should_pass):
-            errs, _ = validate(root, doc)
-            ok = (len(errs) == 0)
-            if ok != should_pass:
-                failures.append(f"{label}: 期望 {'通过' if should_pass else '失败'}，实际 errors={errs}")
+        def expect(label, doc, should_pass, ec=GOOD_CONTENT):
+            errs, _ = validate(root, doc, expected_content=ec)
+            if (len(errs) == 0) != should_pass:
+                failures.append(f"{label}: 期望 {'通过' if should_pass else '失败'}，errors={errs}")
 
-        # 1) good fixture 通过
         expect("good", base_doc([good_cap()]), True)
-        # 2) missing：canonical demo 存在但目录空
         expect("missing", base_doc([]), False)
-        # 3) unexpected：登记了 canonical 不存在的 ghost
         expect("unexpected", base_doc([good_cap(), good_cap(
             id="agent.ghost", name="ghost", path=".claude/agents/ghost.md",
             adapters=[".codex/agents/ghost.toml"])]), False)
-        # 4) 缺契约字段
         bad = good_cap(); bad.pop("completion_contract")
         expect("missing-field", base_doc([bad]), False)
-        # 5) profile 错误
         doc = base_doc([good_cap()]); doc["profile"] = "writing"
         expect("wrong-profile", doc, False)
-        # 6) adapter 声明与映射不符
+        doc = base_doc([good_cap()]); doc["schema_version"] = 2
+        expect("future-schema", doc, False)
+        doc = base_doc([good_cap()]); doc["chassis_spec"]["status"] = "pending-upstream"
+        expect("chassis-pending", doc, False)
+        doc = base_doc([good_cap()]); doc["chassis_spec"]["pin"] = "unpinned"
+        expect("chassis-unpinned", doc, False)
+        doc = base_doc([good_cap()]); doc["chassis_spec"]["compatibility"]["chassis"] = "2.0.0"
+        expect("chassis-future-major", doc, False)
         expect("adapter-mismatch", base_doc([good_cap(adapters=[".codex/agents/wrong.toml"])]), False)
-        # 7) exempt 无 reason
-        expect("exempt-no-reason", base_doc([good_cap(
-            id="agent.demo", status="exempt")]), False)
-        # 8) chassis_spec 缺 compatibility
-        doc = base_doc([good_cap()]); doc["chassis_spec"].pop("compatibility")
-        expect("chassis-missing", doc, False)
+        # stale generated-content：路径存在但内容与 sync 预期不一致 → 失败。
+        expect("adapter-stale", base_doc([good_cap()]), False, ec={ADAPTER: "GENERATED-NEW\n"})
+        expect("exempt-no-reason", base_doc([good_cap(status="exempt")]), False)
+        # ghost exemption：exempt 一个 discovered 里不存在的能力 → 失败。
+        expect("ghost-exempt", base_doc([good_cap(), {
+            "id": "skill.ghost", "kind": "skill", "name": "ghost",
+            "path": ".claude/skills/ghost/SKILL.md", "status": "exempt",
+            "exemption_reason": "made up", "inputs": "x", "outputs": "y",
+            "validators": [], "human_gates": [], "path_boundaries": "n/a",
+            "adapters": [], "completion_contract": "n/a"}]), False)
+        # duplicate kind:name across registered+exempt → 失败。
+        expect("dup-key", base_doc([good_cap(), good_cap(
+            id="agent.demo2", status="exempt", exemption_reason="dup test")]), False)
 
     if failures:
         for f in failures:
             print(f"SELFTEST-FAIL {f}")
         print(f"[check-capability-catalog --self-test] FAIL — {len(failures)} case(s)")
         return 1
-    print("[check-capability-catalog --self-test] OK — 8 对抗场景全部符合预期")
+    print("[check-capability-catalog --self-test] OK — 14 对抗场景全部符合预期")
     return 0
 
 
