@@ -31,3 +31,17 @@
 ## 模板 repo 的特例
 
 本模板里许多目录是**空脚手架**。它们的 `ANATOMY.md` 描述**意图结构**并显式标注「template scaffold」，暂不放指向不存在代码的 `file:line` 引用——等真实代码落地再补 line-addressed citation，避免 citation rot。
+
+## Truth direction：结构地图不持有行为承诺（见 issue #33）
+
+`ANATOMY.md` 只回答「是什么、在哪、谁调用谁、状态归谁」——结构现实的 truth direction 是代码本身：
+现实变了改地图，不是改地图去要求现实迁就旧结构。
+
+若某个组件已经拥有独立的、已获批的**可观察行为承诺**（输入输出、错误、顺序、兼容性、breaking
+判级），承诺正文只归属承诺 owner（例：`template-sync.py` 的行为承诺归 `.agent/template-versioning-policy.md`
+的「template-sync 可观察 Contract」一节），本文件不建对应 `CONTRACT.md`。此时该组件的 `ANATOMY.md`：
+
+- 只反向链接承诺 owner，不复制 rule 正文（详见 `repo-documentation-topology.md` 的 truth-direction 表）；
+- 实现与该承诺不一致时以承诺为准，实现视为 bug，不得为变绿而弱化承诺。
+
+未出现第二个真实、独立的行为承诺边界前，不为此建根级承诺 registry；一次只纳管一个真实边界。
