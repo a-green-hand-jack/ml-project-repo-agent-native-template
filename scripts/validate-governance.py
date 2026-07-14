@@ -16,6 +16,9 @@
    （见 plans/ANATOMY.md 与 plans/20260712-plan-lifecycle-state.zh.md）。
 8. provenance 链（子检查 check-provenance-chain.py）：run→artifact→evidence→claim→
    deliverable 引用完整性、run 闭环、checksum（统一 sha256）、claim marker。
+9. capability catalog（子检查 check-capability-catalog.py）：声明式能力目录
+   `.agent/capability-catalog.toml` 与真实 `.claude/` 能力面 + 生成 adapter 的
+   登记齐全/无幽灵条目/adapter parity 一致（见 issue #28）。
 
 先跑子检查（作为独立进程，便于单独调用），再跑本文件治理规则。
 无第三方依赖（PyYAML 可选）。退出码 0 = 全通过，非 0 = 有失败。
@@ -392,6 +395,7 @@ def main() -> int:
     run_subcheck("check-outcome-ledger-schema.py", strict)
     run_subcheck("validate-experiment-state.py", strict)
     run_subcheck("check-provenance-chain.py", strict)
+    run_subcheck("check-capability-catalog.py", strict)
 
     print("\n=== governance ===", flush=True)
     check_gitignore()
