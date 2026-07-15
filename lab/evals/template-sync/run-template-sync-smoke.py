@@ -34,6 +34,10 @@ Scenarios (each asserts the P0 transactional contract of issue #35):
   block -> receipt result=partial (never pass) with explicit warnings; version
   still advances because the validator passed, but the honest signal is
   partial, not pass;
+- root_contract_framework: root CONTRACT.md is explicitly framework-owned;
+  dry-run does not create it, apply creates a missing copy and overwrites a
+  stale copy, receipts keep it out of unclassified, and the immediate rerun is
+  an apply no-op;
 - generated_stale_rogue: a rogue generated-namespace file that already existed
   BEFORE the run, untouched by this run's generator, still surfaces as
   generated.unexpected -- generated.actual is the full post-generator governed
@@ -107,6 +111,9 @@ glob = "VERSION"
 kind = "framework"
 [[rule]]
 glob = "template-manifest.toml"
+kind = "framework"
+[[rule]]
+glob = "CONTRACT.md"
 kind = "framework"
 [[rule]]
 glob = "fw/**"
@@ -549,6 +556,59 @@ def check_dry_run_no_side_effect(tmp: Path) -> int:
     return 0
 
 
+def check_root_contract_framework(tmp: Path) -> int:
+    """#62: the root governed-component index is framework-owned end to end."""
+    up = tmp / "up-root-contract"
+    down = tmp / "down-root-contract"
+    dry_receipt = tmp / "receipt-root-contract-dry.json"
+    receipt = tmp / "receipt-root-contract.json"
+    build_upstream(up, "v1.1.0")
+    build_downstream(down, "v1.0.0", gen=GEN_OK, val=VAL_OK)
+    write(up / "CONTRACT.md", "upstream governed-component index\n")
+
+    dry = run_sync(down, up, dry_receipt, "--dry-run")
+    if dry.returncode != 0:
+        return fail("root CONTRACT dry-run should exit 0", dry)
+    dry_result = read_json(dry_receipt)
+    if "CONTRACT.md" not in dry_result["classification"]["framework"]:
+        return fail(f"root CONTRACT must classify as framework, got {dry_result['classification']}", dry)
+    if "CONTRACT.md" not in dry_result["manifest"]["expected"]:
+        return fail(f"root CONTRACT missing from dry-run plan, got {dry_result['manifest']}", dry)
+    if (down / "CONTRACT.md").exists():
+        return fail("root CONTRACT dry-run must not create the downstream file", dry)
+
+    missing = run_sync(down, up, receipt)
+    if missing.returncode != 0:
+        return fail("missing root CONTRACT apply should exit 0", missing)
+    missing_result = read_json(receipt)
+    contract = down / "CONTRACT.md"
+    if contract.read_text(encoding="utf-8") != "upstream governed-component index\n":
+        return fail("missing root CONTRACT must be created from upstream", missing)
+    if "CONTRACT.md" not in missing_result["manifest"]["apply_changed"]:
+        return fail(f"missing root CONTRACT must be applied, got {missing_result['manifest']}", missing)
+    if "CONTRACT.md" in missing_result["classification"]["unclassified"]:
+        return fail(f"receipt must not list root CONTRACT as unclassified, got {missing_result['classification']}", missing)
+
+    write(contract, "downstream stale index\n")
+    stale = run_sync(down, up, receipt)
+    if stale.returncode != 0:
+        return fail("stale root CONTRACT apply should exit 0", stale)
+    stale_result = read_json(receipt)
+    if contract.read_text(encoding="utf-8") != "upstream governed-component index\n":
+        return fail("stale root CONTRACT must be overwritten from upstream", stale)
+    if "CONTRACT.md" not in stale_result["manifest"]["apply_changed"]:
+        return fail(f"stale root CONTRACT must be overwritten, got {stale_result['manifest']}", stale)
+    if "CONTRACT.md" in stale_result["classification"]["unclassified"]:
+        return fail(f"stale receipt must not list root CONTRACT as unclassified, got {stale_result['classification']}", stale)
+
+    rerun = run_sync(down, up, receipt)
+    if rerun.returncode != 0:
+        return fail("root CONTRACT idempotent rerun should exit 0", rerun)
+    if read_json(receipt)["manifest"]["apply_changed"]:
+        return fail("root CONTRACT idempotent rerun must be an apply no-op", rerun)
+    return 0
+
+
 def check_dirty_upstream_source(tmp: Path) -> int:
     """A git upstream must record git SHA + working-tree content digest + dirty
     status; a dirty source must not be reported as a clean SHA only."""
@@ -929,6 +989,7 @@ def main() -> int:
             check_validator_fail,
             check_no_verify_no_advance,
             check_dry_run_no_side_effect,
+            check_root_contract_framework,
             check_dirty_upstream_source,
             check_warnings_partial,
             check_generated_arbitrary_unexpected,
