@@ -1,7 +1,7 @@
 # ANATOMY↔CONTRACT 配对文件（S3）交互式计划
 
-Status: approved · 2026-07-15 · ref: issue #48 v4 S3 + human 2026-07-15 批注原话「S3 plan doc
-里面提到的问题我希望都一步到位，不要搞什么 MVP 或者最小实现」（见下方「Human 批注区」）；
+Status: implementing · 2026-07-15 · ref: issue #48 v4 S3 + human 2026-07-15 批注原话「S3 plan
+doc 里面提到的问题我希望都一步到位，不要搞什么 MVP 或者最小实现」（见下方「Human 批注区」）；
 worktree-pr-flow 实现分支 `feat/s3-anatomy-contract-pairing`
 
 > 这是 human 与 agent 的协商界面：agent 写初稿 → human 在文件里批注 → agent 读 diff、收敛计划 →

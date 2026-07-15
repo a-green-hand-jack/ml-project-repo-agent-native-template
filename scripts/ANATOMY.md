@@ -1,6 +1,7 @@
 ---
 related_files:
   - ../ANATOMY.md
+  - CONTRACT.md
   - check-agent-harness.py
   - check-anatomy-drift.py
   - check-capability-catalog.py
@@ -25,7 +26,7 @@ related_files:
 parent: ANATOMY.md
 contracts:
   - component: template-sync
-    owner: .agent/template-versioning-policy.md
+    owner: scripts/CONTRACT.md
 maintenance: |
   新增/删除检查脚本时同 commit 更新本表。检查项与 .agent/ doctrine 对应关系变化时也更新。
 ---
@@ -58,7 +59,7 @@ Codex adapter 同步脚本把 `.claude/` canonical 能力生成到 `.codex/` 与
 | `_agent_surface.py` | 非独立脚本（无 `__main__`）：`bootstrap-project.py`（A4）与 `adopt-existing-repo.py`（B6）共用的 Claude/Codex postflight 渲染函数，避免两套加载清单文案/判定漂移 | `plans/20260712-bootstrap-adoption-proof.zh.md`（D2c） |
 | `sync-codex-adapters.py` | 从 `.claude/agents` / `skills` / `commands` 生成并校验 Codex adapters | `.agent/tool-skill-interface.md` |
 | `bump-template-version.py` | 按 agent 判定的 level 递增 `VERSION`、更 `CHANGELOG.md`、打本地 git tag | `.agent/template-versioning-policy.md` |
-| `template-sync.py` | 下游按 `template-manifest.toml` 追平上游框架层，分阶段事务：preflight/plan/apply/verify/commit-version | 可观察行为承诺的唯一规范正文 owner 是 `.agent/template-versioning-policy.md`「template-sync 可观察 Contract」一节；本行只结构性描述+反向链接，不复制承诺正文 · `template-manifest.toml` |
+| `template-sync.py` | 下游按 `template-manifest.toml` 追平上游框架层，分阶段事务：preflight/plan/apply/verify/commit-version | 可观察行为承诺的唯一规范正文 owner 是 `scripts/CONTRACT.md`（component `template-sync`）；本行只结构性描述+反向链接，不复制承诺正文 · `template-manifest.toml` |
 | `agent-state.py` | 多 agent 控制面状态文件（`memory/agents/<name>.yaml`）写侧 + 格式唯一 owner（解析/staleness/root 锚定 helpers） | `.agent/multi-agent-control-plane.md` |
 | `agent-status.py` | 只读 list/status：roster + 状态 yaml + 可选 `paseo ls` presence，30min TTL 派生 stale | `.agent/multi-agent-control-plane.md` |
 | `agent-mailbox.py` | agent 间消息/handoff 落盘（inbox/outbox 对、decision/handoff 强制 ref、ack 转移 ownership） | `.agent/multi-agent-control-plane.md` |
