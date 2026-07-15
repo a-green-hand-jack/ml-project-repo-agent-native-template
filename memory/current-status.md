@@ -31,12 +31,17 @@
 - **#47 已实现并关闭**：paseo agent 位置选择约定（无 worktree→同 Workspace 新 tab；有 worktree→
   可新 Workspace+tab；永不开新 Project）落进 `.claude/skills/spawn/SKILL.md`（单一 owner），
   commit `de94973`（本地 main，未 push）。
-- **#48（open，tracking）**：LingTai 治理对照总起，v3 覆盖**两份**指南（ANATOMY/CONTRACT +
-  Code Drift/Bloat Control），保持「已吸收/弃/取」结构（human 认可该形式）——指南 B 大头已被
-  #35/action-boundary/dev-guide 吸收；exact path scope 硬门按 #32/#43/#44 反面证据降为 G1 自报
-  声明并入 S2；S1（承诺→证据闭环）随 #46 下一阶段；本阶段唯一执行项 **S2**（变更自检清单：
-  分类矩阵 + Invariant/Variation/Non-goals + exact-base 双检 + 验证纪律 + 副作用授权段，
-  纯文档小 PR），待 human review 后动手。
+- **#48（open，tracking，v4）**：LingTai 治理对照总起，覆盖两份指南，「已吸收/弃/取」结构
+  （human 认可）。三片：**S2** 变更自检清单（G1，分类矩阵 + Invariant/Variation/Non-goals +
+  exact-base 双检自报 + 验证纪律 + 副作用授权段，挂 worktree-pr-flow/pr-review）；**S3**
+  ANATOMY↔CONTRACT 配对文件（human 2026-07-15 拍板推翻 v3 的弃——root CONTRACT 索引 +
+  template-sync 单边界试点先行，红线：不批量/不造双 owner/承诺带证据指针，先走
+  interactive-plan-doc）；S1 承诺→证据闭环随 #46 下一阶段。exact path scope 硬门维持弃
+  （#32/#43/#44 反面证据）。
+- **#49（open，pinned，常驻进度条）**：仿 OpenAlice#183 形制——现状盘点（human/agent 两侧
+  便利）、对照 #22 的 11 轴里程碑地图、差距清单、更新日志；初始估算 **~55%**（机制层成形、
+  真实验证闭环三件套未完成：真实下游 sync #19、runtime enforcement #46、真实实验/证据链）。
+  里程碑后由主 agent 更新。
 - 执行 agent 预定名：**干将·改·灵台缺口**（S2 落地时按 spawn skill 唤起）。
 - 阶段收尾计划：S2 落地 → 模板功能/服务全面测试（与 #46 重启同场景）。
 
