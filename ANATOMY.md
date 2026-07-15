@@ -38,7 +38,7 @@ maintenance: |
 | 协商层 | `plans/` | 交互式 plan doc + 四类文档生命周期状态（注册表 `memory/doc-lifecycle.yaml`） | `plans/ANATOMY.md` |
 | doctrine 层 | `.agent/` | 行为契约、边界、政策、协议 | `.agent/AGENTS.md` |
 | Claude 能力层 | `.claude/` | canonical subagents / skills / commands / hooks / settings | `.claude/ANATOMY.md` |
-| Codex 适配层 | `.codex/` `.agents/` | Codex config / custom agents / repo skills adapters | `.codex/ANATOMY.md` · `.agents/ANATOMY.md` |
+| Codex 适配层 | `.codex/` `.agents/` | Codex native config/rules/navigation（framework）+ custom-agent / skill adapters（generated） | `.codex/ANATOMY.md` · `.agents/ANATOMY.md` |
 | 研究控制面 | `lab/` | code / infra / research / data / artifacts / runs / recipes | `lab/ANATOMY.md` |
 | 活状态层 | `memory/` | current-status / session-tree / practices | `memory/ANATOMY.md` |
 | 对外承诺层 | `deliverables/` | paper / slides / release | `deliverables/ANATOMY.md` |

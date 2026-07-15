@@ -57,7 +57,7 @@ Codex adapter 同步脚本把 `.claude/` canonical 能力生成到 `.codex/` 与
 | `check-adoption-integrity.py` | 读取 adoption baseline，按 hash 证明原 tracked bytes 仍存在 | `.claude/skills/adopt-existing-repo/SKILL.md` |
 | `bootstrap-project.py` | 把刚从模板派生的新 repo 落地：`.template.toml` 锚点、`core.hooksPath`、Codex adapters 同步、governance，幂等；需 human 信息的步骤只报告不代做 | `plans/20260712-bootstrap-adoption-proof.zh.md` · `.claude/skills/bootstrap-project/SKILL.md` |
 | `_agent_surface.py` | 非独立脚本（无 `__main__`）：`bootstrap-project.py`（A4）与 `adopt-existing-repo.py`（B6）共用的 Claude/Codex postflight 渲染函数，避免两套加载清单文案/判定漂移 | `plans/20260712-bootstrap-adoption-proof.zh.md`（D2c） |
-| `sync-codex-adapters.py` | 从 `.claude/agents` / `skills` / `commands` 生成并校验 Codex adapters | `.agent/tool-skill-interface.md` |
+| `sync-codex-adapters.py` | 从 `.claude/agents` / `skills` / `commands` 生成并校验 Codex adapters；`--check` 同时断言 manifest 的 tracked generated 集合精确等于 `expected_files()` | `.agent/tool-skill-interface.md` |
 | `bump-template-version.py` | 按 agent 判定的 level 递增 `VERSION`、更 `CHANGELOG.md`、打本地 git tag | `.agent/template-versioning-policy.md` |
 | `template-sync.py` | 下游按 `template-manifest.toml` 追平上游框架层，分阶段事务：preflight/plan/apply/verify/commit-version | 可观察行为承诺的唯一规范正文 owner 是 `scripts/CONTRACT.md`（component `template-sync`）；本行只结构性描述+反向链接，不复制承诺正文 · `template-manifest.toml` |
 | `agent-state.py` | 多 agent 控制面状态文件（`memory/agents/<name>.yaml`）写侧 + 格式唯一 owner（解析/staleness/root 锚定 helpers） | `.agent/multi-agent-control-plane.md` |
@@ -79,7 +79,7 @@ Inbound:
 - `lab/evals/template-sync/run-template-sync-smoke.py` 是 `template-sync.py` 的故障注入 fixture
   （generator fail / validator fail / 原子 version-write fail / 未分类/无哨兵 warning / MAJOR gate /
   成功幂等重跑；五类路径正负例）；它把本脚本复制进合成下游、用 stub 生成器/validator 端到端驱动。
-- `.codex/agents/*.toml` 与 `.agents/skills/*/SKILL.md` 由 `sync-codex-adapters.py` 生成。
+- `.codex/agents/*.toml` 与 `.agents/skills/*/SKILL.md` 由 `sync-codex-adapters.py` 生成；`template-manifest.toml` 的 generated 分类不得扩及 `.codex` config/rules/navigation 或 `.agents` navigation。
 
 Outbound:
 - `validate-governance.py` 以 subprocess 调用 harness/anatomy/doc-lifecycle/outcome-ledger/
