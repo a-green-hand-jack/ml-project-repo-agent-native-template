@@ -38,13 +38,18 @@
 现实变了改地图，不是改地图去要求现实迁就旧结构。
 
 若某个组件已经拥有独立的、已获批的**可观察行为承诺**（输入输出、错误、顺序、兼容性、breaking
-判级），承诺正文只归属承诺 owner（例：`template-sync.py` 的行为承诺归 `.agent/template-versioning-policy.md`
-的「template-sync 可观察 Contract」一节），本文件不建对应 `CONTRACT.md`。此时该组件的 `ANATOMY.md`：
+判级），承诺正文只归属承诺 owner——一个真实、独立的边界应有自己的 `CONTRACT.md`（例：
+`template-sync` 归 `scripts/CONTRACT.md`，issue #33 建立、issue #48 v4 S3 迁移），并在 root
+[`CONTRACT.md`](../CONTRACT.md) 的「受治理组件」索引登记（见下文 `governed_components` 字段）。
+此时该组件的 `ANATOMY.md`：
 
 - 只反向链接承诺 owner，不复制 rule 正文（详见 `repo-documentation-topology.md` 的 truth-direction 表）；
 - 实现与该承诺不一致时以承诺为准，实现视为 bug，不得为变绿而弱化承诺。
 
-未出现第二个真实、独立的行为承诺边界前，不为此建根级承诺 registry；一次只纳管一个真实边界。
+**不批量**：只有出现真实、独立、已出过问题/争议的边界才新建 `CONTRACT.md`——一次迁一个
+（当前唯一试点是 `template-sync`，迁移映射见
+`plans/20260715-anatomy-contract-pairing.zh.md`）。未出现第二个真实边界前，不为其余组件预建
+`CONTRACT.md`，也不在 root 索引里为它们占位。
 
 ## typed relation schema（静态图，由 `scripts/check-anatomy-drift.py` 强制）
 
@@ -67,7 +72,29 @@ contract_for:                            # 承诺 owner 文件反向声明自己
 target 一律 repo-root-relative（不是相对当前文件），拒绝空值/绝对路径/`..`/repo 外逃逸/不存在的路径。
 只纳管**显式声明**这些字段的节点；未声明的目录是合法 ungoverned leaf，不受影响。当前唯一纳管的
 静态图：root `ANATOMY.md` ↔ `scripts/ANATOMY.md`（parent/children）与 component `template-sync`
-的双向 contract（`scripts/ANATOMY.md` ↔ `.agent/template-versioning-policy.md`，schema 见上一节）。
+的双向 contract（`scripts/ANATOMY.md` ↔ `scripts/CONTRACT.md`，schema 见上一节）。
 
 字段语义、fail-closed 规则细节以 `scripts/check-anatomy-drift.py` 的
 `validate_typed_relations()`/`--self-test` 为准，本节不复制判定逻辑，只说明字段形状与当前纳管范围。
+
+## root CONTRACT.md 的 governed_components 索引
+
+root [`CONTRACT.md`](../CONTRACT.md)（若存在）用同一缩进 block 语法声明它显式纳管的组件集合
+（LingTai guide A 机制4「显式受治理集合」，见 issue #48 v4 S3）。这是第五个 typed relation
+字段，只出现在 root `CONTRACT.md`，不出现在 `ANATOMY.md`：
+
+```yaml
+governed_components:                    # root CONTRACT.md 专用，与 ANATOMY.md 的四字段分离
+  - component: <id>                     # 必须与该组件 contracts/contract_for 图的 component 同名
+    owner: <repo-root-relative path>    # 必须与该组件真实 contracts/contract_for 图算出的 owner 一致
+```
+
+`scripts/check-anatomy-drift.py` 的 `validate_governed_index()` 做交叉校验（root `CONTRACT.md`
+不存在则跳过，向后兼容）：
+
+- 有真实 `contracts`/`contract_for` 双向声明但未登记进索引 → `rule=governed-index-missing`。
+- 索引声称受治理但没有真实双向声明 → `rule=governed-index-orphan`。
+- 两边都有但 owner 路径不一致 → `rule=governed-index-mismatch`。
+
+字段语义与 fail-closed 规则细节以 `validate_governed_index()`/`--self-test` 为准，本节不复制
+判定逻辑。

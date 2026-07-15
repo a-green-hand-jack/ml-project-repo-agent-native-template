@@ -1,5 +1,6 @@
 ---
 related_files:
+  - CONTRACT.md
   - human/ANATOMY.md
   - plans/ANATOMY.md
   - .agent/AGENTS.md
@@ -32,6 +33,7 @@ maintenance: |
 | 平面 | 目录 | 作用 | 子地图 |
 | --- | --- | --- | --- |
 | 入口层 | `AGENTS.md` `CLAUDE.md` `PROJECT.md` `DESIGN.md` | agent/human 入口、项目描述、模板设计说明 | — |
+| 承诺索引层 | `CONTRACT.md` | 受治理组件索引（LingTai guide A 机制4，见 issue #48 v4 S3） | — |
 | 交互层 | `human/` | brief / review / decision / inbox | `human/ANATOMY.md` |
 | 协商层 | `plans/` | 交互式 plan doc + 四类文档生命周期状态（注册表 `memory/doc-lifecycle.yaml`） | `plans/ANATOMY.md` |
 | doctrine 层 | `.agent/` | 行为契约、边界、政策、协议 | `.agent/AGENTS.md` |

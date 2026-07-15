@@ -174,11 +174,11 @@ docs:
   - id: plan-20260715-anatomy-contract-pairing
     path: plans/20260715-anatomy-contract-pairing.zh.md
     kind: plan
-    status: draft
+    status: implementing
     issue: "#48"
-    branch: feat/48-checklist-contract
-    worktree: null
-    approval: null
+    branch: feat/s3-anatomy-contract-pairing
+    worktree: "."
+    approval: "human 2026-07-15 批注原话「S3 plan doc 里面提到的问题我希望都一步到位，不要搞什么 MVP 或者最小实现」；转录见 plans/20260715-anatomy-contract-pairing.zh.md 的 Human 批注区"
     upstream: []
     downstream: []
     superseded_by: null

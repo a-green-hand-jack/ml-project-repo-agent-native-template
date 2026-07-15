@@ -15,6 +15,10 @@
      component 全局唯一 owner。
    只纳管显式声明这些字段的节点；没有声明的目录（合法 ungoverned leaf/template scaffold）
    不受影响、不会被强行拉入 governed set。
+5. root `CONTRACT.md` 的 `governed_components` 索引与上一条 `contracts`/`contract_for` 图的
+   交叉校验（见 .agent/anatomy-protocol.md「root CONTRACT.md 的 governed_components 索引」
+   一节）：登记缺失（governed-index-missing）/ 索引 orphan（governed-index-orphan）/ owner
+   路径不一致（governed-index-mismatch）。root `CONTRACT.md` 不存在时跳过，向后兼容。
 
 只校验「看起来像真实 repo 文件」的引用；占位符（含 `<...>`、`example`、模板示例）跳过。
 这是结构性检查：只能挡 missing file / out-of-range line / 图不自洽；语义正确性仍需人打开代码验证。
@@ -293,11 +297,18 @@ def _classify_relation_target(ref: str, repo: Path) -> tuple[Path | None, str | 
     return target, None
 
 
-def validate_typed_relations(repo: Path, anatomy_files: list[Path]) -> list[str]:
+def validate_typed_relations(
+    repo: Path, anatomy_files: list[Path]
+) -> tuple[list[str], dict[str, Path]]:
     """真实 repo 与 --self-test synthetic fixture 共用的唯一图校验函数。
 
     只纳管显式声明 parent/children/contracts/contract_for 的节点；其余目录
     （合法 ungoverned leaf、template scaffold）完全不受影响。
+
+    返回 (findings, component_owner)：component_owner 是从 contracts/contract_for 图算出的
+    「component -> 真实 owner 路径」映射（只含全局唯一 owner 的 component），供
+    `validate_governed_index()` 与 root CONTRACT.md 的 governed_components 索引交叉校验复用，
+    避免重新解析一遍所有 ANATOMY.md。
     """
     repo = repo.resolve()
     findings: list[str] = []
@@ -531,6 +542,103 @@ def validate_typed_relations(repo: Path, anatomy_files: list[Path]) -> list[str]
                     f"或从 {rel(owner)} 移除这条 contract_for"
                 )
 
+    return findings, component_owner
+
+
+# --------------------------------------------------------------------------
+# root CONTRACT.md 的 governed_components 索引 <-> 上面算出的真实 contracts/contract_for 图
+# 交叉校验。第五个 typed relation 字段，只出现在 root CONTRACT.md，不出现在 ANATOMY.md
+# （见 .agent/anatomy-protocol.md「root CONTRACT.md 的 governed_components 索引」一节）。
+# --------------------------------------------------------------------------
+
+
+def validate_governed_index(repo: Path, component_owner: dict[str, Path]) -> list[str]:
+    """root CONTRACT.md 不存在则跳过（向后兼容）。存在则解析 governed_components，与
+    validate_typed_relations() 算出的真实 component_owner 做集合对比，产出三类 finding：
+    governed-index-missing / governed-index-orphan / governed-index-mismatch。
+    """
+    findings: list[str] = []
+    repo = repo.resolve()
+    contract_path = repo / "CONTRACT.md"
+    if not contract_path.exists():
+        return findings
+
+    def rel(p: Path) -> str:
+        try:
+            return str(p.relative_to(repo))
+        except ValueError:
+            return str(p)
+
+    text = contract_path.read_text(encoding="utf-8", errors="replace")
+    fm = _frontmatter(text)
+    if not fm:
+        return findings
+
+    for v in _scan_typed_key_schema(fm, "governed_components", "list"):
+        findings.append(
+            "GOVERNANCE contract=CONTRACT.md relation=governed_components rule=schema "
+            f"violation={v} action=改为 .agent/anatomy-protocol.md 文档化的顶层唯一 "
+            "+ 缩进 block 语法"
+        )
+
+    entries, entry_errs = _extract_dict_list(fm, "governed_components")
+    for e in entry_errs:
+        findings.append(
+            "GOVERNANCE contract=CONTRACT.md relation=governed_components rule=schema "
+            f"violation={e} action=改为固定形状 '- component: <id>' + 下一行 '  owner: <path>'"
+        )
+
+    seen: set[str] = set()
+    index_owner: dict[str, Path] = {}
+    for e in entries:
+        comp, owner_ref = e.get("component"), e.get("owner")
+        if not comp or not owner_ref:
+            findings.append(
+                "GOVERNANCE contract=CONTRACT.md relation=governed_components rule=schema "
+                f"violation=条目缺失或空 component/owner -> {e} action=补全两个字段（不接受空值）"
+            )
+            continue
+        if comp in seen:
+            findings.append(
+                f"GOVERNANCE contract=CONTRACT.md component={comp} rule=no-duplicate "
+                f"violation=同一文件内重复声明 component -> {comp} "
+                "action=去重 governed_components 列表"
+            )
+            continue
+        seen.add(comp)
+        target, reason = _classify_relation_target(owner_ref, repo)
+        if reason:
+            findings.append(
+                f"GOVERNANCE contract=CONTRACT.md component={comp} rule=path-safety "
+                f"violation={reason} action=修正 owner 为 repo 内安全相对路径"
+            )
+            continue
+        index_owner[comp] = target
+
+    for comp in sorted(set(index_owner) | set(component_owner)):
+        idx, real = index_owner.get(comp), component_owner.get(comp)
+        if real is not None and idx is None:
+            findings.append(
+                f"GOVERNANCE component={comp} rule=governed-index-missing "
+                f"violation=存在真实 contracts/contract_for 双向声明（owner={rel(real)}），"
+                "但 root CONTRACT.md 的 governed_components 未登记该 component "
+                "action=在 CONTRACT.md 的 governed_components 加入该 component"
+            )
+        elif idx is not None and real is None:
+            findings.append(
+                f"GOVERNANCE component={comp} rule=governed-index-orphan "
+                f"violation=root CONTRACT.md 的 governed_components 声称 owner={rel(idx)}，"
+                "但该 component 没有真实的 contracts/contract_for 双向声明 "
+                "action=补全该组件的 contracts/contract_for 双向声明，或从 governed_components 移除该条"
+            )
+        elif idx is not None and real is not None and idx != real:
+            findings.append(
+                f"GOVERNANCE component={comp} rule=governed-index-mismatch "
+                f"violation=root CONTRACT.md 的 governed_components 声称 owner={rel(idx)}，"
+                f"与真实 contracts/contract_for 图算出的 owner={rel(real)} 不一致 "
+                "action=核对两边 owner 路径是否指向同一文件"
+            )
+
     return findings
 
 
@@ -610,13 +718,53 @@ def _build_fixtures(root: Path) -> None:
         "---\n# maintenance 内 typed-key-looking prose 合法\n"
     ))
 
+    # --- root CONTRACT.md 的 governed_components 索引交叉校验 fixture ---
+    # 13) governed-index-missing：真实双向声明存在，但 root CONTRACT.md 未登记。
+    _write(root / "governed_missing/anatomy/ANATOMY.md", (
+        "---\ncontracts:\n  - component: comp-governed-missing\n"
+        "    owner: governed_missing/policy.md\n---\n# a\n"
+    ))
+    _write(root / "governed_missing/policy.md", (
+        "---\ncontract_for:\n  - component: comp-governed-missing\n"
+        "    anatomy: governed_missing/anatomy/ANATOMY.md\n---\n# policy\n"
+    ))
+
+    # 14) governed-index-mismatch：两边都有，但 owner 路径不一致（索引指向 policyB，真实 owner 是 policyA）。
+    _write(root / "governed_mismatch/anatomy/ANATOMY.md", (
+        "---\ncontracts:\n  - component: comp-governed-mismatch\n"
+        "    owner: governed_mismatch/policyA.md\n---\n# a\n"
+    ))
+    _write(root / "governed_mismatch/policyA.md", (
+        "---\ncontract_for:\n  - component: comp-governed-mismatch\n"
+        "    anatomy: governed_mismatch/anatomy/ANATOMY.md\n---\n# policy A（真实 owner）\n"
+    ))
+    _write(root / "governed_mismatch/policyB.md", "# policy B（索引里错误指向的 owner，非真实）\n")
+
+    # 15) governed-index-orphan：root CONTRACT.md 声称受治理，但没有任何真实 contracts/contract_for。
+    _write(root / "governed_orphan/policy.md", "# 只是普通文件，无 contract_for\n")
+
+    # root CONTRACT.md：正例 comp-ok（与 fixture 1 的真实双向声明一致，不应产生任何 finding）+
+    # 三组新违规（missing 不出现在这里、mismatch、orphan）。
+    _write(root / "CONTRACT.md", (
+        "---\n"
+        "governed_components:\n"
+        "  - component: comp-ok\n"
+        "    owner: policy.md\n"
+        "  - component: comp-governed-mismatch\n"
+        "    owner: governed_mismatch/policyB.md\n"
+        "  - component: comp-governed-orphan\n"
+        "    owner: governed_orphan/policy.md\n"
+        "---\n# root CONTRACT（fixture）\n"
+    ))
+
 
 def self_test() -> int:
     with tempfile.TemporaryDirectory(prefix="anatomy-graph-selftest-") as td:
         root = Path(td)
         _build_fixtures(root)
         files = list(iter_anatomy_files(root))
-        findings = validate_typed_relations(root, files)
+        findings, component_owner = validate_typed_relations(root, files)
+        findings += validate_governed_index(root, component_owner)
         joined = "\n".join(findings)
 
         checks: list[tuple[str, bool]] = [
@@ -661,6 +809,18 @@ def self_test() -> int:
             ("12 maintenance 内 typed-key-looking prose 合法不误报", (
                 "schema_maintenance/ANATOMY.md" not in joined
             )),
+            ("13 root CONTRACT.md 正例 comp-ok 与真实双向声明一致，不产生 governed-index 发现", (
+                "component=comp-ok" not in joined
+            )),
+            ("14 governed-index-missing 被检出", (
+                "rule=governed-index-missing" in joined and "comp-governed-missing" in joined
+            )),
+            ("15 governed-index-mismatch 被检出", (
+                "rule=governed-index-mismatch" in joined and "comp-governed-mismatch" in joined
+            )),
+            ("16 governed-index-orphan 被检出", (
+                "rule=governed-index-orphan" in joined and "comp-governed-orphan" in joined
+            )),
         ]
 
         ok = True
@@ -687,7 +847,8 @@ def main() -> int:
         check_citations(anatomy, text)
         check_line_budget(anatomy, text)
 
-    governance_findings = validate_typed_relations(REPO, files)
+    governance_findings, component_owner = validate_typed_relations(REPO, files)
+    governance_findings += validate_governed_index(REPO, component_owner)
     label = "ERROR" if strict else "REPORT"
     for f in governance_findings:
         print(f"{label} {f}")

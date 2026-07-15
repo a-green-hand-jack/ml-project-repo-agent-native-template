@@ -35,7 +35,7 @@ REQUIRED_TOP = [
 # 根目录白名单（其余视为潜在污染 -> warning）。
 ROOT_WHITELIST = {
     "README.md", "PROJECT.md", "DECISIONS.md", "DESIGN.md", "AGENTS.md", "CLAUDE.md",
-    "ANATOMY.md", ".gitignore", ".github", ".githooks", ".agent", ".claude", ".codex",
+    "ANATOMY.md", "CONTRACT.md", ".gitignore", ".github", ".githooks", ".agent", ".claude", ".codex",
     ".agents", "human", "lab", "memory", "deliverables", "scripts", "plans", ".reference-docs",
     # 模板版本 / 上下游同步锚点（见 .agent/template-versioning-policy.md）
     "VERSION", "CHANGELOG.md", "template-manifest.toml", ".template.toml",
