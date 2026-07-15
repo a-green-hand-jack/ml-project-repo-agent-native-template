@@ -4,7 +4,8 @@
 Implement issue #60 adoption template-anchor support under the approved D1-D4 contract.
 
 ## Branch / base
-- Branch: `fix/60-adoption-template-anchor`
+- Local worktree branch: `p2a-60-adoption-template-anchor`
+- Published topic ref: `fix/60-adoption-template-anchor`
 - Worktree: `/home/user/.paseo/worktrees/1kaz3672/60-adoption-template-anchor`
 - Base: `origin/main` = `e3d89a812058d56647df34171cc9c8f9b0c32d7a` (clean at start)
 
