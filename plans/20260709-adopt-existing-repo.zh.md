@@ -96,11 +96,11 @@ Status: verified · 2026-07-12 · 已实现并合入 main（commit 93fabae）；
 
 第一版完成时至少满足：
 
-- `python scripts/adopt-existing-repo.py <fixture> --phase discover` 可生成 plan。
-- `python scripts/adopt-existing-repo.py <fixture> --phase baseline` 可生成 hash/protected/test 基线。
-- `python scripts/adopt-existing-repo.py <fixture> --phase scaffold` 可写入完整 control plane，且不覆盖冲突文件。
-- `python scripts/adopt-existing-repo.py <fixture> --phase normalize` 可把 synthetic repo 根目录收敛到 template 白名单。
-- `python scripts/adopt-existing-repo.py <fixture> --phase prove` 可生成 adoption report。
+- `python scripts/adopt-existing-repo.py <fixture> --phase discover --origin <owner/repo>` 可生成 plan。
+- `python scripts/adopt-existing-repo.py <fixture> --phase baseline --origin <owner/repo>` 可生成 hash/protected/test 基线。
+- `python scripts/adopt-existing-repo.py <fixture> --phase scaffold --origin <owner/repo>` 可写入完整 control plane，且不覆盖冲突文件。
+- `python scripts/adopt-existing-repo.py <fixture> --phase normalize --origin <owner/repo>` 可把 synthetic repo 根目录收敛到 template 白名单。
+- `python scripts/adopt-existing-repo.py <fixture> --phase prove --origin <owner/repo>` 可生成 adoption report。
 - `python scripts/check-adoption-integrity.py <fixture>` 可证明未发生未授权删除/改写。
 - 本模板自身 `python scripts/validate-governance.py --strict` 通过。
 - `git diff --check` 通过。

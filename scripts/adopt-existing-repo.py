@@ -1199,13 +1199,31 @@ def normalize(args: argparse.Namespace) -> dict[str, Any]:
             "re-run discover with the requested explicit origin"
         )
     anchor_decision: dict[str, Any] | None = None
+    anchor_preflight_error: str | None = None
     try:
         anchor_decision = TEMPLATE_ANCHOR.preflight(target, args.origin, read_own_version())
     except TEMPLATE_ANCHOR.TemplateAnchorError as exc:
-        blockers.append(f"template-anchor: {exc}")
+        anchor_preflight_error = f"template-anchor: {exc}"
+        blockers.append(anchor_preflight_error)
     state_blocker = state_redirect_blocker(target)
     if state_blocker:
         blockers.append(state_blocker)
+
+    # An unsafe or incompatible existing anchor is not an ordinary normalize
+    # blocker. `--allow-blocked-normalize` may retain its reporting behavior
+    # for legacy non-anchor blockers, but it must never authorize any queued
+    # move when the anchor itself fails closed.
+    if anchor_preflight_error:
+        template_anchor = {"status": "not-written-anchor-conflict"}
+        append_log(
+            target,
+            "normalize",
+            "blocked",
+            {"moved": moved, "blockers": blockers, "template_anchor": template_anchor},
+            args.dry_run,
+        )
+        print(f"[normalize] moved=0 blockers={len(blockers)} template_anchor={template_anchor['status']}")
+        raise SystemExit("normalize blocked by template anchor: " + anchor_preflight_error)
 
     planned_names: set[str] = set()
     for entry in classification:

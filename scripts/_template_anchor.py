@@ -100,6 +100,13 @@ def _content(origin: str, version: str) -> str:
     )
 
 
+def _creation_mode() -> int:
+    """Match Path.write_text()'s normal 0o666-with-process-umask mode."""
+    current_umask = os.umask(0)
+    os.umask(current_umask)
+    return 0o666 & ~current_umask
+
+
 def apply_atomic(target: Path, decision: dict[str, Any]) -> dict[str, Any]:
     """Apply a preflighted decision without following the anchor path.
 
@@ -124,7 +131,15 @@ def apply_atomic(target: Path, decision: dict[str, Any]) -> dict[str, Any]:
 
     fd, temporary = tempfile.mkstemp(prefix=".template.toml.", suffix=".tmp", dir=target)
     try:
+        if action == "overwrite":
+            # `Path.write_text()` preserves an existing regular file's mode;
+            # retain that behavior despite replacing atomically via a temp file.
+            mode = stat.S_IMODE(_path(target).lstat().st_mode)
+        else:
+            mode = _creation_mode()
+        os.fchmod(fd, mode)
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            fd = -1
             handle.write(_content(decision["origin"], decision["version"]))
             handle.flush()
             os.fsync(handle.fileno())
@@ -132,8 +147,12 @@ def apply_atomic(target: Path, decision: dict[str, Any]) -> dict[str, Any]:
     except OSError as exc:
         raise TemplateAnchorError(f"could not atomically write template anchor: {exc}") from exc
     finally:
-        if os.path.exists(temporary):
+        if fd != -1:
+            os.close(fd)
+        try:
             os.unlink(temporary)
+        except FileNotFoundError:
+            pass
     status = "created" if action == "create" else "overwritten"
     result = {"status": status, "origin": decision["origin"], "version": decision["version"]}
     if "previous_origin" in decision:

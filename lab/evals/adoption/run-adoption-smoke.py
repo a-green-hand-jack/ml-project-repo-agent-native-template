@@ -103,6 +103,7 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -207,6 +208,10 @@ def make_conservative_fixture(root: Path) -> Path:
 
 def test_conservative_migration(root: Path) -> None:
     target = make_conservative_fixture(root)
+    mode_reference = target / ".template-anchor-mode-reference"
+    mode_reference.write_text("normal write mode reference\n", encoding="utf-8")
+    expected_anchor_mode = stat.S_IMODE(mode_reference.stat().st_mode)
+    mode_reference.unlink()
     cmd = [
         sys.executable,
         str(ADOPTER),
@@ -270,6 +275,11 @@ def test_conservative_migration(root: Path) -> None:
     anchor_text = anchor.read_text(encoding="utf-8")
     if ADOPTION_ORIGIN not in anchor_text:
         raise SystemExit("adoption anchor did not record the explicit origin")
+    if stat.S_IMODE(anchor.stat().st_mode) != expected_anchor_mode:
+        raise SystemExit(
+            "new adoption anchor mode must match a normal same-directory write "
+            f"(expected {expected_anchor_mode:04o}, got {stat.S_IMODE(anchor.stat().st_mode):04o})"
+        )
     if plan.get("origin") != ADOPTION_ORIGIN:
         raise SystemExit(f"adoption plan did not record explicit origin: {plan.get('origin')!r}")
     report = (target / "lab" / "docs" / "audits" / "template-adoption-report.md").read_text(
@@ -282,7 +292,7 @@ def test_conservative_migration(root: Path) -> None:
     integrity_json = run([sys.executable, str(INTEGRITY), str(target), "--json"], REPO)
     if json.loads(integrity_json.stdout).get("smoke_warnings"):
         raise SystemExit("clean semantic migration unexpectedly emitted smoke warnings")
-    print("[adoption-smoke] test_conservative_migration OK")
+    print(f"[adoption-smoke] test_conservative_migration OK anchor_mode={expected_anchor_mode:04o}")
 
 
 def make_blocker_fixture(root: Path) -> Path:
@@ -1550,6 +1560,26 @@ def test_smoke_contract_legacy_state(root: Path) -> None:
     print("[adoption-smoke] test_smoke_contract_legacy_state OK")
 
 
+def _queued_path_snapshot(path: Path) -> tuple[object, ...]:
+    """Capture a move source/destination without including unrelated scaffold state."""
+    if path.is_symlink():
+        return ("symlink", os.readlink(path))
+    if path.is_file():
+        return ("file", path.read_bytes())
+    if not path.exists():
+        return ("missing",)
+    entries: list[tuple[str, str, bytes | str]] = []
+    for item in sorted(path.rglob("*")):
+        relative = item.relative_to(path).as_posix()
+        if item.is_symlink():
+            entries.append((relative, "symlink", os.readlink(item)))
+        elif item.is_file():
+            entries.append((relative, "file", item.read_bytes()))
+        elif item.is_dir():
+            entries.append((relative, "dir", ""))
+    return ("dir", *entries)
+
+
 def test_template_anchor_contract(root: Path) -> None:
     """Issue #60: anchor behavior is isolated from existing smoke semantics."""
     required = make_conservative_fixture(root / "required-origin")
@@ -1620,28 +1650,76 @@ def test_template_anchor_contract(root: Path) -> None:
             "[template]\norigin = \"other-owner/other-template\"\nversion = \"1.2.3\"\n",
         ),
         ("malformed", "[template]\norigin = 42\n"),
+        ("symlink", None),
     ):
         target = make_conservative_fixture(root / label)
-        write(target / ".template.toml", content)
-        proc = run([sys.executable, str(ADOPTER), str(target), "--phase", "all"], REPO, check=False)
+        anchor = target / ".template.toml"
+        outside = root / f"{label}-outside"
+        if content is None:
+            write(outside / "sentinel.txt", "must remain untouched\n")
+            anchor.symlink_to(outside / "sentinel.txt")
+        else:
+            write(anchor, content)
+        anchor_before = (
+            ("symlink", os.readlink(anchor))
+            if anchor.is_symlink()
+            else ("regular", anchor.read_bytes(), stat.S_IMODE(anchor.lstat().st_mode))
+        )
+        queued_before = {
+            f"source/{name}": _queued_path_snapshot(target / name)
+            for name in ("pyproject.toml", "src", "tests")
+        }
+        queued_before.update(
+            {
+                f"destination/{name}": _queued_path_snapshot(
+                    target / "lab" / "code" / "imported" / target.name / name
+                )
+                for name in ("pyproject.toml", "src", "tests")
+            }
+        )
+        proc = run(
+            [
+                sys.executable,
+                str(ADOPTER),
+                str(target),
+                "--phase",
+                "all",
+                "--allow-blocked-normalize",
+            ],
+            REPO,
+            check=False,
+        )
         if proc.returncode == 0:
-            raise SystemExit(f"{label} anchor must fail closed before normalize moves")
-        if not (target / "src" / "sample_existing.py").exists():
-            raise SystemExit(f"{label} anchor allowed a move before its conflict was rejected")
-        if (target / "lab" / "code" / "imported" / target.name / "src").exists():
-            raise SystemExit(f"{label} anchor created an imported source tree despite conflict")
-
-    symlink_target = make_conservative_fixture(root / "symlink")
-    outside = root / "outside"
-    write(outside / "sentinel.txt", "must remain untouched\n")
-    (symlink_target / ".template.toml").symlink_to(outside / "sentinel.txt")
-    proc = run([sys.executable, str(ADOPTER), str(symlink_target), "--phase", "all"], REPO, check=False)
-    if proc.returncode == 0:
-        raise SystemExit("symlink template anchor must fail closed")
-    if (outside / "sentinel.txt").read_text(encoding="utf-8") != "must remain untouched\n":
-        raise SystemExit("symlink template anchor was followed or written through")
-    if not (symlink_target / "src" / "sample_existing.py").exists():
-        raise SystemExit("symlink anchor allowed a source move before conflict rejection")
+            raise SystemExit(f"{label} anchor must stay fatal with --allow-blocked-normalize")
+        if "template-anchor" not in proc.stderr:
+            raise SystemExit(f"{label} anchor failure was not reported as an anchor preflight error")
+        anchor_after = (
+            ("symlink", os.readlink(anchor))
+            if anchor.is_symlink()
+            else ("regular", anchor.read_bytes(), stat.S_IMODE(anchor.lstat().st_mode))
+        )
+        if anchor_after != anchor_before:
+            raise SystemExit(f"{label} anchor was changed despite fatal preflight failure")
+        queued_after = {
+            f"source/{name}": _queued_path_snapshot(target / name)
+            for name in ("pyproject.toml", "src", "tests")
+        }
+        queued_after.update(
+            {
+                f"destination/{name}": _queued_path_snapshot(
+                    target / "lab" / "code" / "imported" / target.name / name
+                )
+                for name in ("pyproject.toml", "src", "tests")
+            }
+        )
+        if queued_after != queued_before:
+            raise SystemExit(f"{label} anchor failure moved a queued source or destination")
+        if content is None and (outside / "sentinel.txt").read_text(encoding="utf-8") != "must remain untouched\n":
+            raise SystemExit("symlink template anchor was followed or written through")
+        print(
+            f"[adoption-smoke] anchor-allow-blocked {label} "
+            f"exit={proc.returncode} anchor=unchanged queued_paths=unchanged"
+        )
     print("[adoption-smoke] test_template_anchor_contract OK")
 
 
