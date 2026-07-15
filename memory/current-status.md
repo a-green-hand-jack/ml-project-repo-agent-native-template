@@ -31,9 +31,12 @@
 - **#47 已实现并关闭**：paseo agent 位置选择约定（无 worktree→同 Workspace 新 tab；有 worktree→
   可新 Workspace+tab；永不开新 Project）落进 `.claude/skills/spawn/SKILL.md`（单一 owner），
   commit `de94973`（本地 main，未 push）。
-- **#48（open，tracking）**：LingTai 治理指南第二轮对照总起，v2 已按 human「扬弃、避免过度设计」
-  重写为「已吸收/弃/取」结构——弃 S3/S4/S5；S1（承诺→证据闭环）随 #46 下一阶段；本阶段唯一
-  执行项 **S2**（变更判断矩阵 + PR 自检清单，纯文档小 PR），待 human review 后动手。
+- **#48（open，tracking）**：LingTai 治理对照总起，v3 覆盖**两份**指南（ANATOMY/CONTRACT +
+  Code Drift/Bloat Control），保持「已吸收/弃/取」结构（human 认可该形式）——指南 B 大头已被
+  #35/action-boundary/dev-guide 吸收；exact path scope 硬门按 #32/#43/#44 反面证据降为 G1 自报
+  声明并入 S2；S1（承诺→证据闭环）随 #46 下一阶段；本阶段唯一执行项 **S2**（变更自检清单：
+  分类矩阵 + Invariant/Variation/Non-goals + exact-base 双检 + 验证纪律 + 副作用授权段，
+  纯文档小 PR），待 human review 后动手。
 - 执行 agent 预定名：**干将·改·灵台缺口**（S2 落地时按 spawn skill 唤起）。
 - 阶段收尾计划：S2 落地 → 模板功能/服务全面测试（与 #46 重启同场景）。
 
