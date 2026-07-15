@@ -24,6 +24,19 @@
 - 其余存量 plan 均已 `verified`，decisions 均 `approved`（详见注册表）。
 - 本节由 agent 在状态流转时更新；compact/clear 后 `context_continuity.py` 会把本文件回注新上下文。
 
+## 2026-07-15 issue 治理轮（主 agent：都督·统·治理路线）
+
+- human 决策落地：**#23、#46、#47 关闭**（#46 是"本阶段先关、下一阶段与模板功能全面测试一起重启"，
+  非裁撤）；**#25、#22 已 pin**；#26/#27 建议标 blocked（依赖 Bridge repo 契约，human 未拍板）。
+- **#47 已实现并关闭**：paseo agent 位置选择约定（无 worktree→同 Workspace 新 tab；有 worktree→
+  可新 Workspace+tab；永不开新 Project）落进 `.claude/skills/spawn/SKILL.md`（单一 owner），
+  commit `de94973`（本地 main，未 push）。
+- **#48（open，tracking）**：LingTai 治理指南第二轮对照总起，v2 已按 human「扬弃、避免过度设计」
+  重写为「已吸收/弃/取」结构——弃 S3/S4/S5；S1（承诺→证据闭环）随 #46 下一阶段；本阶段唯一
+  执行项 **S2**（变更判断矩阵 + PR 自检清单，纯文档小 PR），待 human review 后动手。
+- 执行 agent 预定名：**干将·改·灵台缺口**（S2 落地时按 spawn skill 唤起）。
+- 阶段收尾计划：S2 落地 → 模板功能/服务全面测试（与 #46 重启同场景）。
+
 ## 当前 objective
 
 2026-07-14 human 明确授权发布当前本地 `main`：#18 的 fresh runtime 证据证伪 Codex hook
