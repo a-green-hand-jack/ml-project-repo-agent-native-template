@@ -10,6 +10,8 @@ Issue #61 P1: make Codex adapter ownership exact so template-sync treats only
 - Branch: `61-codex-adapter-ownership`
 - Worktree: `/home/user/.paseo/worktrees/1kaz3672/61-codex-adapter-ownership`
 - Base: `origin/main` @ `2eaf02408ecdea6d086cc6648e4933511ee64b31` (verified before edits).
+- Implementation commit: `53262c6` (`fix(template-sync): classify Codex adapters by owner`),
+  pushed to `origin/61-codex-adapter-ownership`.
 
 ## Declaration
 
@@ -60,6 +62,6 @@ specified `python3` form is policy-rejected; no smoke PASS is claimed.
 
 ## Risk / handoff
 
-The implementation is ready for a clean verifier run, but is **not yet a
-commit candidate with validation evidence**. Re-run the issue's required
-commands, inspect the same-commit diff, then commit and push this branch.
+The implementation is pushed and ready for an independent verifier, but is
+**not ready to approve** until the policy-blocked smoke is run. The lifecycle
+failure belongs to the #48 record owner and must not be masked in this issue.
