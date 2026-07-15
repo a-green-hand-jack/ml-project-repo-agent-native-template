@@ -12,6 +12,8 @@ Issue #61 P1: make Codex adapter ownership exact so template-sync treats only
 - Base: `origin/main` @ `2eaf02408ecdea6d086cc6648e4933511ee64b31` (verified before edits).
 - Implementation commit: `53262c6` (`fix(template-sync): classify Codex adapters by owner`),
   pushed to `origin/61-codex-adapter-ownership`.
+- Fixture repair: `d7192f0` (`test(template-sync): create adapter fixture script roots`),
+  pushed to the same branch after the independent smoke failure report.
 
 ## Declaration
 
