@@ -8,6 +8,8 @@
 4. 能力索引：.claude/agents/*.md 与 .claude/skills/*/SKILL.md 有 frontmatter（name/description）。
 5. Claude/Codex 配置可解析、受保护路径有权限地板，且 hooks 引用的脚本存在。
 6. Codex adapters 与 canonical .claude 能力同步。
+7. capability catalog 地板：.agent/capability-catalog.toml 存在、可解析、profile=research
+   （完整 parity 由 check-capability-catalog.py 校验，见 issue #28）。
 
 无第三方依赖。退出码 0 = 通过（可含 warning），1 = 有 error。
 用法：python scripts/check-agent-harness.py [--strict]
@@ -33,7 +35,7 @@ REQUIRED_TOP = [
 # 根目录白名单（其余视为潜在污染 -> warning）。
 ROOT_WHITELIST = {
     "README.md", "PROJECT.md", "DECISIONS.md", "DESIGN.md", "AGENTS.md", "CLAUDE.md",
-    "ANATOMY.md", ".gitignore", ".github", ".githooks", ".agent", ".claude", ".codex",
+    "ANATOMY.md", "CONTRACT.md", ".gitignore", ".github", ".githooks", ".agent", ".claude", ".codex",
     ".agents", "human", "lab", "memory", "deliverables", "scripts", "plans", ".reference-docs",
     # 模板版本 / 上下游同步锚点（见 .agent/template-versioning-policy.md）
     "VERSION", "CHANGELOG.md", "template-manifest.toml", ".template.toml",
@@ -45,6 +47,8 @@ ROOT_WHITELIST = {
 ROOT_IGNORE = {
     ".git", ".venv", "__pycache__", ".DS_Store", ".ruff_cache",
     ".mypy_cache", ".pytest_cache", ".idea", ".vscode", ".env", ".omx",
+    # agent 运行时身份文件（gitignored，见 .agent/agent-identity.md 与 .gitignore 对应条目）
+    ".agent-identity",
 }
 
 # 需要完整四件套的目录。
@@ -243,6 +247,24 @@ def check_codex_adapters() -> None:
             err(f"Codex SKILL.md frontmatter 缺 name/description：{sk.relative_to(REPO)}")
 
 
+def check_capability_catalog() -> None:
+    """能力目录地板：`.agent/capability-catalog.toml` 必须存在、可解析、`profile=research`。
+    完整的登记齐全/adapter parity 由 `check-capability-catalog.py` 权威校验（并入
+    validate-governance）；此处只做结构性存在检查，让 harness 也把「能力目录缺失」当失败。
+    见 issue #28。"""
+    catalog = REPO / ".agent" / "capability-catalog.toml"
+    if not catalog.exists():
+        err("缺少能力目录：.agent/capability-catalog.toml（见 issue #28 / check-capability-catalog.py）")
+        return
+    try:
+        data = tomllib.loads(catalog.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError as e:
+        err(f".agent/capability-catalog.toml 解析失败：{e}")
+        return
+    if data.get("profile") != "research":
+        err(".agent/capability-catalog.toml 的 profile 必须为 'research'")
+
+
 def check_design_inventory() -> None:
     """若存在 DESIGN.md，校验其 §10 能力清单表里的数量与实际一致（防手记漂移）。
     对应 doctrine：`.agent/repo-documentation-topology.md`。DESIGN.md 可选：不存在则跳过；
@@ -280,6 +302,7 @@ def main() -> int:
     check_settings()
     check_codex_config()
     check_codex_adapters()
+    check_capability_catalog()
     check_design_inventory()
 
     for w in warnings:

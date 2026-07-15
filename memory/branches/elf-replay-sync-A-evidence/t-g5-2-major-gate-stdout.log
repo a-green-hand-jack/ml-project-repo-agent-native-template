@@ -1,0 +1,4 @@
+[template-sync] 下游 v0.5.0 → 上游 v1.3.8（跨 MAJOR）
+
+STOP：这是 MAJOR 追平，定义上需人工 reconcile（见 template-versioning-policy）。
+先读上游 CHANGELOG.md，确认破坏性变更点，再加 --allow-major 重跑。

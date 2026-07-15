@@ -78,3 +78,12 @@
 框架层 = `.agent/`、`.claude/{agents,skills,commands,hooks,settings}`、`scripts/` validator、
 `.githooks/`、`.github/` CI/模板、以及混合文件里的 `template:` 哨兵块。项目层 =
 `lab/`、`memory/`、`deliverables/`、`plans/`、`human/`、`PROJECT.md`、`DECISIONS.md`。
+
+## template-sync 可观察 Contract
+
+本组件可观察行为承诺的唯一正文 owner 见 [`../scripts/CONTRACT.md`](../scripts/CONTRACT.md)
+（component `template-sync`；issue #33 建立，issue #48 v4 S3 迁移）。本文件不再复制 TS-1..TS-9
+规则正文与变更矩阵——版本判级（MAJOR/MINOR/PATCH）与四站闭环等本文件其余章节描述的是
+「template repo 自身版本策略」，与 `scripts/CONTRACT.md` 描述的「`template-sync.py` 单次调用
+可观察行为承诺」是两个不同主语，因此不随本节迁移（决策见
+`plans/20260715-anatomy-contract-pairing.zh.md`「未解决问题」）。

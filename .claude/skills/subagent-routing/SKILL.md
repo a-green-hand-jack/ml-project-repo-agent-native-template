@@ -22,6 +22,8 @@ description: 当要为一个 child task 派 subagent 时，用来选定 model/ef
 - `.agent/model-routing-policy.md`（tier 0-4 的 model/effort/tool 预算）。
 - `.agent/tool-skill-interface.md`（何时 shell / skill / subagent / MCP）。
 - `.claude/skills/coding-agent-quota/SKILL.md`（provider quota / token burn / Paseo preference 证据）。
+- `.claude/skills/coding-agent-quota/.outcome-ledger/`（outcome ledger：历史 route decision / 结果证据，
+  schema 见同 skill 的 `schema.md`；launch packet 只嵌 `decision_id`，完整证据按 ID 来这里查）。
 - 当前 `memory/session-tree.md`（避免与已在跑的分支冲突）。
 
 ## 允许修改的路径
@@ -36,10 +38,15 @@ description: 当要为一个 child task 派 subagent 时，用来选定 model/ef
 2. 归类 tier：按 model-routing-policy 的 tier 0-4 判定任务难度与风险（0=最轻只读检索，4=高风险高推理）。
 3. 读取 quota 证据：运行
    `python .claude/skills/coding-agent-quota/scripts/read_agent_quota.py --role <role> --tier <tier> --format json`。
-4. 选 provider + model + effort：优先按 quota 脚本的 `route_recommendation`，同时检查任务是否有必须用某 provider 的实验约束。
+   若 outcome 证据可用（`.outcome-ledger/` 有足量记录），改用/加跑
+   `python .claude/skills/coding-agent-quota/scripts/outcome_route.py --live --role <role> --tier <tier> --task-class <class> --record`，
+   一并拿到 `outcome_route_recommendation`（含 `decision_id`）。quota-only 场景（无 ledger /
+   数据不足 / 过期）行为等同现状：outcome 层会标 `degraded: true` 并回退 quota-only 推荐。
+4. 选 provider + model + effort：优先按 quota 脚本的 `route_recommendation`（有 outcome 证据时按
+   `outcome_route_recommendation`，其 `signals` 说明与 quota-only 基线的差异与理由），同时检查任务是否有必须用某 provider 的实验约束。
 5. 收紧 tools：只授予完成该 task 必需的工具；只读任务不给 Edit/Write。
 6. 明确 scope 与 forbidden：写清允许写路径、禁止触碰的文件、验收标准与回报格式。
-7. 用 `.agent/templates/launch-packet.md` 填出 launch packet；必须包含 quota snapshot、usage velocity、Paseo preference status 与 route recommendation。确认没有隐含的 general-purpose 兜底授权。
+7. 用 `.agent/templates/launch-packet.md` 填出 launch packet；必须包含 quota snapshot、usage velocity、Paseo preference status 与 route recommendation。走了 outcome 层时**只**追加 `outcome decision id`（+ 一行 `degraded` 提示，若回退）——不内嵌完整 quota snapshot / outcome 摘要，完整证据链按 ID 去 outcome ledger 查（已决策，见 plan doc 未解决问题 5）。确认没有隐含的 general-purpose 兜底授权。
 8. 派发，并在 `memory/branches/<slug>.md` 记一行引用。
 
 ## 验证命令

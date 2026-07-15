@@ -1,0 +1,105 @@
+[template-sync] 下游 v1.1.0 → 上游 v1.3.8（跨 MINOR）
+
+计划：覆盖(framework) 0 · 新建 0 · merge 换块 0 · 保护(project) 233 · scaffold 保留 3
+  WARN 未分类(补 template-manifest.toml): CONTRACT.md
+
+=== 重建 Codex 适配 ===
+[sync-codex-adapters] wrote 38 adapter file(s)
+
+真实变更：apply=[] · generator=[]
+
+=== validate-governance（追平后验收）===
+
+=== check-agent-harness.py ===
+[check-agent-harness] OK — 0 error(s), 0 warning(s)
+
+=== check-anatomy-drift.py ===
+REPORT GOVERNANCE anatomy=scripts/ANATOMY.md rule=parent-child-bidirectional violation=声明 parent=ANATOMY.md，但 ANATOMY.md 未在 children 中回链本节点 missing_link=ANATOMY.md#children action=在 ANATOMY.md frontmatter 的 children 加入 scripts/ANATOMY.md
+[check-anatomy-drift] OK — 扫描 15 个 ANATOMY.md，0 处结构漂移，1 处 governance 发现（non-strict：governance 仅报告不拦截）
+
+=== check-doc-lifecycle.py ===
+ERROR 存在四类受管文档但 memory/doc-lifecycle.yaml 缺失——注册表是治理面，缺失/被删即异常；恢复注册表并登记全部四类文档（schema 见 plans/ANATOMY.md）
+[check-doc-lifecycle] FAIL — 1 error(s), 0 warning(s)
+
+=== check-outcome-ledger-schema.py ===
+[check-outcome-ledger-schema] OK — 0 error(s), 0 warning(s)
+
+=== validate-experiment-state.py ===
+WARN  未安装 PyYAML：使用受限解析器（block-style 子集）
+ERROR run-elf-remote-smoke: status=done 但缺 status_history（只有 planned 可省略）
+ERROR run-elf-remote-smoke: status=done 已过 approved 门，但必填字段缺失/仍是占位：config, data_split, expected_runtime（进入 approved 前必须齐备 commit/config/data_split/expected_runtime/success_metric）
+ERROR run-elf-remote-smoke: status=done 已过 approved 门，但缺 human 批准记录字段 approved_by
+ERROR run-elf-remote-smoke: status=done 已过 approved 门，但缺 human 批准记录字段 approved_at
+ERROR run-elf-remote-smoke: status=done 但 run_summary 非法：lab/docs/audits/elf-template-case-report.md（必须位于 lab/code/experiments/）
+ERROR run-elf-remote-smoke: status=done 但 lab/artifacts/*-index.yaml 无引用该 run 的条目（闭环缺 artifact index 环节；见 .agent/artifact-policy.md）
+ERROR run-elf-pytorch-smoke: status=done 但缺 status_history（只有 planned 可省略）
+ERROR run-elf-pytorch-smoke: status=done 已过 approved 门，但必填字段缺失/仍是占位：data_split, expected_runtime（进入 approved 前必须齐备 commit/config/data_split/expected_runtime/success_metric）
+ERROR run-elf-pytorch-smoke: status=done 已过 approved 门，但缺 human 批准记录字段 approved_by
+ERROR run-elf-pytorch-smoke: status=done 已过 approved 门，但缺 human 批准记录字段 approved_at
+ERROR run-elf-pytorch-smoke: status=done 但 run_summary 非法：lab/docs/audits/elf-template-case-report.md（必须位于 lab/code/experiments/）
+ERROR run-elf-pytorch-smoke: status=done 但 lab/artifacts/*-index.yaml 无引用该 run 的条目（闭环缺 artifact index 环节；见 .agent/artifact-policy.md）
+ERROR run-elf-pytorch-runtime-smoke: status=done 但缺 status_history（只有 planned 可省略）
+ERROR run-elf-pytorch-runtime-smoke: status=done 已过 approved 门，但必填字段缺失/仍是占位：data_split（进入 approved 前必须齐备 commit/config/data_split/expected_runtime/success_metric）
+ERROR run-elf-pytorch-runtime-smoke: status=done 已过 approved 门，但缺 human 批准记录字段 approved_by
+ERROR run-elf-pytorch-runtime-smoke: status=done 已过 approved 门，但缺 human 批准记录字段 approved_at
+ERROR run-elf-pytorch-runtime-smoke: status=done 但 run_summary 非法：lab/docs/audits/complete-template-verification-report.md（必须位于 lab/code/experiments/）
+ERROR run-elf-pytorch-runtime-smoke: status=done 但 lab/artifacts/*-index.yaml 无引用该 run 的条目（闭环缺 artifact index 环节；见 .agent/artifact-policy.md）
+ERROR run-elf-pytorch-runtime-smoke-replay-claude: status=done 但缺 status_history（只有 planned 可省略）
+ERROR run-elf-pytorch-runtime-smoke-replay-claude: status=done 已过 approved 门，但必填字段缺失/仍是占位：data_split（进入 approved 前必须齐备 commit/config/data_split/expected_runtime/success_metric）
+ERROR run-elf-pytorch-runtime-smoke-replay-claude: status=done 已过 approved 门，但缺 human 批准记录字段 approved_by
+ERROR run-elf-pytorch-runtime-smoke-replay-claude: status=done 已过 approved 门，但缺 human 批准记录字段 approved_at
+ERROR run-elf-pytorch-runtime-smoke-replay-claude: status=done 但 run_summary 非法：memory/current-status.md（Commands + results 表，2026-07-09 行）（必须位于 lab/code/experiments/）
+[validate-experiment-state] FAIL — 23 error(s), 1 warning(s)
+
+=== check-provenance-chain.py ===
+PASS    evidence ev-elf-pytorch-runtime-smoke-replay-claude：run run-elf-pytorch-runtime-smoke-replay-claude 已闭环（done + run_summary）
+PASS    claim marker：deliverables 下暂无 marker（无 marker 的活跃交付物由 deliverables/index.md 的 marker-or-review 检查兜底）
+UNKNOWN dataset-index：lab/data/dataset-index.yaml 不存在，未检查
+FAIL    schema_version：lab/research/experiment-ledger.yaml 缺失或非法（应为整数 ≥1，实际 None）
+FAIL    schema_version：lab/research/claims.yaml 缺失或非法（应为整数 ≥1，实际 None）
+FAIL    schema_version：lab/artifacts/result-index.yaml 缺失或非法（应为整数 ≥1，实际 None）
+FAIL    result-index result-001：status='active' 时 location 不得为空/占位
+FAIL    result-index result-002：status='active' 时 location 不得为空/占位
+FAIL    schema_version：lab/artifacts/table-index.yaml 缺失或非法（应为整数 ≥1，实际 None）
+FAIL    schema_version：lab/artifacts/figure-index.yaml 缺失或非法（应为整数 ≥1，实际 None）
+FAIL    schema_version：lab/artifacts/trace-index.yaml 缺失或非法（应为整数 ≥1，实际 None）
+FAIL    trace-index trace-001：status='active' 时 location 不得为空/占位
+FAIL    trace-index trace-002：status='active' 时 location 不得为空/占位
+FAIL    schema_version：lab/artifacts/model-index.yaml 缺失或非法（应为整数 ≥1，实际 None）
+FAIL    schema_version：lab/models/checkpoint-index.yaml 缺失或非法（应为整数 ≥1，实际 None）
+FAIL    schema_version：lab/research/evidence.yaml 缺失或非法（应为整数 ≥1，实际 None）
+FAIL    evidence ev-elf-readme-local：config 缺失或占位
+FAIL    evidence ev-elf-readme-local：run_id 缺失或占位（evidence 必须可回溯到 run）
+FAIL    evidence ev-elf-remote-smoke：config 缺失或占位
+FAIL    evidence ev-elf-remote-smoke：run_id 缺失或占位（evidence 必须可回溯到 run）
+FAIL    evidence ev-elf-pytorch-smoke：run_id 缺失或占位（evidence 必须可回溯到 run）
+FAIL    evidence ev-elf-pytorch-runtime-smoke：run_id 缺失或占位（evidence 必须可回溯到 run）
+FAIL    claim claim-elf-source-identity：evidence=ev-elf-readme-local 仍是占位/不完整记录，不得贡献 claim 强度
+FAIL    claim claim-elf-source-identity：status=partial 但没有有效且 supports_claim 归属匹配的 evidence
+FAIL    claim claim-elf-remote-smoke：evidence=ev-elf-remote-smoke 仍是占位/不完整记录，不得贡献 claim 强度
+FAIL    claim claim-elf-remote-smoke：status=partial 但没有有效且 supports_claim 归属匹配的 evidence
+FAIL    claim claim-elf-pytorch-smoke：evidence=ev-elf-pytorch-smoke 仍是占位/不完整记录，不得贡献 claim 强度
+FAIL    claim claim-elf-pytorch-smoke：status=partial 但没有有效且 supports_claim 归属匹配的 evidence
+FAIL    claim claim-elf-pytorch-runtime-smoke：evidence=ev-elf-pytorch-runtime-smoke 仍是占位/不完整记录，不得贡献 claim 强度
+FAIL    schema_version：lab/research/regression-matrix.yaml 缺失或非法（应为整数 ≥1，实际 None）
+FAIL    schema_version：lab/research/release-gates.yaml 缺失或非法（应为整数 ≥1，实际 None）
+
+[check-provenance-chain] FAIL — 28 fail, 1 unknown, 2 pass
+
+=== check-capability-catalog.py ===
+[check-capability-catalog] OK — 登记 46 项，0 error(s), 0 warning(s)
+
+=== governance ===
+WARN  未安装 PyYAML：跳过 YAML 深度解析，仅做轻量检查
+WARN  未安装 PyYAML：跳过证据链一致性检查
+WARN  未安装 PyYAML：跳过发布闸门一致性检查
+WARN  未安装 PyYAML：跳过回归矩阵一致性检查
+ERROR check-doc-lifecycle.py 失败（exit 1）
+ERROR validate-experiment-state.py 失败（exit 1）
+ERROR check-provenance-chain.py 失败（exit 1）
+
+[validate-governance] FAIL — 3 error(s), 4 warning(s)
+
+[receipt] result=fail → /tmp/tg5-evidence/receipt-real-sync.json
+
+[template-sync] FAIL — 版本保持 v1.1.0，失败阶段 generated_rebuild（gen-content-mismatch:.codex/config.toml; gen-content-mismatch:.codex/rules/default.rules）。修复后重跑：python scripts/template-sync.py --from /home/user/Projects/ml-project-repo-agent-native-template --receipt /tmp/tg5-evidence/receipt-real-sync.json

@@ -9,12 +9,23 @@
 设计要点：用 shlex 做**真正的命令解析**（不是子串正则），因此
 - 引号里的字面量（commit message、echo "..."）不会被误当成命令拦（消除误伤）；
 - 引号里的真实路径/分支（rm -rf "lab/data"、git push origin "main"）仍能识别（不漏）。
-本 hook 是"防误操作"护栏，非对抗性沙箱：不为"把危险命令藏进 python -c / 命令替换"负责
-（这类代码执行本就被 allow 的 pytest/uv run 信任，数据安全最终靠 gitignore + 备份）。
+本 hook 是"防误操作"护栏，非通用对抗性沙箱；但 launch registry 的已知入口命中即拒，
+`env -S` 与 shell `-c` 这类调用者可编程动态面整体 fail-closed，caller env 不能放行。
 
 协议：Claude Code / Codex 通过 stdin 传 JSON（tool_name / tool_input）；exit 2 = 阻止，
 exit 0 = 放行。解析失败保守放行。无第三方依赖。push 到受保护分支需
 `CLAUDE_ALLOW_PUSH_MAIN=1` 或 `CODEX_ALLOW_PUSH_MAIN=1`（见 `.agent/autonomous-window.md`）。
+
+另挂 doc-lifecycle 机械拦截（issue #13，安全地板之外的完整性层）：对 brief/plan/review/decision
+四类文档与 memory/doc-lifecycle.yaml 的写入/删除（Edit|Write|apply_patch|Bash），调
+scripts/check-doc-lifecycle.py 的 pretooluse_reason() 拦「状态跃迁到进阶态但完整性不成立」
+「删除/移走注册表」等可判定事实；判定层自身异常保守放行，human 显式绕过 DOC_LIFECYCLE_SKIP=1。
+
+另挂多 agent 冲突/写错-worktree 机械拦截（issue #14，安全地板之外的协作完整性层）：对
+Edit/Write/NotebookEdit/apply_patch 的写入，调 scripts/check-agent-conflicts.py 的
+pretooluse_reason() 拦「写入其他活跃 agent 声明的 owned path / 自己声明的 forbidden path /
+declared worktree 与实际不符」这类可判定事实（见 .agent/multi-agent-control-plane.md）；
+判定层异常保守放行，human 显式绕过 AGENT_CONFLICT_SKIP=1。
 """
 import json
 import os
@@ -40,6 +51,16 @@ PROTECTED_FILES = (".env",)
 # 受保护分支：push 需 human 明确放行。
 PROTECTED_BRANCHES = {"main", "master"}
 PUSH_ESCAPE_ENVS = ("CLAUDE_ALLOW_PUSH_MAIN", "CODEX_ALLOW_PUSH_MAIN")
+
+# doc-lifecycle 机械拦截（issue #13）：判定本体在 scripts/check-doc-lifecycle.py（runtime-neutral），
+# 这里只做薄接线。路径身份必须交给判定本体解析；字面量预过滤会漏掉 cwd/symlink alias。
+# human 显式绕过：DOC_LIFECYCLE_SKIP=1（判定层内识别）。
+DOC_LIFECYCLE_SCRIPT = REPO_ROOT / "scripts" / "check-doc-lifecycle.py"
+
+# 多 agent 冲突/写错-worktree 机械拦截（issue #14）：判定本体在
+# scripts/check-agent-conflicts.py（runtime-neutral），这里只做薄接线 + 廉价预过滤。
+# human 显式绕过：AGENT_CONFLICT_SKIP=1（判定层内识别）。
+AGENT_CONFLICT_SCRIPT = REPO_ROOT / "scripts" / "check-agent-conflicts.py"
 
 # rm -r 允许递归删除的安全目标（缓存/构建/临时，可再生）。
 SAFE_RM_BASENAMES = {
@@ -207,6 +228,42 @@ def _patch_paths(patch_text: str) -> list[str]:
     return paths
 
 
+def _launch_gate_reason(raw_cmd: str) -> str | None:
+    """launch registry 门禁（薄接线）：判定逻辑与单一真源在 lab/infra/launch/。
+
+    launch/kill/restart 类命令（lab/infra/launch/registry.yaml 的 gated_prefixes）是
+    human gate；调用者可写的 `CLAUDE_ALLOW_LAUNCH` / `CODEX_ALLOW_LAUNCH` 不构成
+    human approval，也不放行。判定脚本缺失/异常时，含已知 launch 入口的命令 fail-closed。
+    """
+    gate = REPO_ROOT / "lab" / "infra" / "launch" / "launch_gate.py"
+    if not gate.is_file():
+        if re.search(
+            r"\b(?:sbatch|scancel|srun|runai)\b|fake_job\.py|"
+            r"lab\.infra\.launch\.fake_job|"
+            r"expctl\.py\s+apply-recovery",
+            raw_cmd,
+        ):
+            return "launch gate 缺失，已对已知 launch 入口 fail-closed"
+        return None
+    try:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("launch_gate", gate)
+        assert spec and spec.loader
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod.gate_reason(raw_cmd)
+    except Exception as exc:  # noqa: BLE001
+        if re.search(
+            r"\b(?:sbatch|scancel|srun|runai)\b|fake_job\.py|"
+            r"lab\.infra\.launch\.fake_job|"
+            r"expctl\.py\s+apply-recovery",
+            raw_cmd,
+        ):
+            return f"launch gate 不可用，已 fail-closed：{type(exc).__name__}"
+        return None
+
+
 def _block(reason: str) -> None:
     out = {
         "hookSpecificOutput": {
@@ -228,6 +285,11 @@ def _check_bash(raw_cmd: str) -> None:
     # 兜底：嵌套（find -exec 等）删受保护 bytes。去引号避免误伤字符串字面量。
     if DESTRUCTIVE_PROTECTED.search(_dequote(raw_cmd)):
         _block("破坏性命令触碰受保护数据/产物路径（含 find -exec 等嵌套）。删/移 bytes 走 human gate。")
+
+    # launch/kill/restart 类命令的 human gate 地板（registry 单一真源，薄接线）。
+    launch_reason = _launch_gate_reason(raw_cmd)
+    if launch_reason:
+        _block(launch_reason)
 
     session_escape = any(
         os.environ.get(env, "").strip().lower() in ("1", "true", "yes")
@@ -269,6 +331,50 @@ def _check_bash(raw_cmd: str) -> None:
                 )
 
 
+def _doc_lifecycle_reason(tool: str, tool_input: dict) -> str | None:
+    """doc-lifecycle 完整性拦截（见 plans/20260712-plan-lifecycle-state.zh.md 已决策 2/4）。
+    只拦「状态跃迁到进阶态但状态/引用完整性不成立」这类可判定事实；判定层任何异常
+    保守放行——本函数绝不能反噬上面的安全地板逻辑。"""
+    if not DOC_LIFECYCLE_SCRIPT.is_file():
+        return None
+    try:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("check_doc_lifecycle", DOC_LIFECYCLE_SCRIPT)
+        if spec is None or spec.loader is None:
+            return None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod.pretooluse_reason(tool, tool_input, REPO_ROOT)
+    except Exception:  # noqa: BLE001  判定层失败保守放行
+        return None
+
+
+def _agent_conflict_reason(tool: str, tool_input: dict) -> str | None:
+    """多 agent ownership/worktree 完整性拦截（见 plans/20260712-multi-agent-control-plane.zh.md
+    已决策 5/6）。只拦「写入其他活跃 agent 的 owned path / 自己的 forbidden path / 写错
+    worktree」这类可判定事实；判定层任何异常保守放行——绝不能反噬上面的安全地板逻辑。"""
+    try:
+        if not AGENT_CONFLICT_SCRIPT.is_file():
+            return None
+        # 廉价预过滤：本 checkout 没有 agent 状态文件、也不是 linked worktree（.git 是文件，
+        # 状态可能锚定在主 checkout）时，不加载判定模块。
+        agents_dir = REPO_ROOT / "memory" / "agents"
+        has_local_state = agents_dir.is_dir() and any(agents_dir.glob("*.yaml"))
+        if not has_local_state and not (REPO_ROOT / ".git").is_file():
+            return None
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("check_agent_conflicts", AGENT_CONFLICT_SCRIPT)
+        if spec is None or spec.loader is None:
+            return None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod.pretooluse_reason(tool, tool_input, REPO_ROOT)
+    except Exception:  # noqa: BLE001  判定层失败保守放行
+        return None
+
+
 def main() -> None:
     raw = sys.stdin.read()
     if not raw.strip():
@@ -283,12 +389,21 @@ def main() -> None:
 
     if tool == "Bash":
         _check_bash(tool_input.get("command", "") or "")
+        reason = _doc_lifecycle_reason(tool, tool_input)  # 拦 rm/mv 等删除/移走注册表
+        if reason:
+            _block(reason)
     elif tool in ("Edit", "Write", "NotebookEdit"):
         path = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
         if path and _is_protected_file(path):
             _block(
                 f"受保护路径不可写：{path}。bytes/私有/产物只留 index，删改走 human gate。"
             )
+        for reason in (
+            _agent_conflict_reason(tool, tool_input),
+            _doc_lifecycle_reason(tool, tool_input),
+        ):
+            if reason:
+                _block(reason)
     elif tool == "apply_patch":
         patch_text = tool_input.get("command", "") or ""
         for path in _patch_paths(patch_text):
@@ -296,6 +411,12 @@ def main() -> None:
                 _block(
                     f"受保护路径不可写：{path}。bytes/私有/产物只留 index，删改走 human gate。"
                 )
+        for reason in (
+            _agent_conflict_reason(tool, tool_input),
+            _doc_lifecycle_reason(tool, tool_input),
+        ):
+            if reason:
+                _block(reason)
 
     sys.exit(0)
 

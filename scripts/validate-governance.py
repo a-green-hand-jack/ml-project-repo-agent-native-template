@@ -11,6 +11,14 @@
    必须指向 claims.yaml 中真实存在的 claim（防止「已判定放行/已判定回归通过」却引用空主张）。
 6. merge 哨兵：template-manifest.toml 标为 merge 的文件必须有成对 template:begin/end 块，
    否则 template-sync 会整体跳过它、模板更新传不到下游（见 template-versioning-policy.md）。
+7. doc lifecycle（子检查 check-doc-lifecycle.py）：brief/plan/review/decision 四类文档的
+   状态锚点与 memory/doc-lifecycle.yaml 注册表一致、引用完整、进阶态证据齐全
+   （见 plans/ANATOMY.md 与 plans/20260712-plan-lifecycle-state.zh.md）。
+8. provenance 链（子检查 check-provenance-chain.py）：run→artifact→evidence→claim→
+   deliverable 引用完整性、run 闭环、checksum（统一 sha256）、claim marker。
+9. capability catalog（子检查 check-capability-catalog.py）：声明式能力目录
+   `.agent/capability-catalog.toml` 与真实 `.claude/` 能力面 + 生成 adapter 的
+   登记齐全/无幽灵条目/adapter parity 一致（见 issue #28）。
 
 先跑子检查（作为独立进程，便于单独调用），再跑本文件治理规则。
 无第三方依赖（PyYAML 可选）。退出码 0 = 全通过，非 0 = 有失败。
@@ -112,8 +120,32 @@ def check_evidence_chain() -> None:
         return
 
     grade_rank = {"log": 1, "metric": 2, "table": 3, "figure": 4, "paper-claim": 5}
-    ev_by_id = {e.get("id"): e for e in evlist if isinstance(e, dict)}
-    claim_ids = {c.get("id") for c in claims if isinstance(c, dict)}
+    ev_by_id = {}
+    for e in evlist:
+        if not isinstance(e, dict):
+            continue
+        eid = e.get("id")
+        if eid in ev_by_id:
+            errors.append(f"evidence duplicate id：{eid}")
+        else:
+            ev_by_id[eid] = e
+    claim_ids = set()
+    for c in claims:
+        if not isinstance(c, dict):
+            continue
+        cid = c.get("id")
+        if cid in claim_ids:
+            errors.append(f"claim duplicate id：{cid}")
+        claim_ids.add(cid)
+
+    def evidence_complete(e: dict) -> bool:
+        required = ("supports_claim", "grade", "command", "commit", "run_id", "config")
+        return all(
+            isinstance(e.get(field), str)
+            and bool(e[field].strip())
+            and not _is_placeholder(e[field])
+            for field in required
+        ) and e.get("grade") in grade_rank
 
     for e in evlist:
         if isinstance(e, dict) and e.get("supports_claim") not in claim_ids:
@@ -124,10 +156,22 @@ def check_evidence_chain() -> None:
             continue
         cid, status = c.get("id"), c.get("status")
         refs = c.get("evidence") or []
-        linked = [ev_by_id[r] for r in refs if r in ev_by_id]
+        linked = []
         for r in refs:
             if r not in ev_by_id:
                 errors.append(f"claim {cid} 引用未知 evidence：{r}")
+                continue
+            evidence = ev_by_id[r]
+            if not evidence_complete(evidence):
+                errors.append(f"claim {cid} 引用占位/不完整 evidence：{r}")
+                continue
+            if evidence.get("supports_claim") != cid:
+                errors.append(
+                    f"claim {cid} 引用 evidence {r}，但 supports_claim="
+                    f"{evidence.get('supports_claim')!r}（归属边不匹配）"
+                )
+                continue
+            linked.append(evidence)
         strongest = max((grade_rank.get(e.get("grade"), 0) for e in linked), default=0)
         if status in ("partial", "supported") and not linked:
             errors.append(f"overclaim：claim {cid} status={status} 但无 evidence 支撑")
@@ -347,6 +391,11 @@ def main() -> int:
     strict = "--strict" in sys.argv
     run_subcheck("check-agent-harness.py", strict)
     run_subcheck("check-anatomy-drift.py", strict)
+    run_subcheck("check-doc-lifecycle.py", strict)
+    run_subcheck("check-outcome-ledger-schema.py", strict)
+    run_subcheck("validate-experiment-state.py", strict)
+    run_subcheck("check-provenance-chain.py", strict)
+    run_subcheck("check-capability-catalog.py", strict)
 
     print("\n=== governance ===", flush=True)
     check_gitignore()

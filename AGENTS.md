@@ -8,7 +8,7 @@
 
 1. 本文件 `AGENTS.md`
 2. `.agent/AGENTS.md`（doctrine 索引）
-3. `memory/current-status.md`（当前状态与 handoff）
+3. `memory/current-status.md`（当前状态与 handoff，含当前 plan 指针）＋ `memory/doc-lifecycle.yaml`（brief/plan/review/decision 的权威生命周期状态——fresh session 先确认当前 approved/implementing plan 再动手，语义见 `plans/ANATOMY.md`）
 4. 结构探索前先读 root `ANATOMY.md`，再读目标目录的 `ANATOMY.md`
 
 ## 心智模型

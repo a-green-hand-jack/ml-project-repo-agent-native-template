@@ -8,7 +8,7 @@
 
 1. `AGENTS.md`
 2. `.agent/AGENTS.md`
-3. `memory/current-status.md`（若存在）
+3. `memory/current-status.md`（若存在，含当前 plan 指针）＋ `memory/doc-lifecycle.yaml`（当前 approved/implementing plan 的权威状态）
 4. 结构探索前读 root `ANATOMY.md`
 
 ## 项目能力是 repo-local

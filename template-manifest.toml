@@ -35,6 +35,10 @@ glob = ".claude/settings.local.json"
 kind = "project"        # 本地权限覆盖，属下游
 
 [[rule]]
+glob = ".agent/capability-catalog.toml"
+kind = "framework"      # 声明式能力目录，上游拥有（校验器 scripts/check-capability-catalog.py，见 issue #28）
+
+[[rule]]
 glob = ".agent/**"
 kind = "framework"
 
