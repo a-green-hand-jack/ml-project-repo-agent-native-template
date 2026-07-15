@@ -50,8 +50,12 @@
   （5cc9976）。base=origin/main `327e76a`，与本地 main（072af38，领先 7 个未 push commit）
   改动路径无重叠。主 agent 已独立复跑 validate-governance / check-doc-lifecycle 全绿。
   详见 `memory/branches/48-lingtai-round2.md`（在该分支上）。
-- **下一步（human gate）**：human 批注 S3 plan doc → 决定 `feat/48-checklist-contract` 的
-  PR/merge → S3 实现另行授权 → 模板功能/服务全面测试（与 #46 重启同场景）→ 更新 #49 进度条。
+- **#48 主体收口（2026-07-15 下午）**：S2 经 PR #50、S3 全量实现经 **PR #51**（`9683a71`）
+  合入 main 并 push。S3 一步到位（human 批注）：root `CONTRACT.md` + `scripts/CONTRACT.md`
+  （TS-1..TS-9 唯一 owner，policy 改链接）+ `check-anatomy-drift.py` `validate_governed_index()`
+  （self-test 16/16）+ plan doc approved→implementing。两位执行官（干将·改·灵台缺口 /
+  干将·铸·契约配对）与 worktree/分支均已归档删除。#48 仅剩 S1（随 #46）。#49 进度 ~58%。
+- **下一步**：模板功能/服务全面测试（与 #46 重启同场景）→ 真实下游追平（#11/#19）。
 
 ## 当前 objective
 
