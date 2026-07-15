@@ -31,6 +31,10 @@ glob = "template-manifest.toml"
 kind = "framework"      # 分类清单本身随模板演进
 
 [[rule]]
+glob = "CONTRACT.md"
+kind = "framework"      # root governed-component index is upstream-owned
+
+[[rule]]
 glob = ".claude/settings.local.json"
 kind = "project"        # 本地权限覆盖，属下游
 
