@@ -1,8 +1,7 @@
 # ANATOMY↔CONTRACT 配对文件（S3）交互式计划
 
-Status: implementing · 2026-07-15 · ref: issue #48 v4 S3 + human 2026-07-15 批注原话「S3 plan
-doc 里面提到的问题我希望都一步到位，不要搞什么 MVP 或者最小实现」（见下方「Human 批注区」）；
-worktree-pr-flow 实现分支 `feat/s3-anatomy-contract-pairing`
+Status: verified · 2026-07-16 · ref: PR #51 merged as `9683a71`; issue #48 S3 全量实现、验证与
+分支/worktree 清理均已完成
 
 > 这是 human 与 agent 的协商界面：agent 写初稿 → human 在文件里批注 → agent 读 diff、收敛计划 →
 > 每次采纳的修订做一个小 commit。**本 plan 原计划只覆盖设计，approved 后才移交 `worktree-pr-flow`
@@ -63,8 +62,8 @@ plan 收敛 commit 与实现 commit(s) 都在这个新分支完成。
 
 ## Linked issue / PR
 
-issue #48（v4）。无 PR：实现完成、验证全绿后由执行官起草 PR，PR/merge 走 human gate
-（见 `.agent/human-gates.md`），本轮不自行开 PR。
+issue #48（v4）；实现经 PR #51 合入 main（merge commit `9683a71`，2026-07-15）。原实现
+branch/worktree 已在合入后清理，历史证据由本 plan、PR 与 merge commit 保留。
 
 ## Allowed paths
 
@@ -248,9 +247,9 @@ S3 实现阶段（本轮，一步到位）：
 
 1. ~~human 批注本文档~~ — 已完成：human 2026-07-15 批注「一步到位」，见「Human 批注区」。
 2. ~~收敛后状态转 approved~~ — 已完成（本 commit）。
-3. 移交 `worktree-pr-flow` 同分支一步到位实现（不再分两轮 PR）：root `CONTRACT.md` +
-   `scripts/CONTRACT.md` + `check-anatomy-drift.py` 扩展 + 相关 doctrine 同步，验证全绿后
-   PR 走 human gate（PR/merge 由 human 另行批准）。
+3. ~~移交 `worktree-pr-flow` 同分支一步到位实现并走 PR/merge~~ — 已完成：PR #51 合入
+   `9683a71`，root `CONTRACT.md`、`scripts/CONTRACT.md`、drift checker 与相关 doctrine 已落地。
+4. ~~合入后将 lifecycle 从 implementing 收口到 verified~~ — 已完成（2026-07-16）。
 
 ## Plan revision log
 
@@ -259,3 +258,5 @@ S3 实现阶段（本轮，一步到位）：
   MVP 或者最小实现」；据此取消原「只设计不实现」的分阶段安排，`check-anatomy-drift.py` 扩展与
   「未解决问题」三条并入本轮一次性实现；状态 draft → approved（干将·铸·契约配对，
   issue #48 v4 S3，分支 `feat/s3-anatomy-contract-pairing`）。
+- 2026-07-16 收口：PR #51 已于 2026-07-15 合入 main（`9683a71`），实现 branch/worktree 已清理；
+  修正遗漏的 implementing → verified 状态流转，并同步注册表历史证据。
