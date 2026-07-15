@@ -213,6 +213,7 @@ def build_downstream(root: Path, version: str, *, gen: str, val: str) -> None:
 
 def build_adapter_ownership_upstream(root: Path) -> None:
     """Build a real Codex adapter surface without duplicating generator logic."""
+    (root / "scripts").mkdir(parents=True, exist_ok=True)
     write(root / "VERSION", "v1.1.0\n")
     write(root / "template-manifest.toml", ADAPTER_OWNERSHIP_MANIFEST)
     shutil.copy2(SCRIPT, root / "scripts" / "template-sync.py")
@@ -230,6 +231,7 @@ def build_adapter_ownership_upstream(root: Path) -> None:
 
 
 def build_adapter_ownership_downstream(root: Path) -> None:
+    (root / "scripts").mkdir(parents=True, exist_ok=True)
     shutil.copy2(SCRIPT, root / "scripts" / "template-sync.py")
     write(root / ".template.toml", '[template]\norigin = "acme/downstream"\nversion = "v1.0.0"\n')
     for rel in ("config.toml", "rules/default.rules", "README.md", "AGENTS.md", "CLAUDE.md", "ANATOMY.md"):

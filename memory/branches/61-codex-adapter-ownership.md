@@ -42,6 +42,7 @@ Passed:
 | `./scripts/sync-codex-adapters.py --check` | `OK — 0 issue(s)` |
 | `./scripts/check-agent-harness.py` | `OK — 0 error(s), 0 warning(s)` |
 | `./scripts/check-anatomy-drift.py --strict` | `OK — 17 ANATOMY, 0 drift, 0 governance findings` |
+| `uv run --no-project python3 lab/evals/template-sync/run-template-sync-smoke.py` | `OK`，完整 production-path smoke（含 #61 adapter ownership scenario） |
 | `git diff --check` and `git diff --cached --check` | exit 0 |
 | `./scripts/check-same-commit.py --staged` | `OK —— 1 处结构改动，对应 anatomy 已同变更集更新` |
 
@@ -50,18 +51,13 @@ but failed on the pre-existing active `#48` lifecycle entry, whose branch and
 worktree are absent in this checkout. It also emitted four existing PyYAML
 absence warnings. This worker was forbidden to modify lifecycle state.
 
-The required Python commands could not be started in this Codex App execution
-surface. Each was rejected before process creation with:
-
-`Rejected("approval required by policy, but AskForApproval is set to Never")`.
-
-This affected control-plane registration/heartbeat/idle and the requested
-`python3 lab/evals/template-sync/run-template-sync-smoke.py` invocation. The
-smoke is not executable (`Permission denied` when called directly), while its
-specified `python3` form is policy-rejected; no smoke PASS is claimed.
+The initial #61 fixture run exposed a missing `root/scripts/` parent before
+`copy2()`. Both fixture builders now create that parent explicitly; all other
+fixture file writes use the local `write()` helper, which creates parents.
+The prescribed `uv run --no-project python3 ...` rerun passed.
 
 ## Risk / handoff
 
-The implementation is pushed and ready for an independent verifier, but is
-**not ready to approve** until the policy-blocked smoke is run. The lifecycle
-failure belongs to the #48 record owner and must not be masked in this issue.
+The implementation has complete #61 regression evidence and is ready for an
+independent verifier. The sole governance blocker is the pre-existing #48
+lifecycle record and must not be masked in this issue.
