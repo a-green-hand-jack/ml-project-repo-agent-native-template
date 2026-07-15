@@ -13,7 +13,7 @@ maintenance: |
 ## What this is
 
 Codex 读取的 repo-local skills 层。它不是 canonical workflow 源；canonical 源在 `.claude/skills/`
-与 `.claude/commands/`，本目录由生成器同步。
+与 `.claude/commands/`；`skills/**` 由生成器同步，目录导航文件是 framework。
 
 ## Components
 
@@ -26,7 +26,8 @@ Codex 读取的 repo-local skills 层。它不是 canonical workflow 源；canon
 
 - Codex 可显式用 `$<skill-name>` 调用这些 skills；enabled skills 也会出现在 slash command list。
 - `scripts/sync-codex-adapters.py --check` 校验本目录与 `.claude/` canonical 源一致。
+- `template-manifest.toml` 只把 `skills/**` 分类为 generated；`README.md`、`AGENTS.md`、`CLAUDE.md` 与本文件由 framework 追平。
 
 ## Notes
 
-- 不手写 adapter 内容，避免 Claude/Codex 能力漂移。
+- 不手写 `skills/**` adapter 内容，避免 Claude/Codex 能力漂移。

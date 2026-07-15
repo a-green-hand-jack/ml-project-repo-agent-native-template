@@ -62,6 +62,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
 SCRIPT = REPO / "scripts" / "template-sync.py"
+ADAPTER_SYNC_SCRIPT = REPO / "scripts" / "sync-codex-adapters.py"
 
 # The upstream ships gen/adapter.txt as its committed generated output
 # (kind=generated -> skipped by raw sync, rebuilt by the generator). GEN_CONTENT
@@ -127,6 +128,39 @@ glob = "merge-nosentinel.md"
 kind = "merge"
 """
 
+# #61: generated ownership is deliberately narrower than either adapter
+# directory. The final framework rules are fallbacks and must therefore follow
+# the concrete generated rules.
+ADAPTER_OWNERSHIP_MANIFEST = """\
+[[rule]]
+glob = ".template.toml"
+kind = "project"
+[[rule]]
+glob = "VERSION"
+kind = "framework"
+[[rule]]
+glob = "template-manifest.toml"
+kind = "framework"
+[[rule]]
+glob = ".claude/**"
+kind = "framework"
+[[rule]]
+glob = ".codex/agents/**"
+kind = "generated"
+[[rule]]
+glob = ".agents/skills/**"
+kind = "generated"
+[[rule]]
+glob = ".codex/**"
+kind = "framework"
+[[rule]]
+glob = ".agents/**"
+kind = "framework"
+[[rule]]
+glob = "scripts/**"
+kind = "framework"
+"""
+
 SENT_BEGIN = "<!-- template:begin -->"
 SENT_END = "<!-- template:end -->"
 
@@ -175,6 +209,80 @@ def build_downstream(root: Path, version: str, *, gen: str, val: str) -> None:
     write(root / "scaf" / "existing.txt", "downstream custom scaffold\n")
     # merge: old block + downstream tail that must be preserved.
     write(root / "merge.md", f"DOWN-HEAD\n{SENT_BEGIN}\nDOWNSTREAM BLOCK v1\n{SENT_END}\nDOWN-TAIL\n")
+
+
+def build_adapter_ownership_upstream(root: Path) -> None:
+    """Build a real Codex adapter surface without duplicating generator logic."""
+    (root / "scripts").mkdir(parents=True, exist_ok=True)
+    write(root / "VERSION", "v1.1.0\n")
+    write(root / "template-manifest.toml", ADAPTER_OWNERSHIP_MANIFEST)
+    shutil.copy2(SCRIPT, root / "scripts" / "template-sync.py")
+    shutil.copy2(ADAPTER_SYNC_SCRIPT, root / "scripts" / "sync-codex-adapters.py")
+    write(root / ".claude" / "agents" / "demo.md", "---\nname: demo\ndescription: demo agent\ntools: Read\n---\n\nDemo.\n")
+    write(root / ".claude" / "skills" / "demo-skill" / "SKILL.md", "---\nname: demo-skill\ndescription: demo skill\n---\n\nDemo.\n")
+    for rel in ("config.toml", "rules/default.rules", "README.md", "AGENTS.md", "CLAUDE.md", "ANATOMY.md"):
+        write(root / ".codex" / rel, f"upstream codex {rel}\n")
+    for rel in ("README.md", "AGENTS.md", "CLAUDE.md", "ANATOMY.md"):
+        write(root / ".agents" / rel, f"upstream agents {rel}\n")
+    proc = subprocess.run([sys.executable, str(root / "scripts" / "sync-codex-adapters.py")],
+                          cwd=root, text=True, capture_output=True, check=False)
+    if proc.returncode != 0:
+        raise RuntimeError(f"adapter fixture generation failed:\n{proc.stdout}\n{proc.stderr}")
+
+
+def build_adapter_ownership_downstream(root: Path) -> None:
+    (root / "scripts").mkdir(parents=True, exist_ok=True)
+    shutil.copy2(SCRIPT, root / "scripts" / "template-sync.py")
+    write(root / ".template.toml", '[template]\norigin = "acme/downstream"\nversion = "v1.0.0"\n')
+    for rel in ("config.toml", "rules/default.rules", "README.md", "AGENTS.md", "CLAUDE.md", "ANATOMY.md"):
+        write(root / ".codex" / rel, f"stale codex {rel}\n")
+    for rel in ("README.md", "AGENTS.md", "CLAUDE.md", "ANATOMY.md"):
+        write(root / ".agents" / rel, f"stale agents {rel}\n")
+    write(root / ".codex" / "agents" / "demo.toml", "stale generated agent\n")
+    write(root / ".agents" / "skills" / "demo-skill" / "SKILL.md", "stale generated skill\n")
+    write(root / "scripts" / "validate-governance.py", VAL_OK)
+
+
+def check_adapter_ownership_exact_set(tmp: Path) -> int:
+    """#61 regression: only actual adapter outputs are generated.
+
+    A broad `.codex/**` or `.agents/**` generated rule wrongly makes native
+    config/rules/navigation files part of the exact generated manifest and
+    blocks version advancement forever. This production-path fixture copies the
+    real adapter generator and derives the expected paths from it.
+    """
+    up, down, receipt = tmp / "up-adapter-owner", tmp / "down-adapter-owner", tmp / "receipt-adapter-owner.json"
+    build_adapter_ownership_upstream(up)
+    build_adapter_ownership_downstream(down)
+
+    proc = run_sync(down, up, receipt)
+    if proc.returncode != 0:
+        return fail("adapter ownership sync should pass", proc)
+    r = read_json(receipt)
+    sync_spec = importlib.util.spec_from_file_location("adapter_sync_expected", up / "scripts" / "sync-codex-adapters.py")
+    sync_mod = importlib.util.module_from_spec(sync_spec)
+    sys.modules[sync_spec.name] = sync_mod
+    sync_spec.loader.exec_module(sync_mod)
+    expected_generated = {path.relative_to(up).as_posix() for path in sync_mod.expected_files()}
+    got_generated = set(r["manifest"]["generated"]["expected"])
+    if got_generated != expected_generated:
+        return fail(f"generated manifest must exactly equal real adapter outputs, got {got_generated}", proc)
+    if r["manifest"]["generated"]["missing"] or r["manifest"]["generated"]["unexpected"]:
+        return fail(f"adapter generated manifest should be clean, got {r['manifest']['generated']}", proc)
+    framework_paths = {".codex/config.toml", ".codex/rules/default.rules", ".codex/README.md",
+                       ".codex/AGENTS.md", ".codex/CLAUDE.md", ".codex/ANATOMY.md",
+                       ".agents/README.md", ".agents/AGENTS.md", ".agents/CLAUDE.md", ".agents/ANATOMY.md"}
+    if not framework_paths <= set(r["manifest"]["apply_changed"]):
+        return fail(f"native adapter framework files must be applied, got {r['manifest']['apply_changed']}", proc)
+    if expected_generated & set(r["manifest"]["apply_changed"]):
+        return fail("generated adapters must not be raw-copied during apply", proc)
+    if version_of(down) != "v1.1.0" or r["result"] != "pass":
+        return fail(f"clean adapter ownership sync must advance version, got {r['result']}/{version_of(down)}", proc)
+
+    rerun = run_sync(down, up, receipt)
+    if rerun.returncode != 0 or read_json(receipt)["manifest"]["apply_changed"]:
+        return fail("adapter ownership immediate rerun must be an apply no-op", rerun)
+    return 0
 
 
 def run_sync(downstream: Path, upstream: Path, receipt: Path, *extra: str) -> subprocess.CompletedProcess[str]:
@@ -827,6 +935,7 @@ def main() -> int:
             check_generated_missing,
             check_generated_wrong_bytes_content_mismatch,
             check_generated_stale_rogue_unexpected,
+            check_adapter_ownership_exact_set,
             check_interrupt_unknown,
             check_commit_interrupt,
             check_timeout_unknown,

@@ -87,12 +87,20 @@ glob = ".claude/**"
 kind = "merge"          # .claude 下其余导航文件（README/AGENTS/ANATOMY 等）含项目内容
 
 [[rule]]
-glob = ".codex/**"
+glob = ".codex/agents/**"
 kind = "generated"
 
 [[rule]]
-glob = ".agents/**"
+glob = ".agents/skills/**"
 kind = "generated"
+
+[[rule]]
+glob = ".codex/**"
+kind = "framework"    # native Codex config/rules/navigation are upstream-owned, not generated
+
+[[rule]]
+glob = ".agents/**"
+kind = "framework"    # navigation files are upstream-owned; only skills are generated
 
 [[rule]]
 glob = "scripts/**"
