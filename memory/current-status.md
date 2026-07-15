@@ -55,7 +55,13 @@
   （TS-1..TS-9 唯一 owner，policy 改链接）+ `check-anatomy-drift.py` `validate_governed_index()`
   （self-test 16/16）+ plan doc approved→implementing。两位执行官（干将·改·灵台缺口 /
   干将·铸·契约配对）与 worktree/分支均已归档删除。#48 仅剩 S1（随 #46）。#49 进度 ~58%。
-- **下一步**：模板功能/服务全面测试（与 #46 重启同场景）→ 真实下游追平（#11/#19）。
+- **下一步：#52（open，tracking）系统测试总起**——取代 #46 重启职责；六组（G1 静态门禁 /
+  G2 runtime enforcement / G3 skills / G4 多 agent 控制面 / G5 版本同步 / G6 Codex parity）+
+  测试登记表 + ELF 真实 replay（`origin/worktree-case+elf-template-replay` 开新 worktree，
+  Agent A 更新 template、Agent B 独立测试，硬分工防自证据）。human review 后按组开 6 个
+  sub-issue 分阶段测；全过后 bump **v1.4.0** + tag（human 批）。遗留注意：`gh pr merge
+  --delete-branch` 在本地分支被 worktree 占用时会连远端删除一起中止，合并后需
+  `git push origin --delete <branch>` 兜底（#50/#51 的残留远端分支已补删）。
 
 ## 当前 objective
 
