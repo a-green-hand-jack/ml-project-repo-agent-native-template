@@ -170,3 +170,15 @@ docs:
     upstream: []
     downstream: []
     superseded_by: null
+
+  - id: plan-20260715-anatomy-contract-pairing
+    path: plans/20260715-anatomy-contract-pairing.zh.md
+    kind: plan
+    status: draft
+    issue: "#48"
+    branch: feat/48-checklist-contract
+    worktree: null
+    approval: null
+    upstream: []
+    downstream: []
+    superseded_by: null
