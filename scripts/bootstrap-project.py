@@ -57,7 +57,6 @@ import json
 import re
 import subprocess
 import sys
-import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
 from types import ModuleType
@@ -86,13 +85,13 @@ def _load_sibling(name: str) -> ModuleType:
 
 
 AGENT_SURFACE = _load_sibling("_agent_surface")
+TEMPLATE_ANCHOR = _load_sibling("_template_anchor")
 
 STATE_DIR = Path("lab/docs/audits/template-bootstrap/state")
 REPORT_PATH = Path("lab/docs/audits/template-bootstrap-report.md")
 STATE_FILE = "state.json"
 LOG_FILE = "run-log.jsonl"
 
-ORIGIN_RE = re.compile(r"^[\w.-]+/[\w.-]+$")
 PLACEHOLDER_RE = re.compile(r"<[^<>\n]{2,120}>")
 TEMPLATE_DEFAULT_OWNER = "@a-green-hand-jack"
 
@@ -204,11 +203,10 @@ def refuse_upstream_template(target: Path, origin: str) -> None:
 
 
 def validate_origin(origin: str) -> None:
-    if not ORIGIN_RE.match(origin):
-        raise SystemExit(
-            f"--origin must look like <owner/repo>, got {origin!r} "
-            "(not inferred; pass it explicitly — see 未解决问题 2)"
-        )
+    try:
+        TEMPLATE_ANCHOR.validate_origin(origin)
+    except TEMPLATE_ANCHOR.TemplateAnchorError as exc:
+        raise SystemExit(str(exc)) from exc
 
 
 def read_own_version() -> str:
@@ -219,60 +217,23 @@ def read_own_version() -> str:
 
 
 def read_template_toml(path: Path) -> dict[str, Any] | None:
-    if not path.exists():
-        return None
-    return tomllib.loads(path.read_text(encoding="utf-8")).get("template", {})
+    return TEMPLATE_ANCHOR._existing_anchor(path)
 
 
 def write_template_toml(path: Path, origin: str, version: str) -> None:
-    lines = [
-        "[template]",
-        f"origin = {json.dumps(origin, ensure_ascii=False)}",
-        f"version = {json.dumps(version, ensure_ascii=False)}",
-    ]
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    decision = TEMPLATE_ANCHOR.preflight(path.parent, origin, version, allow_force=True)
+    TEMPLATE_ANCHOR.apply_atomic(path.parent, decision)
 
 
 def ensure_template_toml(
     target: Path, origin: str, version: str, force: bool, dry_run: bool
 ) -> dict[str, Any]:
-    path = target / ".template.toml"
-    existing = read_template_toml(path)
-    if existing is None:
-        if dry_run:
-            return {"status": "would-create", "origin": origin, "version": version}
-        write_template_toml(path, origin, version)
-        return {"status": "created", "origin": origin, "version": version}
-
-    existing_origin = existing.get("origin")
-    if existing_origin == origin:
-        # Idempotent: same origin -> confirm, do not rewrite (not even version).
-        return {
-            "status": "confirmed",
-            "origin": existing_origin,
-            "version": existing.get("version"),
-        }
-
-    if not force:
-        raise SystemExit(
-            f"origin mismatch: {path} already has origin={existing_origin!r}, "
-            f"requested --origin={origin!r}. Refusing to overwrite silently; "
-            "pass --force to override (见开放问题 3 已决策)."
+    try:
+        return TEMPLATE_ANCHOR.ensure(
+            target, origin, version, allow_force=force, dry_run=dry_run
         )
-    if dry_run:
-        return {
-            "status": "would-overwrite",
-            "origin": origin,
-            "version": version,
-            "previous_origin": existing_origin,
-        }
-    write_template_toml(path, origin, version)
-    return {
-        "status": "overwritten",
-        "origin": origin,
-        "version": version,
-        "previous_origin": existing_origin,
-    }
+    except TEMPLATE_ANCHOR.TemplateAnchorError as exc:
+        raise SystemExit(str(exc)) from exc
 
 
 def ensure_hooks_path(target: Path, dry_run: bool) -> dict[str, Any]:

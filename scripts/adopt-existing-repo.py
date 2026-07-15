@@ -58,6 +58,7 @@ def _load_sibling(name: str) -> ModuleType:
 
 
 AGENT_SURFACE = _load_sibling("_agent_surface")
+TEMPLATE_ANCHOR = _load_sibling("_template_anchor")
 
 STATE_DIR = Path("lab/docs/audits/template-adoption/state")
 REPORT_PATH = Path("lab/docs/audits/template-adoption-report.md")
@@ -69,6 +70,7 @@ LEGACY_PLAN_SCHEMA = "template-adoption-plan-v1"
 STATE_FILES = (PLAN_FILE, BASELINE_FILE, LOG_FILE)
 
 CONTROL_ITEMS = [
+    ".template.toml",
     "AGENTS.md",
     "CLAUDE.md",
     "ANATOMY.md",
@@ -97,6 +99,7 @@ CONTROL_ITEMS = [
 ]
 
 ROOT_WHITELIST = {
+    ".template.toml",
     "README.md",
     "PROJECT.md",
     "DECISIONS.md",
@@ -155,6 +158,13 @@ EXCLUDE_REL_PREFIXES = (
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def read_own_version() -> str:
+    version_file = TEMPLATE_ROOT / "VERSION"
+    if not version_file.is_file():
+        raise SystemExit(f"template root missing VERSION: {version_file}")
+    return version_file.read_text(encoding="utf-8").strip()
 
 
 def rel_posix(path: Path, root: Path) -> str:
@@ -556,6 +566,29 @@ def classify_entry(target: Path, name: str, kind: str, import_root_rel: str) -> 
     and touch whatever the link points at. Symlinks at protected positions
     (the entry itself or nested) are reported by `protected_hits_within`.
     """
+    if name == TEMPLATE_ANCHOR.ANCHOR_NAME:
+        try:
+            anchor = TEMPLATE_ANCHOR.read(target)
+        except TEMPLATE_ANCHOR.TemplateAnchorError as exc:
+            return {
+                "path": name,
+                "kind": kind,
+                "category": "conflict",
+                "target_path": name,
+                "blocker": True,
+                "reason": f"template anchor is unsafe or malformed: {exc}",
+            }
+        if anchor is not None:
+            return {
+                "path": name,
+                "kind": kind,
+                "category": "template_control_item",
+                "target_path": name,
+                "blocker": False,
+                "reason": "governed template anchor; retained at the root and never imported",
+                "anchor_origin": anchor["origin"],
+                "anchor_version": anchor["version"],
+            }
     protected_hits = protected_hits_within(target, name)
     if protected_hits:
         if protected_hits == [name]:
@@ -766,6 +799,8 @@ def discover(args: argparse.Namespace) -> dict[str, Any]:
         "target": str(target),
         "template_root": str(TEMPLATE_ROOT),
         "policy": args.policy,
+        "origin": args.origin,
+        "template_version": read_own_version(),
         "project_slug": slug,
         "state_dir": STATE_DIR.as_posix(),
         "report_path": REPORT_PATH.as_posix(),
@@ -1157,6 +1192,17 @@ def normalize(args: argparse.Namespace) -> dict[str, Any]:
     moved: list[dict[str, str]] = []
     move_candidates: list[tuple[str, str, Path, Path]] = []
     blockers: list[str] = list(plan_shape_blockers)
+    if plan.get("origin") != args.origin:
+        blockers.append(
+            "origin-mismatch: discover recorded "
+            f"{plan.get('origin')!r}, but normalize received --origin={args.origin!r}; "
+            "re-run discover with the requested explicit origin"
+        )
+    anchor_decision: dict[str, Any] | None = None
+    try:
+        anchor_decision = TEMPLATE_ANCHOR.preflight(target, args.origin, read_own_version())
+    except TEMPLATE_ANCHOR.TemplateAnchorError as exc:
+        blockers.append(f"template-anchor: {exc}")
     state_blocker = state_redirect_blocker(target)
     if state_blocker:
         blockers.append(state_blocker)
@@ -1360,10 +1406,42 @@ def normalize(args: argparse.Namespace) -> dict[str, Any]:
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(src), str(dst))
         moved.append({"from": name, "to": target_path})
+    if blockers:
+        template_anchor = {"status": "not-written-blocked"}
+    elif args.dry_run:
+        assert anchor_decision is not None
+        template_anchor = {
+            "status": "would-" + anchor_decision["action"],
+            "origin": anchor_decision["origin"],
+            "version": anchor_decision["version"],
+        }
+        print(f"DRY-RUN template anchor {anchor_decision['action']}: {target / TEMPLATE_ANCHOR.ANCHOR_NAME}")
+    else:
+        assert anchor_decision is not None
+        try:
+            template_anchor = TEMPLATE_ANCHOR.apply_atomic(target, anchor_decision)
+        except TEMPLATE_ANCHOR.TemplateAnchorError as exc:
+            append_log(
+                target,
+                "normalize",
+                "failed",
+                {"moved": moved, "blockers": blockers, "template_anchor_error": str(exc)},
+                args.dry_run,
+            )
+            raise SystemExit(f"normalize completed moves but could not write template anchor: {exc}") from exc
     status = "blocked" if blockers else "ok"
-    append_log(target, "normalize", status, {"moved": moved, "blockers": blockers}, args.dry_run)
-    print(f"[normalize] moved={len(moved)} blockers={len(blockers)}")
-    return {"moved": moved, "blockers": blockers}
+    append_log(
+        target,
+        "normalize",
+        status,
+        {"moved": moved, "blockers": blockers, "template_anchor": template_anchor},
+        args.dry_run,
+    )
+    print(
+        f"[normalize] moved={len(moved)} blockers={len(blockers)} "
+        f"template_anchor={template_anchor['status']}"
+    )
+    return {"moved": moved, "blockers": blockers, "template_anchor": template_anchor}
 
 
 def current_hash_index(target: Path) -> dict[str, list[str]]:
@@ -1641,6 +1719,7 @@ def prove(args: argparse.Namespace) -> dict[str, Any]:
         "schema": "template-adoption-proof-v1",
         "created_at": now_iso(),
         "target": str(target),
+        "origin": plan.get("origin"),
         "integrity": integrity,
         "governance": governance,
         "smoke": smoke,
@@ -1681,6 +1760,7 @@ def write_report(target: Path, plan: dict[str, Any], proof: dict[str, Any]) -> N
     normalize = normalize_rows[-1].get("details", {}) if normalize_rows else {}
     moved = normalize.get("moved", [])
     blockers = normalize.get("blockers", [])
+    template_anchor = normalize.get("template_anchor")
     current_pollution = [
         e["path"]
         for e in list_root_entries(target)
@@ -1691,6 +1771,7 @@ def write_report(target: Path, plan: dict[str, Any], proof: dict[str, Any]) -> N
         "",
         f"- created_at: `{proof['created_at']}`",
         f"- target: `{proof['target']}`",
+        f"- origin: `{proof.get('origin')}`",
         f"- policy: `{plan.get('policy')}`",
         f"- import_root: `{plan.get('import_root')}`",
         f"- integrity: `{'ok' if proof['integrity']['ok'] else 'failed'}`",
@@ -1700,6 +1781,7 @@ def write_report(target: Path, plan: dict[str, Any], proof: dict[str, Any]) -> N
         f"- baseline_files_present: `{proof['integrity']['present']}/{proof['integrity']['baseline_files']}`",
         f"- moved_root_entries: `{len(moved)}`",
         f"- normalize_blockers: `{len(blockers)}`",
+        f"- template_anchor: `{json.dumps(template_anchor, sort_keys=True)}`",
         f"- remaining_root_pollution: `{len(current_pollution)}`",
         "",
         "## Notes",
@@ -1795,6 +1877,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("target", type=Path)
     parser.add_argument(
+        "--origin",
+        required=True,
+        help="upstream template <owner/repo>; required for every phase and never inferred",
+    )
+    parser.add_argument(
         "--phase",
         choices=["discover", "baseline", "scaffold", "normalize", "prove", "all"],
         default="discover",
@@ -1814,6 +1901,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
+    try:
+        TEMPLATE_ANCHOR.validate_origin(args.origin)
+    except TEMPLATE_ANCHOR.TemplateAnchorError as exc:
+        raise SystemExit(str(exc)) from exc
     phases = ["discover", "baseline", "scaffold", "normalize", "prove"]
     if args.phase != "all":
         phases = [args.phase]

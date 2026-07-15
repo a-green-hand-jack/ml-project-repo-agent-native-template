@@ -17,7 +17,7 @@ Claude command and run `python scripts/sync-codex-adapters.py`.
 建议参数格式：
 
 ```text
-/adopt-existing-repo /path/to/repo --project-name <slug> --test-command "<cmd>"
+/adopt-existing-repo /path/to/repo --project-name <slug> --test-command "<cmd>" --origin <owner/repo>
 ```
 
 执行：
