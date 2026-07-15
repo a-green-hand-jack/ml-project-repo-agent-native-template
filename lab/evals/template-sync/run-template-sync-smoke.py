@@ -34,10 +34,10 @@ Scenarios (each asserts the P0 transactional contract of issue #35):
   block -> receipt result=partial (never pass) with explicit warnings; version
   still advances because the validator passed, but the honest signal is
   partial, not pass;
-- root_contract_framework: root CONTRACT.md is explicitly framework-owned;
-  dry-run does not create it, apply creates a missing copy and overwrites a
-  stale copy, receipts keep it out of unclassified, and the immediate rerun is
-  an apply no-op;
+- root_contract_framework: root CONTRACT.md is bound to the real production
+  template-manifest.toml; dry-run does not create it, apply creates a missing
+  copy and overwrites a stale copy, receipts keep it out of unclassified, and
+  the immediate rerun is an apply no-op;
 - generated_stale_rogue: a rogue generated-namespace file that already existed
   BEFORE the run, untouched by this run's generator, still surfaces as
   generated.unexpected -- generated.actual is the full post-generator governed
@@ -67,6 +67,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[3]
 SCRIPT = REPO / "scripts" / "template-sync.py"
 ADAPTER_SYNC_SCRIPT = REPO / "scripts" / "sync-codex-adapters.py"
+PRODUCTION_MANIFEST = REPO / "template-manifest.toml"
 
 # The upstream ships gen/adapter.txt as its committed generated output
 # (kind=generated -> skipped by raw sync, rebuilt by the generator). GEN_CONTENT
@@ -111,9 +112,6 @@ glob = "VERSION"
 kind = "framework"
 [[rule]]
 glob = "template-manifest.toml"
-kind = "framework"
-[[rule]]
-glob = "CONTRACT.md"
 kind = "framework"
 [[rule]]
 glob = "fw/**"
@@ -306,6 +304,40 @@ def version_of(downstream: Path) -> str:
 
 def read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def root_contract_manifest_error(manifest: Path) -> str | None:
+    """Check the production rule with template-sync's own parser/matcher."""
+    rules = tomllib.loads(manifest.read_text(encoding="utf-8")).get("rule", [])
+    spec = importlib.util.spec_from_file_location("template_sync_manifest_check", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    matches = [rule for rule in rules if module.match_glob("CONTRACT.md", rule.get("glob", ""))]
+    if len(matches) != 1:
+        return f"CONTRACT.md must match exactly one production rule, got {matches}"
+    if matches[0].get("kind") != "framework":
+        return f"CONTRACT.md's only production rule must be framework, got {matches[0]}"
+    if module.classify("CONTRACT.md", rules) != "framework":
+        return "template-sync classify() must classify CONTRACT.md as framework"
+    return None
+
+
+def write_conflicting_contract_manifest(source: Path, destination: Path) -> None:
+    """Create an isolated contradictory rule solely for mutation sanity."""
+    lines = source.read_text(encoding="utf-8").splitlines(keepends=True)
+    for index, line in enumerate(lines):
+        if line.strip() != 'glob = "CONTRACT.md"':
+            continue
+        for kind_index in range(index + 1, len(lines)):
+            if lines[kind_index].startswith("[[rule]]"):
+                break
+            if lines[kind_index].lstrip().startswith("kind ="):
+                lines[kind_index] = 'kind = "project"  # isolated mutation sanity\\n'
+                write(destination, "".join(lines))
+                return
+        break
+    raise RuntimeError("production CONTRACT.md rule has no mutable kind field")
 
 
 def check_happy_and_idempotent(tmp: Path) -> int:
@@ -557,13 +589,25 @@ def check_dry_run_no_side_effect(tmp: Path) -> int:
 
 
 def check_root_contract_framework(tmp: Path) -> int:
-    """#62: the root governed-component index is framework-owned end to end."""
+    """#62: bind root CONTRACT.md coverage to the production manifest."""
     up = tmp / "up-root-contract"
     down = tmp / "down-root-contract"
     dry_receipt = tmp / "receipt-root-contract-dry.json"
     receipt = tmp / "receipt-root-contract.json"
     build_upstream(up, "v1.1.0")
     build_downstream(down, "v1.0.0", gen=GEN_OK, val=VAL_OK)
+    shutil.copy2(PRODUCTION_MANIFEST, up / "template-manifest.toml")
+
+    manifest_error = root_contract_manifest_error(up / "template-manifest.toml")
+    if manifest_error is not None:
+        return fail(f"production root CONTRACT manifest rule invalid: {manifest_error}")
+    conflicting_manifest = tmp / "conflicting-template-manifest.toml"
+    write_conflicting_contract_manifest(up / "template-manifest.toml", conflicting_manifest)
+    conflicting_error = root_contract_manifest_error(conflicting_manifest)
+    if conflicting_error is None:
+        return fail("root CONTRACT manifest assertion must fail for an isolated conflicting rule")
+    print(f"[template-sync-smoke] #62 mutation rejected: {conflicting_error}")
+
     write(up / "CONTRACT.md", "upstream governed-component index\n")
 
     dry = run_sync(down, up, dry_receipt, "--dry-run")
