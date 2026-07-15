@@ -174,11 +174,11 @@ docs:
   - id: plan-20260715-anatomy-contract-pairing
     path: plans/20260715-anatomy-contract-pairing.zh.md
     kind: plan
-    status: implementing
+    status: verified
     issue: "#48"
     branch: feat/s3-anatomy-contract-pairing
-    worktree: "."
-    approval: "human 2026-07-15 批注原话「S3 plan doc 里面提到的问题我希望都一步到位，不要搞什么 MVP 或者最小实现」；转录见 plans/20260715-anatomy-contract-pairing.zh.md 的 Human 批注区"
+    worktree: null
+    approval: "human 2026-07-15 一步到位批注；PR #51 merged 9683a71（2026-07-15），S3 全量实现与验证完成，branch/worktree 已按流程清理"
     upstream: []
     downstream: []
     superseded_by: null
