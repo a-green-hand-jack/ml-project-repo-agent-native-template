@@ -317,7 +317,11 @@ def run_sync_codex_adapters(target: Path, dry_run: bool) -> dict[str, Any]:
     if dry_run:
         return {"status": "would-sync"}
     write_result = run([sys.executable, str(script)], target, timeout=60)
-    check_result = run([sys.executable, str(script), "--check"], target, timeout=60)
+    # target 已在此之前写好 .template.toml（步骤 1 先于本步骤），结构上必是
+    # downstream；显式传 context 而非依赖 auto 检测，见 issue #67 D1。
+    check_result = run(
+        [sys.executable, str(script), "--check", "--context", "downstream"], target, timeout=60
+    )
     return {
         "status": "ok" if check_result["returncode"] == 0 else "failed",
         "write_returncode": write_result["returncode"],

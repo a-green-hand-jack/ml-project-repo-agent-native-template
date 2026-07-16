@@ -30,6 +30,17 @@ asserting:
 - (positive) a legitimately derived repo whose *upstream* remote points back
   at the template (origin = its own slug) is NOT refused — only the identity
   remote (`origin`) participates in the refusal criterion.
+- (issue #67) `.codex/agents/**` + `.agents/skills/**` stripped from the base
+  commit before `git init` — so the bootstrap-generated adapters land on
+  disk correct but genuinely untracked, the real adoption-time bug — and
+  `validate-governance.py --strict` / `check-agent-harness.py --strict` /
+  `sync-codex-adapters.py --check` are still all green (auto-detected
+  `context=downstream`); the same untracked fixture under an explicit
+  `--context source` still fails (#61's tracked exact-set is not globally
+  relaxed); disk-based missing/stale/unexpected adapters still fail
+  regardless of context; a malformed or symlinked `.template.toml` role
+  anchor fails closed under `--context auto` rather than silently
+  downgrading.
 
 Uncommitted worktree changes are NOT covered (the target is built from
 HEAD): commit first, then run this smoke.
@@ -38,6 +49,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -285,6 +297,111 @@ def check_derived_with_upstream_remote(tmp: Path) -> int:
     return 0
 
 
+def build_untracked_adapters_repo(target: Path) -> None:
+    """Materialize the real template, then strip the generated adapter
+    namespaces BEFORE the base commit — so bootstrap's own generator
+    regenerates them fresh, correct, and genuinely untracked (issue #67's
+    exact adoption-time precondition, not a synthetic stand-in)."""
+    materialize_template(target)
+    shutil.rmtree(target / ".codex" / "agents")
+    shutil.rmtree(target / ".agents" / "skills")
+    git_init(target)
+
+
+def sync_codex_check(target: Path, *extra: str) -> subprocess.CompletedProcess[str]:
+    return run(
+        [sys.executable, str(target / "scripts" / "sync-codex-adapters.py"), "--check", *extra],
+        target,
+    )
+
+
+def check_untracked_generated_adapters(tmp: Path) -> int:
+    """Issue #67: an adopted/bootstrapped downstream repo whose generated
+    Codex adapters are correct, byte-matching, but never `git add`ed must
+    pass the real harness — not be misreported as missing."""
+    target = tmp / "untracked-adapters"
+    build_untracked_adapters_repo(target)
+
+    proc = self_bootstrap(target, "--origin", ORIGIN)
+    if proc.returncode != 0:
+        return fail("self-bootstrap over a base commit without generated adapters should succeed", proc)
+
+    tracked = run(["git", "ls-files", "--", ".codex/agents", ".agents/skills"], target)
+    if tracked.stdout.strip():
+        return fail(f"fixture precondition violated — adapters already tracked: {tracked.stdout}", tracked)
+    agent_tomls = sorted((target / ".codex" / "agents").glob("*.toml"))
+    if not agent_tomls:
+        return fail("bootstrap should have regenerated .codex/agents/*.toml on disk")
+    status = run(["git", "status", "--porcelain"], target)
+    if "?? .codex/agents/" not in status.stdout and ".codex/agents/" not in status.stdout:
+        return fail(f"generated adapters should show untracked in git status, got: {status.stdout}", status)
+
+    # the actual fix: real validators must be green despite untracked adapters.
+    rc = check_validators(target)
+    if rc != 0:
+        return rc
+
+    direct = sync_codex_check(target)
+    if direct.returncode != 0 or "context=downstream" not in direct.stdout:
+        return fail("direct --check (auto) should resolve and print context=downstream and pass", direct)
+
+    # #61 must not be globally relaxed: explicit source context on this same
+    # untracked-but-correct fixture must still fail the tracked exact-set gate.
+    source_ctx = sync_codex_check(target, "--context", "source")
+    if source_ctx.returncode == 0 or "context=source" not in source_ctx.stdout:
+        return fail("explicit --context source on untracked adapters must still fail (#61 preserved)", source_ctx)
+
+    # disk-based missing/stale/unexpected must still fail regardless of context.
+    victim = agent_tomls[0]
+    original = victim.read_bytes()
+
+    victim.unlink()
+    missing = sync_codex_check(target, "--context", "downstream")
+    if missing.returncode == 0 or "missing generated adapter" not in missing.stdout:
+        return fail("a genuinely missing generated adapter must still fail downstream context", missing)
+    victim.write_bytes(original)
+
+    victim.write_bytes(b"stale bytes\n")
+    stale = sync_codex_check(target, "--context", "downstream")
+    if stale.returncode == 0 or "stale generated adapter" not in stale.stdout:
+        return fail("stale generated adapter content must still fail downstream context", stale)
+    victim.write_bytes(original)
+
+    rogue = target / ".codex" / "agents" / "rogue-unexpected.toml"
+    rogue.write_text("rogue\n", encoding="utf-8")
+    unexpected = sync_codex_check(target, "--context", "downstream")
+    if unexpected.returncode == 0 or "unexpected generated adapter" not in unexpected.stdout:
+        return fail("an unexpected rogue adapter must still fail downstream context", unexpected)
+    rogue.unlink()
+
+    clean = sync_codex_check(target)
+    if clean.returncode != 0:
+        return fail("fixture should be clean again after restoring the mutated adapter", clean)
+
+    # malformed / symlink role anchor must fail closed under auto, never
+    # silently downgrade to either a source or downstream PASS.
+    anchor = target / ".template.toml"
+    original_anchor = anchor.read_bytes()
+
+    anchor.write_text("not valid toml {{{", encoding="utf-8")
+    malformed = sync_codex_check(target)
+    if malformed.returncode == 0 or "拒绝作为角色锚点" not in malformed.stdout:
+        return fail("a malformed .template.toml anchor must fail closed under --context auto", malformed)
+
+    anchor.unlink()
+    os.symlink("/etc/hostname", anchor)
+    symlinked = sync_codex_check(target)
+    if symlinked.returncode == 0 or "symlink" not in symlinked.stdout:
+        return fail("a symlinked .template.toml anchor must fail closed under --context auto", symlinked)
+    anchor.unlink()
+    anchor.write_bytes(original_anchor)
+
+    restored = sync_codex_check(target)
+    if restored.returncode != 0:
+        return fail("fixture should pass again once a valid anchor is restored", restored)
+    return 0
+
+
 def main() -> int:
     head = candidate_commit()
     print(f"[bootstrap-smoke] tested commit (git archive HEAD): {head}")
@@ -301,6 +418,7 @@ def main() -> int:
             lambda: check_missing_githooks_fails(tmp),
             lambda: check_upstream_refusal(tmp),
             lambda: check_derived_with_upstream_remote(tmp),
+            lambda: check_untracked_generated_adapters(tmp),
         ):
             rc = check()
             if rc != 0:

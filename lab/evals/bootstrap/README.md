@@ -22,6 +22,13 @@ repo runs its own copy of the script against itself (self-bootstrap, target `.`)
   必须配置 `core.hooksPath`，缺失不允许被当成 skipped 成功）;
 - (negative) a target whose git remote points at the `--origin` slug（即上游模板 repo 自身的
   checkout）is refused before any mutation.
+- (issue #67) `.codex/agents/**` + `.agents/skills/**` stripped from the base commit before
+  `git init`，so bootstrap's own generator regenerates them correct-but-genuinely-untracked（真实
+  adoption-time 场景，not a synthetic stand-in）；`validate-governance.py --strict` /
+  `check-agent-harness.py --strict` / `sync-codex-adapters.py --check` 仍全绿（自动判定
+  `context=downstream`）；同一 untracked fixture 显式 `--context source` 仍 fail（#61 未被全局放宽）；
+  磁盘 missing/stale/unexpected 两种 context 都仍 fail；`.template.toml` 角色锚点是 symlink 或无法
+  解析时，`--context auto` fail-closed 而非静默降级。
 
 This smoke test does **not** cover the fresh-Codex-session runtime check from A5 (guidance/skill
 discovery, project hook load provenance) — that requires an actual Codex CLI session against the

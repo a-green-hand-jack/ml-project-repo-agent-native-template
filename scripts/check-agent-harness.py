@@ -212,8 +212,12 @@ def check_codex_adapters() -> None:
     if not sync_script.exists():
         err("缺少 scripts/sync-codex-adapters.py")
         return
+    # 本脚本自身既可能在模板 source checkout 跑（自检），也可能被复制进
+    # bootstrap/adopt 出来的 downstream repo 跑；身份取决于 REPO 是哪一份，
+    # 因此显式传 auto 让 sync-codex-adapters.py 按 .template.toml 锚点自判
+    # source/downstream（而非隐式依赖其默认值），见 issue #67 D1。
     proc = subprocess.run(
-        [sys.executable, str(sync_script), "--check"],
+        [sys.executable, str(sync_script), "--check", "--context", "auto"],
         cwd=str(REPO),
         text=True,
         capture_output=True,
