@@ -13,6 +13,7 @@ related_files:
   - adopt-existing-repo.py
   - check-adoption-integrity.py
   - bootstrap-project.py
+  - _template_anchor.py
   - _agent_surface.py
   - sync-codex-adapters.py
   - bump-template-version.py
@@ -53,9 +54,10 @@ Codex adapter 同步脚本把 `.claude/` canonical 能力生成到 `.codex/` 与
 | `check-provenance-chain.py` | provenance 链：run→artifact→evidence→claim→deliverable；双向 claim/evidence 归属边、行级 marker 覆盖、run 闭环、checksum（sha256）、active-only gate artifact、安全 repo-relative regular-file path、dataset split、ID 唯一性；active/submitted/passed 状态 fail-closed，`--self-test` 跑内嵌对抗 fixture | `.agent/artifact-policy.md` |
 | `check-same-commit.py` | same-commit rule：结构改动(A/D/R)未同变更集更新对应 ANATOMY → 拦。diff 驱动，不进 governance；由 `.githooks/pre-commit` + CI 调用 | `.agent/anatomy-protocol.md` |
 | `check-outcome-ledger-schema.py` | outcome ledger/fixture schema、decision↔outcome 生命周期、完整具体路线证据隔离、正样本地板/零样本与 stale fallback、replay 确定性、credential/写边界防线；经 importlib 复用 skill 内 `outcome_ledger.py` | `.agent/model-routing-policy.md` · `plans/20260712-outcome-aware-routing.zh.md` |
-| `adopt-existing-repo.py` | 分 phase 迁移已有 Git repo：discover（语义归类，B1-B3）/baseline/scaffold/normalize（消费归类计划，B4）/prove（含双 agent surface 报告，B6） | `plans/20260709-adopt-existing-repo.zh.md` · `plans/20260712-bootstrap-adoption-proof.zh.md` · `.claude/skills/adopt-existing-repo/SKILL.md` |
+| `adopt-existing-repo.py` | 分 phase 迁移已有 Git repo：所有 phase 显式 `--origin`；discover（语义归类，B1-B3）/baseline/scaffold/normalize（消费归类计划，B4），仅无 blocker 的 normalize 末尾经 `_template_anchor.py` 原子 create/confirm `.template.toml`；prove（含双 agent surface 报告，B6） | `plans/20260709-adopt-existing-repo.zh.md` · `plans/20260712-bootstrap-adoption-proof.zh.md` · `.claude/skills/adopt-existing-repo/SKILL.md` |
 | `check-adoption-integrity.py` | 读取 adoption baseline，按 hash 证明原 tracked bytes 仍存在 | `.claude/skills/adopt-existing-repo/SKILL.md` |
 | `bootstrap-project.py` | 把刚从模板派生的新 repo 落地：`.template.toml` 锚点、`core.hooksPath`、Codex adapters 同步、governance，幂等；需 human 信息的步骤只报告不代做 | `plans/20260712-bootstrap-adoption-proof.zh.md` · `.claude/skills/bootstrap-project/SKILL.md` |
+| `_template_anchor.py` | 非独立模块：bootstrap/adoption 共享 `.template.toml` create/confirm/conflict、regular-file/symlink 校验与原子写；不拥有或重构 template-sync 的 version advance | `bootstrap-project.py` · `adopt-existing-repo.py` |
 | `_agent_surface.py` | 非独立脚本（无 `__main__`）：`bootstrap-project.py`（A4）与 `adopt-existing-repo.py`（B6）共用的 Claude/Codex postflight 渲染函数，避免两套加载清单文案/判定漂移 | `plans/20260712-bootstrap-adoption-proof.zh.md`（D2c） |
 | `sync-codex-adapters.py` | 从 `.claude/agents` / `skills` / `commands` 生成并校验 Codex adapters；write 磁盘专属、与 context 无关；`--check` 按 `--context {source,downstream,auto}` 区分合同（issue #67）：source 断言 tracked generated 集合精确等于 `expected_files()`（#61）；downstream 断言生产 manifest 把每个 expected path 分类为 generated，不要求已 `git add`；auto 按 `.template.toml` 角色锚点判定，锚点是 symlink/无法解析时 fail-closed；missing/stale/unexpected 磁盘检查两种 context 都执行 | `.agent/tool-skill-interface.md` · `scripts/CONTRACT.md`（TS-10） |
 | `bump-template-version.py` | 按 agent 判定的 level 递增 `VERSION`、更 `CHANGELOG.md`、打本地 git tag | `.agent/template-versioning-policy.md` |
@@ -72,7 +74,7 @@ Inbound:
 - `.githooks/pre-commit` 调用 `check-same-commit.py --staged`。
 - `.claude/settings.json` 与 `.codex/rules/default.rules` 把关键脚本列入 allow。
 - `.claude/commands/adopt-existing-repo.md` 与 `.claude/skills/adopt-existing-repo/SKILL.md`
-  调用 adoption 脚本；`lab/evals/adoption/run-adoption-smoke.py` 是它的 27 场景 synthetic fixture，
+  调用 adoption 脚本；`lab/evals/adoption/run-adoption-smoke.py` 是它的 anchor regression + 既有 synthetic fixture，
   同时覆盖 B 的语义归类/安全边界与 C 的结构化 smoke 合同。
 - `.claude/skills/bootstrap-project/SKILL.md` 调用 `bootstrap-project.py`；
   `lab/evals/bootstrap/run-bootstrap-smoke.py` 是它的 synthetic fixture。
@@ -98,6 +100,9 @@ Outbound:
 - `bootstrap-project.py` 与 `adopt-existing-repo.py` 都通过 `importlib`（同 `_load_sibling()`
   helper）加载 `_agent_surface.py` 的 `agent_surface_checklist()`，共用同一份 Claude/Codex
   postflight 渲染逻辑（D2c）。
+- `bootstrap-project.py` 与 `adopt-existing-repo.py` 也通过同一加载模式复用
+  `_template_anchor.py`；它只统一 anchor 的 create/confirm/conflict，`template-sync.py` 的
+  version-advance 原子事务仍保持独立。
 - `lab/infra/launch/expctl.py` 通过 `importlib` 复用 `validate-experiment-state.py` 的
   `load_yaml`（PyYAML 优先 + 受限解析器回退），避免两份 YAML 解析逻辑漂移。
 

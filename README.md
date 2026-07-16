@@ -98,6 +98,7 @@ python scripts/adopt-existing-repo.py /path/to/existing-repo \
   --phase all \
   --policy conservative \
   --project-name <slug> \
+  --origin <owner/repo> \
   --test-command "<original test command>"
 python scripts/check-adoption-integrity.py /path/to/existing-repo
 ```
@@ -109,6 +110,11 @@ root entry 打内置保守四类标签（`template_control_item` / `conservative
 不覆盖、不移动受保护 bytes；冲突文件会保存在 `human/imported/adoption-conflicts/`，原 repo
 root 会收敛到 `lab/code/imported/<slug>/`，proof（含 Claude/Codex 双 agent surface 加载清单）
 写入目标 repo 的 `lab/docs/audits/template-adoption-report.md`。
+
+所有 phase 都要求显式 `--origin <owner/repo>`，不从 remote 或路径猜测。只有无 blocker 的成功
+`normalize` 才会在完成所有 move 后原子创建/确认 `.template.toml`；dry-run、scaffold-only 和
+`--allow-blocked-normalize` 不写锚点。同 origin 的已有锚点保留 version；异源、malformed 或
+symlink 锚点在 move 前 fail-closed。
 
 `prove`/`check-adoption-integrity.py` 的 exit code 只反映 adoption 工具自身的完整性（tracked-byte
 hash 是否一致、是否有未解决的 conflict/受保护路径 blocker）；被迁移项目自身原生测试命令的结果

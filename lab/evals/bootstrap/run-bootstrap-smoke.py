@@ -50,6 +50,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import stat
 import shutil
 import subprocess
 import sys
@@ -125,6 +126,10 @@ def check_idempotency(target: Path) -> int:
     state_json = target / STATE_DIR / "state.json"
     run_log = target / STATE_DIR / "run-log.jsonl"
     report_md = target / REPORT_REL
+    mode_reference = target / ".template-anchor-mode-reference"
+    mode_reference.write_text("normal write mode reference\n", encoding="utf-8")
+    expected_anchor_mode = stat.S_IMODE(mode_reference.stat().st_mode)
+    mode_reference.unlink()
 
     first = self_bootstrap(target, "--origin", ORIGIN)
     if first.returncode != 0:
@@ -133,6 +138,12 @@ def check_idempotency(target: Path) -> int:
         return fail("first run should report .template.toml: created", first)
     if not (target / ".template.toml").exists():
         return fail(".template.toml missing after first run")
+    anchor_mode = stat.S_IMODE((target / ".template.toml").stat().st_mode)
+    if anchor_mode != expected_anchor_mode:
+        return fail(
+            ".template.toml creation mode must match a normal same-directory write "
+            f"(expected {expected_anchor_mode:04o}, got {anchor_mode:04o})"
+        )
     for p in (state_json, run_log, report_md):
         if not p.exists():
             return fail(f"missing {p.relative_to(target)} after first run")
@@ -164,6 +175,7 @@ def check_idempotency(target: Path) -> int:
     row = json.loads(log_after[1])
     if row.get("content_changed") is not False or row.get("template_toml_status") != "confirmed":
         return fail(f"second run-log row should audit a confirming run, got {row}", second)
+    print(f"[bootstrap-smoke] anchor-create mode={expected_anchor_mode:04o}")
     return 0
 
 
@@ -175,15 +187,22 @@ def check_origin_conflict(target: Path) -> int:
     if ORIGIN not in template_toml.read_text(encoding="utf-8"):
         return fail("origin mismatch run mutated .template.toml without --force")
 
+    template_toml.chmod(0o640)
+    expected_anchor_mode = stat.S_IMODE(template_toml.stat().st_mode)
     forced = self_bootstrap(target, "--origin", OTHER_ORIGIN, "--force")
     if forced.returncode != 0:
         return fail("forced origin override should succeed", forced)
     if "overwritten" not in forced.stdout:
         return fail("forced run should report .template.toml: overwritten", forced)
+    if stat.S_IMODE(template_toml.stat().st_mode) != expected_anchor_mode:
+        return fail("forced overwrite must preserve the existing .template.toml mode")
 
     restore = self_bootstrap(target, "--origin", ORIGIN, "--force")
     if restore.returncode != 0:
         return fail("restoring original origin with --force should succeed", restore)
+    if stat.S_IMODE(template_toml.stat().st_mode) != expected_anchor_mode:
+        return fail("restoring a forced origin override must preserve the existing .template.toml mode")
+    print(f"[bootstrap-smoke] anchor-forced-overwrite mode={expected_anchor_mode:04o}")
     return 0
 
 
