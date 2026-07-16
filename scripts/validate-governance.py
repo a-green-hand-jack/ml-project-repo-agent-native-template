@@ -207,7 +207,7 @@ def check_evidence_chain() -> None:
         strongest = max((grade_rank.get(e.get("grade"), 0) for e in linked), default=0)
         if status in ("partial", "supported") and not linked and not is_legacy_claim:
             errors.append(f"overclaim：claim {cid} status={status} 但无 evidence 支撑")
-        if status == "supported" and strongest < grade_rank["metric"]:
+        if status == "supported" and strongest < grade_rank["metric"] and not is_legacy_claim:
             errors.append(f"overclaim：claim {cid} status=supported 但最强证据低于 metric")
         if c.get("verified_by_fresh_reviewer") is True:
             paper = [e for e in linked if e.get("grade") == "paper-claim"

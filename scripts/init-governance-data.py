@@ -690,6 +690,103 @@ def _self_test() -> int:
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
+    # MAJOR-1 回归（fresh review）：validate-governance.py::check_evidence_chain() 的
+    # 「status=supported 但最强证据低于 metric」检查曾漏了 legacy 豁免（只有「无 evidence
+    # 支撑」那条有豁免）——supported claim 的全部 evidence 都降级为 legacy 时，
+    # init/check-provenance-chain/validate-governance 三方判定必须一致（都放行）；
+    # 缺 legacy 标记的同形态数据必须仍被判 overclaim FAIL（证明豁免没有放松正常判定）。
+    tmp2 = Path(tempfile.mkdtemp(prefix="init-governance-data-selftest-supported-"))
+    try:
+        for name in (
+            "check-doc-lifecycle.py",
+            "validate-experiment-state.py",
+            "check-provenance-chain.py",
+            "validate-governance.py",
+        ):
+            (tmp2 / "scripts").mkdir(exist_ok=True, parents=True)
+            (tmp2 / "scripts" / name).write_text(
+                (REPO / "scripts" / name).read_text(encoding="utf-8"), encoding="utf-8"
+            )
+        (tmp2 / "lab" / "research").mkdir(parents=True)
+        (tmp2 / "lab" / "artifacts").mkdir(parents=True)
+        (tmp2 / "lab" / "models").mkdir(parents=True)
+        (tmp2 / "lab" / "code" / "experiments").mkdir(parents=True)
+        (tmp2 / "plans").mkdir(parents=True)
+        (tmp2 / "memory").mkdir(parents=True)
+
+        (tmp2 / "lab/research/evidence.yaml").write_text(
+            "evidence:\n"
+            "  - id: ev-supported-legacy\n"
+            "    supports_claim: claim-supported-legacy\n"
+            "    grade: metric\n"
+            "    commit: \"abc123\"\n"
+            "    run_id: null\n"
+            "    config: null\n",
+            encoding="utf-8",
+        )
+        (tmp2 / "lab/research/claims.yaml").write_text(
+            "claims:\n"
+            "  - id: claim-supported-legacy\n"
+            "    title: \"supported legacy claim\"\n"
+            "    status: supported\n"
+            "    evidence: [ev-supported-legacy]\n",
+            encoding="utf-8",
+        )
+
+        run(tmp2)
+
+        ev_text = (tmp2 / "lab/research/evidence.yaml").read_text(encoding="utf-8")
+        claim_text = (tmp2 / "lab/research/claims.yaml").read_text(encoding="utf-8")
+        expect("governance_status: legacy_unverified" in ev_text,
+               "MAJOR-1 回归：evidence 应被标记 legacy")
+        expect("governance_status: legacy_unverified" in claim_text,
+               "MAJOR-1 回归：supported claim 应被标记 legacy（全部 evidence 已降级）")
+
+        pc = _load_module("_igd_test_pc_supported", tmp2, "scripts/check-provenance-chain.py")
+        rep = pc.Report()
+        pc.run_checks(tmp2, rep)
+        expect(
+            not rep.fails,
+            f"MAJOR-1 回归：check-provenance-chain 对 legacy supported claim 应 0 fail，得到：{rep.fails}",
+        )
+
+        gov = _load_module("_igd_test_gov_supported", tmp2, "scripts/validate-governance.py")
+        gov.check_evidence_chain()
+        expect(
+            not any("claim-supported-legacy" in e for e in gov.errors),
+            f"MAJOR-1 回归：validate-governance 对 legacy supported claim 应 0 error，得到：{gov.errors}",
+        )
+
+        # 负例：同形态但**无** legacy 标记——evidence 完整齐全但 grade=log（< metric），
+        # 必须仍被 validate-governance 判 overclaim FAIL（证明豁免没有放松正常判定）。
+        (tmp2 / "lab/research/evidence.yaml").write_text(
+            "evidence:\n"
+            "  - id: ev-supported-weak\n"
+            "    supports_claim: claim-supported-weak\n"
+            "    grade: log\n"
+            "    command: \"some command\"\n"
+            "    commit: \"abc123\"\n"
+            "    run_id: \"run-x\"\n"
+            "    config: \"cfg.yaml\"\n",
+            encoding="utf-8",
+        )
+        (tmp2 / "lab/research/claims.yaml").write_text(
+            "claims:\n"
+            "  - id: claim-supported-weak\n"
+            "    title: \"supported weak-grade claim\"\n"
+            "    status: supported\n"
+            "    evidence: [ev-supported-weak]\n",
+            encoding="utf-8",
+        )
+        gov2 = _load_module("_igd_test_gov_weak", tmp2, "scripts/validate-governance.py")
+        gov2.check_evidence_chain()
+        expect(
+            any("claim-supported-weak" in e and "最强证据低于 metric" in e for e in gov2.errors),
+            f"MAJOR-1 负例：无 legacy 标记的 supported+弱证据 claim 仍应被判 overclaim FAIL，得到：{gov2.errors}",
+        )
+    finally:
+        shutil.rmtree(tmp2, ignore_errors=True)
+
     total_msg = "OK" if not failed else f"FAIL（{failed} 处）"
     print(f"[init-governance-data --self-test] {total_msg}")
     return 1 if failed else 0
