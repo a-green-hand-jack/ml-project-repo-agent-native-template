@@ -10,6 +10,7 @@ related_files:
   - check-provenance-chain.py
   - validate-governance.py
   - validate-experiment-state.py
+  - init-governance-data.py
   - adopt-existing-repo.py
   - check-adoption-integrity.py
   - bootstrap-project.py
@@ -47,11 +48,12 @@ Codex adapter 同步脚本把 `.claude/` canonical 能力生成到 `.codex/` 与
 | --- | --- | --- |
 | `check-agent-harness.py` | 结构/必需文件/根污染/四件套/能力索引/settings/DESIGN 清单 校验 | `.agent/repo-editing-guardrails.md` · `repo-documentation-topology.md` |
 | `check-anatomy-drift.py` | ANATOMY related_files 与 line citation 漂移 + 120 行硬上限 | `.agent/anatomy-protocol.md` |
-| `validate-governance.py` | 聚合 harness/anatomy/doc-lifecycle/outcome-ledger/实验状态/provenance-chain/capability-catalog 七个子检查 + gitignore/YAML/tracked-bytes + 证据链一致性(overclaim 拦截) | `.agent/action-boundary.md` · `artifact-policy.md` · `principles.md` |
+| `validate-governance.py` | 聚合 harness/anatomy/doc-lifecycle/outcome-ledger/实验状态/provenance-chain/capability-catalog 七个子检查 + gitignore/YAML/tracked-bytes + 证据链一致性(overclaim 拦截，含 `governance_status=legacy_unverified` 存量豁免，issue #63 D1，与另两个子检查同一套语义) | `.agent/action-boundary.md` · `artifact-policy.md` · `principles.md` |
 | `check-capability-catalog.py` | 声明式能力目录 `.agent/capability-catalog.toml` ↔ 真实 `.claude/` 能力面 ↔ 生成 adapter 的三向一致：登记齐全(missing)/无幽灵条目(unexpected)/adapter parity + schema(profile=research, chassis-spec pin/compatibility)；`--self-test` 跑内嵌对抗 fixture | `.agent/tool-skill-interface.md` · `.agent/capability-catalog.toml` · issue #28 |
-| `check-doc-lifecycle.py` | brief/plan/review/decision 生命周期：唯一顶部状态锚点↔注册表一致、引用完整、活跃 plan 的 issue/Git branch/worktree 关联、进阶态证据、过期 approval；validator 在 commit 粒度权威校验跨文件一致性，`pretooluse_reason()` 只拦单次写入局部不完整并对常见 Bash 删除模式尽力兜底；`--self-test` 跑内嵌对抗 fixtures | `plans/ANATOMY.md` · `plans/20260712-plan-lifecycle-state.zh.md` |
-| `validate-experiment-state.py` | 实验状态机（planned→approved→running→done/failed→superseded，经 status_history 逐步校验）+ approved 必填字段 + alert command/workdir、批准审计与 provenance/consume/execution/resolved 不变量 + done 闭环（run summary 路径/regular-file 安全）。PyYAML 可选（内置受限 block-style 解析器回退）；`--self-test` 内嵌对抗 fixture | `plans/20260712-experiment-control-plane.zh.md` · `.agent/human-gates.md` |
-| `check-provenance-chain.py` | provenance 链：run→artifact→evidence→claim→deliverable；双向 claim/evidence 归属边、行级 marker 覆盖、run 闭环、checksum（sha256）、active-only gate artifact、安全 repo-relative regular-file path、dataset split、ID 唯一性；active/submitted/passed 状态 fail-closed，`--self-test` 跑内嵌对抗 fixture | `.agent/artifact-policy.md` |
+| `check-doc-lifecycle.py` | brief/plan/review/decision 生命周期：唯一顶部状态锚点↔注册表一致、引用完整、活跃 plan 的 issue/Git branch/worktree 关联、进阶态证据、过期 approval；validator 在 commit 粒度权威校验跨文件一致性，`pretooluse_reason()` 只拦单次写入局部不完整并对常见 Bash 删除模式尽力兜底；`status: draft` 天然是 pre-governance 存量豁免档位（issue #63 D1，不改代码，`init-governance-data.py` 复用）；`--self-test` 跑内嵌对抗 fixtures | `plans/ANATOMY.md` · `plans/20260712-plan-lifecycle-state.zh.md` |
+| `validate-experiment-state.py` | 实验状态机（planned→approved→running→done/failed→superseded，经 status_history 逐步校验）+ approved 必填字段 + alert command/workdir、批准审计与 provenance/consume/execution/resolved 不变量 + done 闭环（run summary 路径/regular-file 安全）+ `governance_status=legacy_unverified` 存量豁免（issue #63 D1：跳过 history/approval/closure 三项，不豁免 id/status/alerts）。PyYAML 可选（内置受限 block-style 解析器回退）；`--self-test` 内嵌对抗 fixture | `plans/20260712-experiment-control-plane.zh.md` · `.agent/human-gates.md` |
+| `check-provenance-chain.py` | provenance 链：run→artifact→evidence→claim→deliverable；双向 claim/evidence 归属边、行级 marker 覆盖、run 闭环、checksum（sha256）、active-only gate artifact、安全 repo-relative regular-file path、dataset split、ID 唯一性；active/submitted/passed 状态 fail-closed；`governance_status=legacy_unverified` 三态豁免（evidence 缺 command/config/run_id、claim 无 eligible evidence、artifact-index active 缺 location，issue #63 D1，legacy 证据不进 valid_ids 也不算 FAIL），`--self-test` 跑内嵌对抗 fixture | `.agent/artifact-policy.md` |
+| `init-governance-data.py` | 幂等补齐三个 G1 validator 要求的下游数据层结构骨架：`memory/doc-lifecycle.yaml` 注册表 + 状态锚点回填（status=draft）、`schema_version`、`governance_status=legacy_unverified` 存量标记；用「文件是否已有 schema_version/注册表是否已存在」做「是否已 init 过」的信号，之后新出现的 FAIL 只 flag 不自动标记，不放松新数据判定；`--dry-run` 供 `template-sync.py` 收尾阶段预览；`--self-test` 内嵌对抗 fixture（含幂等 + 负例） | issue #63 D1 |
 | `check-same-commit.py` | same-commit rule：结构改动(A/D/R)未同变更集更新对应 ANATOMY → 拦。diff 驱动，不进 governance；由 `.githooks/pre-commit` + CI 调用 | `.agent/anatomy-protocol.md` |
 | `check-outcome-ledger-schema.py` | outcome ledger/fixture schema、decision↔outcome 生命周期、完整具体路线证据隔离、正样本地板/零样本与 stale fallback、replay 确定性、credential/写边界防线；经 importlib 复用 skill 内 `outcome_ledger.py` | `.agent/model-routing-policy.md` · `plans/20260712-outcome-aware-routing.zh.md` |
 | `adopt-existing-repo.py` | 分 phase 迁移已有 Git repo：所有 phase 显式 `--origin`；discover（语义归类，B1-B3）/baseline/scaffold/normalize（消费归类计划，B4），仅无 blocker 的 normalize 末尾经 `_template_anchor.py` 原子 create/confirm `.template.toml`；prove（含双 agent surface 报告，B6） | `plans/20260709-adopt-existing-repo.zh.md` · `plans/20260712-bootstrap-adoption-proof.zh.md` · `.claude/skills/adopt-existing-repo/SKILL.md` |
@@ -61,7 +63,7 @@ Codex adapter 同步脚本把 `.claude/` canonical 能力生成到 `.codex/` 与
 | `_agent_surface.py` | 非独立脚本（无 `__main__`）：`bootstrap-project.py`（A4）与 `adopt-existing-repo.py`（B6）共用的 Claude/Codex postflight 渲染函数，避免两套加载清单文案/判定漂移 | `plans/20260712-bootstrap-adoption-proof.zh.md`（D2c） |
 | `sync-codex-adapters.py` | 从 `.claude/agents` / `skills` / `commands` 生成并校验 Codex adapters；write 磁盘专属、与 context 无关；`--check` 按 `--context {source,downstream,auto}` 区分合同（issue #67）：source 断言 tracked generated 集合精确等于 `expected_files()`（#61）；downstream 断言生产 manifest 把每个 expected path 分类为 generated，不要求已 `git add`；auto 按 `.template.toml` 角色锚点判定，锚点是 symlink/无法解析时 fail-closed；missing/stale/unexpected 磁盘检查两种 context 都执行 | `.agent/tool-skill-interface.md` · `scripts/CONTRACT.md`（TS-10） |
 | `bump-template-version.py` | 按 agent 判定的 level 递增 `VERSION`、更 `CHANGELOG.md`、打本地 git tag | `.agent/template-versioning-policy.md` |
-| `template-sync.py` | 下游按 `template-manifest.toml` 追平上游框架层，分阶段事务：preflight/plan/apply/verify/commit-version | 可观察行为承诺的唯一规范正文 owner 是 `scripts/CONTRACT.md`（component `template-sync`）；本行只结构性描述+反向链接，不复制承诺正文 · `template-manifest.toml` |
+| `template-sync.py` | 下游按 `template-manifest.toml` 追平上游框架层，分阶段事务：preflight/plan/apply/verify/commit-version；receipt 新增 `governance_data_gap`（新落地 `scripts/check-*.py`/`scripts/validate-*.py` + `init-governance-data.py --dry-run` 缺口预览 + 建议命令，issue #63 D1，只报告不自动 init，不改既有字段语义） | 可观察行为承诺的唯一规范正文 owner 是 `scripts/CONTRACT.md`（component `template-sync`）；本行只结构性描述+反向链接，不复制承诺正文 · `template-manifest.toml` |
 | `agent-state.py` | 多 agent 控制面状态文件（`memory/agents/<name>.yaml`）写侧 + 格式唯一 owner（解析/staleness/root 锚定 helpers） | `.agent/multi-agent-control-plane.md` |
 | `agent-status.py` | 只读 list/status：roster + 状态 yaml + 可选 `paseo ls` presence，30min TTL 派生 stale | `.agent/multi-agent-control-plane.md` |
 | `agent-mailbox.py` | agent 间消息/handoff 落盘（inbox/outbox 对、decision/handoff 强制 ref、ack 转移 ownership） | `.agent/multi-agent-control-plane.md` |
@@ -80,7 +82,9 @@ Inbound:
   `lab/evals/bootstrap/run-bootstrap-smoke.py` 是它的 synthetic fixture。
 - `lab/evals/template-sync/run-template-sync-smoke.py` 是 `template-sync.py` 的故障注入 fixture
   （generator fail / validator fail / 原子 version-write fail / 未分类/无哨兵 warning / MAJOR gate /
-  成功幂等重跑；五类路径正负例）；它把本脚本复制进合成下游、用 stub 生成器/validator 端到端驱动。
+  成功幂等重跑 / `governance_data_gap` 首次落地+已存在负例；五类路径正负例）；它把本脚本复制进合成
+  下游、用 stub 生成器/validator（`governance_data_gap` 场景额外复制真实三个 G1 validator +
+  `init-governance-data.py`）端到端驱动。
 - `.codex/agents/*.toml` 与 `.agents/skills/*/SKILL.md` 由 `sync-codex-adapters.py` 生成；`template-manifest.toml` 的 generated 分类不得扩及 `.codex` config/rules/navigation 或 `.agents` navigation。
 
 Outbound:

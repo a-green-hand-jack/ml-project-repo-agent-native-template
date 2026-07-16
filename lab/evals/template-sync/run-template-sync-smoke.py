@@ -34,6 +34,12 @@ Scenarios (each asserts the P0 transactional contract of issue #35):
   block -> receipt result=partial (never pass) with explicit warnings; version
   still advances because the validator passed, but the honest signal is
   partial, not pass;
+- governance_data_gap: real check-doc-lifecycle.py / validate-experiment-state.py /
+  check-provenance-chain.py / init-governance-data.py newly landing (action=create)
+  makes the receipt report new_validators + an init-governance-data.py --dry-run gap
+  preview + a suggested command, without ever touching downstream data files; a
+  second sync where those files already exist (action=unchanged) reports no gap
+  (issue #63 D1);
 - root_contract_framework: root CONTRACT.md is bound to the real production
   template-manifest.toml; dry-run does not create it, apply creates a missing
   copy and overwrites a stale copy, receipts keep it out of unclassified, and
@@ -169,6 +175,35 @@ kind = "framework"
 SENT_BEGIN = "<!-- template:begin -->"
 SENT_END = "<!-- template:end -->"
 
+# issue #63 D1: template-sync 收尾阶段的 governance_data_gap receipt 字段。用真实的
+# check-doc-lifecycle.py / validate-experiment-state.py / check-provenance-chain.py /
+# init-governance-data.py（而非 stub），因为这个场景直接测的是它们之间的接线，不是
+# generator/validator 本身的通过与否（那两者继续用 stub 保持确定性）。
+GOVERNANCE_GAP_MANIFEST = """\
+[[rule]]
+glob = ".template.toml"
+kind = "project"
+[[rule]]
+glob = "VERSION"
+kind = "framework"
+[[rule]]
+glob = "template-manifest.toml"
+kind = "framework"
+[[rule]]
+glob = "scripts/**"
+kind = "framework"
+[[rule]]
+glob = "gen/**"
+kind = "generated"
+"""
+
+GOVERNANCE_VALIDATOR_NAMES = (
+    "check-doc-lifecycle.py",
+    "validate-experiment-state.py",
+    "check-provenance-chain.py",
+    "init-governance-data.py",
+)
+
 
 def fail(label: str, proc: subprocess.CompletedProcess[str] | None = None) -> int:
     print(f"[template-sync-smoke] FAIL: {label}")
@@ -246,6 +281,89 @@ def build_adapter_ownership_downstream(root: Path) -> None:
     write(root / ".codex" / "agents" / "demo.toml", "stale generated agent\n")
     write(root / ".agents" / "skills" / "demo-skill" / "SKILL.md", "stale generated skill\n")
     write(root / "scripts" / "validate-governance.py", VAL_OK)
+
+
+def build_governance_gap_upstream(root: Path) -> None:
+    (root / "scripts").mkdir(parents=True, exist_ok=True)
+    write(root / "VERSION", "v1.1.0\n")
+    write(root / "template-manifest.toml", GOVERNANCE_GAP_MANIFEST)
+    shutil.copy2(SCRIPT, root / "scripts" / "template-sync.py")
+    for name in GOVERNANCE_VALIDATOR_NAMES:
+        shutil.copy2(REPO / "scripts" / name, root / "scripts" / name)
+    write(root / "scripts" / "sync-codex-adapters.py", GEN_OK)
+    write(root / "scripts" / "validate-governance.py", VAL_OK)
+    write(root / "gen" / "adapter.txt", GEN_CONTENT)
+
+
+def build_governance_gap_downstream(root: Path) -> None:
+    (root / "scripts").mkdir(parents=True, exist_ok=True)
+    shutil.copy2(SCRIPT, root / "scripts" / "template-sync.py")
+    write(root / "scripts" / "sync-codex-adapters.py", GEN_OK)
+    write(root / "scripts" / "validate-governance.py", VAL_OK)
+    write(root / ".template.toml", '[template]\norigin = "acme/downstream"\nversion = "v1.0.0"\n')
+    # 预置一条真实的 pre-governance 存量数据缺口：run status=done 但缺 status_history/
+    # approval 字段——这些新 validator 落地前它们从未被要求过。
+    write(
+        root / "lab" / "research" / "experiment-ledger.yaml",
+        "experiments:\n  - id: run-legacy\n    status: done\n    commit: \"abc1234\"\n",
+    )
+
+
+def check_governance_data_gap_report(tmp: Path) -> int:
+    """issue #63 D1: template-sync 新落地门禁 validator 时，receipt 必须报告新增门禁
+    清单 + 数据层 gap 预览计数 + 建议命令，且绝不自动执行 init（数据文件不得被动过）。
+    validator 已存在（非首次落地）时不应再报 governance_data_gap。
+    """
+    up = tmp / "up-gov-gap"
+    down = tmp / "down-gov-gap"
+    receipt_f = tmp / "receipt-gov-gap.json"
+    build_governance_gap_upstream(up)
+    build_governance_gap_downstream(down)
+
+    proc = subprocess.run(
+        [sys.executable, "scripts/template-sync.py", "--from", str(up), "--receipt", str(receipt_f)],
+        cwd=down, text=True, capture_output=True,
+    )
+    if not receipt_f.exists():
+        return fail("首次落地 governance validator：receipt 未落盘", proc)
+    data = json.loads(receipt_f.read_text(encoding="utf-8"))
+    gap = data.get("governance_data_gap")
+    if not gap:
+        return fail(f"首次落地 3 个 G1 validator 应产出 governance_data_gap，得到 {gap}", proc)
+    # newly_landed_validators 只认 scripts/check-*.py / scripts/validate-*.py —— 命中三个
+    # G1 门禁本身；init-governance-data.py 是补救脚本不是 gate，故意不在这个集合里。
+    expected_new = {
+        f"scripts/{n}" for n in GOVERNANCE_VALIDATOR_NAMES if n != "init-governance-data.py"
+    }
+    if set(gap.get("new_validators", [])) != expected_new:
+        return fail(f"new_validators 应恰为 {expected_new}，得到 {gap.get('new_validators')}", proc)
+    inner = gap.get("gap")
+    if not inner or inner.get("error"):
+        return fail(f"gap 预览应成功产出诚实计数，得到：{inner}", proc)
+    if inner.get("changed", 0) < 1:
+        return fail(f"应检测到 ≥1 处缺口（run-legacy 缺 status_history/approval），得到 {inner}", proc)
+    if not any("run-legacy" in k for k in inner.get("changed_keys", [])):
+        return fail(f"缺口应命中 run-legacy，changed_keys={inner.get('changed_keys')}", proc)
+    if gap.get("suggested_command") != "python scripts/init-governance-data.py":
+        return fail(f"suggested_command 不对：{gap.get('suggested_command')}", proc)
+    ledger_after = (down / "lab" / "research" / "experiment-ledger.yaml").read_text(encoding="utf-8")
+    if "governance_status" in ledger_after:
+        return fail("template-sync 不该自动执行 init——数据文件被静默改动了", proc)
+
+    # 负例：validator 已存在（非首次落地，本次 action=unchanged）——不应再报 gap。
+    for name in GOVERNANCE_VALIDATOR_NAMES:
+        shutil.copy2(up / "scripts" / name, down / "scripts" / name)
+    receipt_f2 = tmp / "receipt-gov-gap-2.json"
+    proc2 = subprocess.run(
+        [sys.executable, "scripts/template-sync.py", "--from", str(up), "--receipt", str(receipt_f2)],
+        cwd=down, text=True, capture_output=True,
+    )
+    data2 = json.loads(receipt_f2.read_text(encoding="utf-8"))
+    if data2.get("governance_data_gap") is not None:
+        return fail(f"validator 已存在时不该再报 governance_data_gap，得到 {data2.get('governance_data_gap')}", proc2)
+
+    print("[template-sync-smoke] governance_data_gap OK")
+    return 0
 
 
 def check_adapter_ownership_exact_set(tmp: Path) -> int:
@@ -1041,6 +1159,7 @@ def main() -> int:
             check_generated_wrong_bytes_content_mismatch,
             check_generated_stale_rogue_unexpected,
             check_adapter_ownership_exact_set,
+            check_governance_data_gap_report,
             check_interrupt_unknown,
             check_commit_interrupt,
             check_timeout_unknown,

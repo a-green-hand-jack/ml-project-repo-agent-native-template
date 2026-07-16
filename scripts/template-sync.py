@@ -23,6 +23,12 @@
 不静默伪装成功；超时/中断记为 unknown，绝不显示为 pass。版本不前进 + 精确 partial
 receipt + 可重跑，取代危险的自动 rollback。
 
+`governance_data_gap`（issue #63 D1，新增字段，不改既有字段语义）：本次 sync 新创建
+（下游此前不存在）的 `scripts/check-*.py` / `scripts/validate-*.py` 门禁 validator 清单 +
+`scripts/init-governance-data.py --dry-run` 的诚实缺口计数（无新落地 validator 时为
+`null`）。template-sync **只报告，不自动执行 init**——数据层初始化是显式、独立、可审计
+的人工/agent 动作。
+
 无第三方硬依赖（tomllib 读；.template.toml 手写）。退出码 0 = 成功（pass/partial），
 非 0 = 失败或需人工介入（fail/unknown/MAJOR-STOP）。
 用法：
@@ -36,6 +42,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -45,6 +52,8 @@ import tempfile
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+
+GOVERNANCE_VALIDATOR_GLOBS = ("scripts/check-*.py", "scripts/validate-*.py")
 
 DOWNSTREAM = Path(__file__).resolve().parent.parent
 SEMVER_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
@@ -334,6 +343,47 @@ def build_manifest(plan: list[PlanItem], applied: ApplyResult, upstream: Path,
     }
 
 
+def newly_landed_validators(plan: list[PlanItem]) -> list[str]:
+    """本次 sync 新创建（下游此前不存在）的门禁 validator 脚本（issue #63 D1）。
+
+    template-sync 只落地 validator 本身，不迁移它要求的数据层——追平后下游可能从全绿
+    掉到大面积 FAIL。receipt 必须报告这个语义缺口，不能静默（见 issue #63 复现记录）。
+    """
+    out = []
+    for pi in plan:
+        if pi.kind != "framework" or pi.action != "create":
+            continue
+        if any(match_glob(pi.path, g) for g in GOVERNANCE_VALIDATOR_GLOBS):
+            out.append(pi.path)
+    return sorted(out)
+
+
+def governance_data_gap_report(downstream: Path) -> dict | None:
+    """跑 scripts/init-governance-data.py --dry-run 得到的诚实缺口计数（不落盘，纯预览）。
+
+    只在 apply 已把 init-governance-data.py 落到下游磁盘后调用才有意义（dry-run sync
+    模式下文件还没落地，调用方需跳过）。init-governance-data.py 不存在（上游尚未发布
+    这个版本）时返回 None，不是 error。
+    """
+    init_script = downstream / "scripts" / "init-governance-data.py"
+    if not init_script.is_file():
+        return None
+    try:
+        spec = importlib.util.spec_from_file_location("_ts_init_governance_data", init_script)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        counts = mod.run(downstream, dry_run=True)
+    except Exception as e:  # noqa: BLE001  best-effort：gap 预览失败不影响 sync 本身结果
+        return {"error": str(e)}
+    return {
+        "changed": len(counts.changed),
+        "skipped": len(counts.skipped),
+        "flagged": len(counts.flagged),
+        "changed_keys": [k for k, _m in counts.changed],
+        "flagged_keys": [k for k, _m in counts.flagged],
+    }
+
+
 def classification_summary(plan: list[PlanItem]) -> dict:
     out: dict[str, list[str]] = {
         "framework": [], "generated": [], "project": [], "scaffold": [], "merge": [],
@@ -582,12 +632,24 @@ def main() -> int:
         "warnings": ([f"merge:{w}" for w in warn_merge]
                      + [f"unclassified:{w}" for w in warn_unclassified]),
         "failure": None,
+        "governance_data_gap": None,
     }
 
     # ── dry-run 早退：不写任何文件、不推进版本、不验证 ──────────────────────
     if args.dry_run:
         receipt["stages"]["apply"] = "planned"
         receipt["result"] = "dry-run"
+        new_validators = newly_landed_validators(plan)
+        if new_validators:
+            receipt["governance_data_gap"] = {
+                "new_validators": new_validators,
+                "gap": None,  # dry-run 未 apply，文件还没落地，无法预览缺口
+                "suggested_command": "python scripts/init-governance-data.py",
+                "note": "dry-run 未落地文件，数据层 gap 需在真实 sync 后用"
+                        "`python scripts/init-governance-data.py --dry-run` 预览",
+            }
+            print(f"\n提醒：本次 sync 会新落地门禁 validator：{new_validators}；"
+                  "真实 sync 后建议跑 python scripts/init-governance-data.py --dry-run 预览数据层缺口。")
         print("\n[dry-run] 未落地任何文件、未推进版本、未验证。")
         emit_receipt(receipt, args)
         return 0
@@ -610,6 +672,24 @@ def main() -> int:
         print(f"ERROR Codex 适配重建 {gen_status}（{gen_detail}）：.codex/.agents 可能 stale，"
               "本次不推进版本。")
     after_gen = snapshot_tree(DOWNSTREAM, excluded)
+
+    # ── 新落地门禁 validator + 数据层 gap 报告（issue #63 D1：不再静默，不自动执行 init）──
+    new_validators = newly_landed_validators(plan)
+    if new_validators:
+        gap = governance_data_gap_report(DOWNSTREAM)
+        receipt["governance_data_gap"] = {
+            "new_validators": new_validators,
+            "gap": gap,
+            "suggested_command": "python scripts/init-governance-data.py",
+        }
+        if gap and not gap.get("error") and gap.get("changed"):
+            print(
+                f"\n提醒：本次 sync 新落地门禁 validator {new_validators}；"
+                f"数据层检测到 {gap['changed']} 处缺口（结构骨架未初始化，不自动修复）。"
+                "建议执行：python scripts/init-governance-data.py"
+            )
+        elif gap and gap.get("error"):
+            print(f"\nWARN 数据层 gap 检测本身失败（不影响本次 sync 结果）：{gap['error']}")
 
     apply_changed = diff_snap(before_apply, after_apply)
     generated_outputs = diff_snap(after_apply, after_gen)

@@ -5,7 +5,10 @@
 1. .gitignore 保护危险路径（data/runs/models bytes、checkpoints、wandb、private、.env）。
 2. lab/{research,artifacts,data,models}/*.yaml 可解析（有 PyYAML 时深检，否则做轻量结构检查）。
 3. 大 bytes 未被误加进 Git（有 git 时检查 tracked 文件不含受保护 bytes 路径）。
-4. 证据链一致：claims↔evidence 引用可解析，且 claim 强度 ≤ 最强证据（overclaim 拦截）。
+4. 证据链一致：claims↔evidence 引用可解析，且 claim 强度 ≤ 最强证据（overclaim 拦截）；
+   显式登记 governance_status=legacy_unverified 的 pre-governance 存量 evidence/claim
+   （issue #63 D1，与 check-provenance-chain.py 同一套语义）不因缺 run_id/config 等
+   字段被判占位/不完整，但也不贡献 claim 强度。
 5. 发布闸门 / 回归矩阵一致：release-gates.yaml 与 regression-matrix.yaml 的枚举字段合法，
    且一旦离开占位默认状态（gate_status/last_status 不再是 open/unknown），其 claim 引用
    必须指向 claims.yaml 中真实存在的 claim（防止「已判定放行/已判定回归通过」却引用空主张）。
@@ -40,6 +43,25 @@ PROTECTED_GITIGNORE_TOKENS = [
 
 errors: list[str] = []
 warnings: list[str] = []
+
+GOVERNANCE_LEGACY = "legacy_unverified"  # pre-governance 存量豁免（issue #63 D1）
+
+
+def _check_legacy_marker(e: dict, ident: str) -> bool:
+    """与 check-provenance-chain.py 的 governance_status 标记同一套语义（issue #63 D1）：
+    显式 governance_status=legacy_unverified + 非占位 governance_note 才算合法 legacy；
+    标记非法/缺 note 时记错误且不换来豁免，仍按原有严格判定处理。"""
+    gs = e.get("governance_status")
+    if gs is None:
+        return False
+    if gs != GOVERNANCE_LEGACY:
+        errors.append(f"{ident}：governance_status 非法：{gs!r}（合法值仅 {GOVERNANCE_LEGACY}）")
+        return False
+    note = e.get("governance_note")
+    if not isinstance(note, str) or not note.strip() or _is_placeholder(note):
+        errors.append(f"{ident}：governance_status={GOVERNANCE_LEGACY} 但缺非占位 governance_note")
+        return False
+    return True
 
 
 def run_subcheck(script: str, strict: bool) -> None:
@@ -151,10 +173,18 @@ def check_evidence_chain() -> None:
         if isinstance(e, dict) and e.get("supports_claim") not in claim_ids:
             errors.append(f"evidence {e.get('id')} 的 supports_claim 指向未知 claim：{e.get('supports_claim')}")
 
+    # legacy evidence（issue #63 D1）：归属边仍要求成立，但不因 run_id/config 等缺失被判
+    # 「占位/不完整」，也不贡献 claim 强度——与 check-provenance-chain.py 的三态判定一致。
+    legacy_ev_ids = {
+        e.get("id") for e in evlist
+        if isinstance(e, dict) and _check_legacy_marker(e, f"evidence {e.get('id')}")
+    }
+
     for c in claims:
         if not isinstance(c, dict):
             continue
         cid, status = c.get("id"), c.get("status")
+        is_legacy_claim = _check_legacy_marker(c, f"claim {cid}")
         refs = c.get("evidence") or []
         linked = []
         for r in refs:
@@ -162,18 +192,20 @@ def check_evidence_chain() -> None:
                 errors.append(f"claim {cid} 引用未知 evidence：{r}")
                 continue
             evidence = ev_by_id[r]
-            if not evidence_complete(evidence):
-                errors.append(f"claim {cid} 引用占位/不完整 evidence：{r}")
-                continue
             if evidence.get("supports_claim") != cid:
                 errors.append(
                     f"claim {cid} 引用 evidence {r}，但 supports_claim="
                     f"{evidence.get('supports_claim')!r}（归属边不匹配）"
                 )
                 continue
+            if r in legacy_ev_ids:
+                continue  # legacy：归属边有效，但不贡献 claim 强度，也不算「占位/不完整」
+            if not evidence_complete(evidence):
+                errors.append(f"claim {cid} 引用占位/不完整 evidence：{r}")
+                continue
             linked.append(evidence)
         strongest = max((grade_rank.get(e.get("grade"), 0) for e in linked), default=0)
-        if status in ("partial", "supported") and not linked:
+        if status in ("partial", "supported") and not linked and not is_legacy_claim:
             errors.append(f"overclaim：claim {cid} status={status} 但无 evidence 支撑")
         if status == "supported" and strongest < grade_rank["metric"]:
             errors.append(f"overclaim：claim {cid} status=supported 但最强证据低于 metric")
