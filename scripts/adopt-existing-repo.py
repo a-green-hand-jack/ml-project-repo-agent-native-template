@@ -1564,7 +1564,12 @@ def run_sync_codex_check(target: Path) -> dict[str, Any]:
     script = target / "scripts" / "sync-codex-adapters.py"
     if not script.exists():
         return {"status": "missing", "path": "scripts/sync-codex-adapters.py"}
-    result = run([sys.executable, str(script), "--check"], target, timeout=60)
+    # An adoption target is always downstream: correct, byte-matching
+    # generated adapters that were never `git add`ed must pass, not be
+    # reported as missing (issue #67 D1) — explicit, not auto-detected.
+    result = run(
+        [sys.executable, str(script), "--check", "--context", "downstream"], target, timeout=60
+    )
     return {
         "status": "ok" if result["returncode"] == 0 else "failed",
         "returncode": result["returncode"],

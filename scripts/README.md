@@ -10,7 +10,7 @@ python scripts/check-anatomy-drift.py         # ANATOMY 引用与行号漂移 + 
 python scripts/check-provenance-chain.py      # provenance 链 + 安全路径 + fail-closed gate；--self-test 跑内嵌对抗 fixture
 python scripts/check-same-commit.py --staged  # same-commit rule：结构改动 <-> ANATOMY 同变更集
 python scripts/check-outcome-ledger-schema.py # outcome schema / 具体路线隔离 / 正样本与 fallback / 写入与 credential 防线
-python scripts/sync-codex-adapters.py --check # Codex adapters 与 .claude canonical 能力是否同步
+python scripts/sync-codex-adapters.py --check # Codex adapters 与 .claude canonical 能力是否同步（--context source/downstream/auto，默认 auto；issue #67）
 python scripts/adopt-existing-repo.py <repo> --phase all  # 迁移已有 repo 到 template 形态
 python scripts/check-adoption-integrity.py <repo>         # 校验 adoption baseline bytes 仍存在
 python scripts/bootstrap-project.py <new-repo> --origin <owner/repo>  # 落地刚派生的新 repo（幂等）

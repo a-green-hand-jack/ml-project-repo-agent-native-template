@@ -23,7 +23,7 @@ v4 S3）。只有出现在下表的 component 才承担完整 CONTRACT 约束；
 
 | component | 归属 ANATOMY | Contract owner | contract_version | 状态 |
 | --- | --- | --- | --- | --- |
-| `template-sync` | `scripts/ANATOMY.md` | `scripts/CONTRACT.md` | 1 | active |
+| `template-sync` | `scripts/ANATOMY.md` | `scripts/CONTRACT.md` | 2 | active |
 
 ## 如何新增一条
 
