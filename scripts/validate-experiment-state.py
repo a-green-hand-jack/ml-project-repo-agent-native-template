@@ -15,6 +15,10 @@
 4. 闭环（status=done）：run_summary 是 `lab/code/experiments/` 内 repo-relative、非 symlink
    regular file，且 lab/artifacts/*-index.yaml 有引用该 run id 的条目；绝对路径、traversal、
    repo/允许目录逃逸与缺任一环节均报告错误。
+5. pre-governance 存量豁免（issue #63 D1）：条目可显式登记 `governance_status: legacy_unverified`
+   + 非占位 `governance_note`，跳过 2/3/4（history/approval/closure）三项严格检查——用于本门禁
+   落地前就已存在、无法回填真实证据的历史条目；不豁免 status/id 合法性与 alerts 审计；
+   新条目（无此标记）判定严格度不放松。由 `scripts/init-governance-data.py` 登记，不手填猜测值。
 
 独立脚本（仿 check-same-commit.py 先例），由 validate-governance.py 经 run_subcheck 拉起。
 YAML 解析：优先 PyYAML；无 PyYAML 时用内置受限解析器（block-style 子集：嵌套 mapping /
@@ -33,6 +37,10 @@ LEDGER_REL = "lab/research/experiment-ledger.yaml"
 RUN_SUMMARY_DIR_REL = Path("lab/code/experiments")
 
 STATUSES = ("planned", "approved", "running", "done", "failed", "superseded")
+# pre-governance 存量豁免（issue #63 D1）：entry 可选 governance_status=legacy_unverified +
+# 非占位 governance_note，跳过 history/approval/closure 三项严格检查（结构校验仍适用）。
+# 新条目（无此标记）判定严格度不放松；豁免范围只到这三项，不覆盖 status/id 合法性、alerts。
+LEGACY_MARKER = "legacy_unverified"
 ALLOWED_TRANSITIONS = {
     ("planned", "approved"),
     ("approved", "running"),
@@ -178,7 +186,28 @@ def _is_placeholder(v) -> bool:
     return v is None or (isinstance(v, str) and (not v.strip() or v.strip().startswith("<")))
 
 
-def _check_history(exp: dict, errors: list[str]) -> None:
+def _check_legacy_marker(exp: dict, errors: list[str]) -> bool:
+    """校验并返回该条目是否合法登记为 legacy_unverified。标记本身非法/不完整时返回
+    False——不完整的豁免声明不能顺带换来豁免，仍须过正常严格检查。"""
+    eid = exp.get("id")
+    gs = exp.get("governance_status")
+    if gs is None:
+        return False
+    if gs != LEGACY_MARKER:
+        errors.append(f"{eid}: governance_status 非法：{gs!r}（合法值仅 {LEGACY_MARKER}）")
+        return False
+    if _is_placeholder(exp.get("governance_note")):
+        errors.append(
+            f"{eid}: governance_status={LEGACY_MARKER} 但缺非占位 governance_note"
+            "（说明该条目为 pre-governance 存量、未验证，不是新数据不合规）"
+        )
+        return False
+    return True
+
+
+def _check_history(exp: dict, is_legacy: bool, errors: list[str]) -> None:
+    if is_legacy:
+        return
     eid, status = exp.get("id"), exp.get("status")
     history = exp.get("status_history")
     if not history:
@@ -208,7 +237,9 @@ def _check_history(exp: dict, errors: list[str]) -> None:
         errors.append(f"{eid}: status={status} 与 status_history 末项 {seq[-1]} 不一致")
 
 
-def _check_approval_fields(exp: dict, errors: list[str]) -> None:
+def _check_approval_fields(exp: dict, is_legacy: bool, errors: list[str]) -> None:
+    if is_legacy:
+        return
     eid, status = exp.get("id"), exp.get("status")
     history = exp.get("status_history") or []
     reached_approved = status in ("approved", "running", "done", "failed", "superseded") or any(
@@ -389,9 +420,13 @@ def _run_summary_reason(root: Path, value: object) -> str | None:
     return None
 
 
-def _check_closure(exp: dict, root: Path, artifact_run_ids: set[str], errors: list[str]) -> None:
+def _check_closure(
+    exp: dict, root: Path, artifact_run_ids: set[str], is_legacy: bool, errors: list[str]
+) -> None:
     eid = exp.get("id")
     if exp.get("status") != "done":
+        return
+    if is_legacy:
         return
     summary = exp.get("run_summary")
     if _is_placeholder(summary):
@@ -450,10 +485,11 @@ def check_ledger(root: Path) -> tuple[list[str], list[str]]:
             promote = "no"
         if promote not in (None, *PROMOTE_VALUES):
             errors.append(f"{eid}: promote 非法：{exp.get('promote')}")
-        _check_history(exp, errors)
-        _check_approval_fields(exp, errors)
+        is_legacy = _check_legacy_marker(exp, errors)
+        _check_history(exp, is_legacy, errors)
+        _check_approval_fields(exp, is_legacy, errors)
         _check_alerts(exp, errors)
-        _check_closure(exp, root, artifact_run_ids, errors)
+        _check_closure(exp, root, artifact_run_ids, is_legacy, errors)
     return errors, warnings
 
 
@@ -633,6 +669,35 @@ experiments:
 """
 
 
+_FIXTURE_LEGACY_OK = """\
+experiments:
+  - id: run-legacy
+    status: done
+    governance_status: legacy_unverified
+    governance_note: "pre-governance backfill by scripts/init-governance-data.py on 2026-07-16; original data predates G1 validators, not fabricated, pending human re-verification"
+    commit: "b29d8833609e9ab7f67cd9da39435ac5cea04837"
+    config: null
+    data_split: null
+    promote: no
+"""
+
+_FIXTURE_LEGACY_BAD = """\
+experiments:
+  - id: run-legacy-no-note
+    status: done
+    governance_status: legacy_unverified
+    commit: "abc"
+  - id: run-legacy-bad-value
+    status: done
+    governance_status: retroactive
+    governance_note: "some note"
+    commit: "abc"
+  - id: run-new-strict
+    status: done
+    commit: "abc"
+"""
+
+
 def _self_test() -> int:
     import shutil
     import tempfile
@@ -715,6 +780,24 @@ def _self_test() -> int:
         expect("run-bad-approval" in text and "provenance verifier" in text, "伪造 provenance 报错")
         expect("run-bad-approval" in text and "consumed_at / consumed_by" in text, "半消费状态报错")
         expect("run-bad-approval" in text and "alert id 重复" in text, "重复 alert id 报错")
+
+        # legacy 豁免（issue #63 D1）：显式标记 + 非占位 note 时跳过 history/approval/closure，
+        # 但仍受基础结构与非 legacy 条目的严格判定约束。
+        (root / LEDGER_REL).write_text(_FIXTURE_LEGACY_OK, encoding="utf-8")
+        errors, _ = check_ledger(root)
+        expect(errors == [], f"合法 legacy 条目应零 error（缺 config/data_split/status_history/闭环也放行），得到：{errors}")
+
+        (root / LEDGER_REL).write_text(_FIXTURE_LEGACY_BAD, encoding="utf-8")
+        errors, _ = check_ledger(root)
+        text = "\n".join(errors)
+        expect("run-legacy-no-note" in text and "governance_note" in text,
+               "legacy 标记缺 governance_note 报错")
+        expect("run-legacy-bad-value" in text and "governance_status 非法" in text,
+               "governance_status 非法取值报错")
+        expect("run-new-strict" in text and "status_history" in text,
+               "无 legacy 标记的新条目仍严格判定（不因隔壁条目放松）")
+        expect("run-legacy-no-note" in text and "status_history" in text,
+               "缺 governance_note 的不完整豁免声明不换来豁免——仍须过正常严格检查")
     finally:
         shutil.rmtree(root, ignore_errors=True)
 

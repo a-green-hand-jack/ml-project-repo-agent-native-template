@@ -16,6 +16,7 @@ python scripts/check-adoption-integrity.py <repo>         # 校验 adoption base
 python scripts/bootstrap-project.py <new-repo> --origin <owner/repo>  # 落地刚派生的新 repo（幂等）
 python scripts/bump-template-version.py --level minor --note "..."   # 发版：递增 VERSION + tag（上游）
 python scripts/template-sync.py --from /path/to/upstream             # 追平上游框架层（下游）
+python scripts/init-governance-data.py [--dry-run] [--verbose]       # 补齐新落地门禁的数据层结构骨架（幂等）
 python scripts/agent-status.py                # 多 agent 控制面：谁在跑/状态/心跳/未读（只读）
 python scripts/agent-state.py register "<name>" --task "..." --owned <paths>  # 登记状态/心跳
 python scripts/agent-mailbox.py send|inbox|handoff|ack ...   # agent 间消息与 ownership handoff 落盘
@@ -35,6 +36,14 @@ version **只在** 文件 apply、Codex 生成器重建、`validate-governance.p
 可重跑命令。失败后重跑幂等，不需手工伪造版本。故障注入 fixture：`lab/evals/template-sync/`。
 
 加 `--strict` 让 warning 也算失败（适合 CI）。脚本**无第三方依赖**（PyYAML 可选，用于 YAML 深度解析）。
+
+`init-governance-data.py`（issue #63 D1）补齐 `check-doc-lifecycle.py` / `validate-experiment-state.py` /
+`check-provenance-chain.py` 三个门禁要求、但下游可能从未落地过的数据层结构：缺失的
+`memory/doc-lifecycle.yaml` 注册表 + 状态锚点、`schema_version`、`governance_status: legacy_unverified`
+存量标记（缺 run_id/config/status_history/approval/location 等字段但不编造具体值）。只补结构骨架，
+不改字段真实语义；用「文件是否已有 schema_version/注册表是否已存在」判定是否已 init 过——之后新出现
+的不合规条目只 flag、不自动标记 legacy，不放松新数据判定。`--dry-run` 只报告不落盘；
+`template-sync.py` 收尾阶段用它给 receipt 生成 `governance_data_gap` 预览，不自动调用真实 init。
 
 `validate-governance.py` 还包含 `check_release_gates()` / `check_regression_matrix()`：校验
 `lab/research/release-gates.yaml` / `regression-matrix.yaml` 的枚举字段合法，且一旦

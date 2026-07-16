@@ -32,7 +32,9 @@ deliverables/index.md              对外交付物
 - 各 index / ledger YAML 带 `schema_version`（整数，从 1 起，逐 index 独立计数）。
 - index 条目离开占位状态后，`location` / `how_to_inspect` / `commit` / `config` /
   `run_id` 均非占位（全部 7 类统一要求）；模板 scaffold 只在 `status: unknown` 且未被
-  引用时可保留占位，`active` 条目不得用占位值跳过校验。
+  引用时可保留占位，`active` 条目不得用占位值跳过校验，唯一例外是显式登记
+  `governance_status: legacy_unverified` + 非占位 `governance_note`（issue #63 D1：
+  pre-governance 存量条目从未记录过 `location`，不允许编造，只能显式标记；新条目不适用）。
   确无 run 来源的合法场景（外部数据集、human-cc/agent trace、历史遗留）必须**显式豁免**：
   `provenance_unavailable_reason`（固定枚举：`external-origin` / `human-authored` /
   `legacy-untracked`）+ `provenance_unavailable_justification`（非空、非占位的人工具体
@@ -43,7 +45,11 @@ deliverables/index.md              对外交付物
   `<dataset-id>/<split>`，且 split
   实际列在 dataset 条目的 `splits` 中。claim 引用 evidence 时还必须核对
   `evidence.supports_claim == claim.id`，且边必须双向声明：每条完整 evidence 都必须出现在
-  owner claim 的 `evidence` 列表中；占位/不完整 evidence 不参与 claim 强度计算。
+  owner claim 的 `evidence` 列表中；占位/不完整 evidence 不参与 claim 强度计算。evidence 缺
+  `command`/`config`/`run_id` 时同样可显式登记 `governance_status: legacy_unverified` +
+  `governance_note`（issue #63 D1）：归属边仍要求成立，但不进 `valid_ids`（不贡献强度、不算
+  FAIL）；claim 若全部引用 evidence 都降级为 legacy，claim 自身也可同标记，豁免
+  `status∈{partial,supported}` 需 eligible evidence 的检查。
 - deliverables 正文的 claim marker：`<!-- claim: id=<claim-id> evidence=<ev-id>,... -->`
   （只覆盖 Markdown；非 Markdown 交付物走 `human/reviews/results/` 人工 review 兜底）。
   「evidence 齐全=是」的非 draft 交付物必须二选一：正文 marker 覆盖索引该行列出的

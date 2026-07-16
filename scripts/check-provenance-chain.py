@@ -36,6 +36,14 @@
 最短闭环（result-index → evidence → claims → deliverables），Phase B 已扩展到全部
 7 类 index + regression-matrix / release-gates（见 plans/20260712-artifact-evidence-chain.zh.md）。
 
+8. pre-governance 存量豁免（issue #63 D1）：evidence / claim / artifact-index 条目可显式
+   登记 `governance_status: legacy_unverified` + 非占位 `governance_note`——用于本门禁落地前
+   就已存在、无法回填真实 run_id/config/location 的历史条目。legacy evidence 不再因
+   run_id/config 缺失被 FAIL，但也**不进入 valid_evidence_ids**，不贡献 claim 强度；legacy
+   claim 允许 status∈{partial,supported} 但暂无 eligible evidence；legacy artifact-index
+   条目允许 status=active 但 location 为空（否则该组合无任何豁免出口，见 check_artifact_indexes
+   注释）。新条目（无此标记）判定严格度不放松；标记本身非法/缺 note 时不换来豁免。
+
 无第三方硬依赖：PyYAML 可选（缺失时用内置受限解析器回退；再失败记 UNKNOWN，
 --strict 下 unknown 也算失败，不静默降级）。模板占位条目只有在未激活、未被引用时
 才可保留；一旦进入 active evidence、submitted/published deliverable 或 passed gate，
@@ -70,6 +78,7 @@ PROVENANCE_UNAVAILABLE_REASONS = {  # 三元组豁免（决策 9）：无 run �
     "legacy-untracked",  # 历史遗留条目，来源三元组尚未回填
 }
 JUSTIFICATION_PLACEHOLDERS = {"tbd", "n/a", "na", "none", "todo", "...", "-", "?"}
+GOVERNANCE_LEGACY = "legacy_unverified"  # pre-governance 存量豁免标记（issue #63 D1）
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 URI_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
 WINDOWS_ABSOLUTE_RE = re.compile(r"^[A-Za-z]:[\\/]")
@@ -490,6 +499,22 @@ def _check_reason_justification(
     return True
 
 
+def _check_governance_marker(entry: dict, ident: str, rep: Report) -> bool:
+    """校验并返回该条目是否合法登记为 legacy_unverified。标记非法/缺 note 时记 FAIL 并
+    返回 False——不完整的豁免声明不能顺带换来豁免，仍须过正常严格检查（见文档 8）。"""
+    gs = entry.get("governance_status")
+    if gs is None:
+        return False
+    if gs != GOVERNANCE_LEGACY:
+        rep.fail(f"{ident}：governance_status 非法（{gs!r}），合法值仅 {GOVERNANCE_LEGACY}")
+        return False
+    note = entry.get("governance_note")
+    if not _filled(note) or str(note).strip().lower() in JUSTIFICATION_PLACEHOLDERS:
+        rep.fail(f"{ident}：governance_status={GOVERNANCE_LEGACY} 但缺非占位 governance_note")
+        return False
+    return True
+
+
 def _check_justified_unavailable(entry: dict, ident: str, rep: Report) -> None:
     reason = entry.get("checksum_unavailable_reason")
     if _check_reason_justification(
@@ -673,10 +698,13 @@ def check_artifact_indexes(root: Path, runs: dict, claim_ids: set, rep: Report) 
             status = e.get("status")
             if status not in ARTIFACT_STATUS:
                 rep.fail(f"{ident}：status 非法：{status!r}")
+            is_legacy = _check_governance_marker(e, ident, rep)
             location = e.get("location")
             if not _filled(location):
-                # 仅未激活 scaffold 可保留占位；任何真实状态都不得借此跳过。
-                if status != "unknown":
+                # 仅未激活 scaffold 可保留占位；任何真实状态都不得借此跳过——
+                # 唯一例外是显式登记的 legacy_unverified（issue #63 D1：pre-governance
+                # 存量条目本就没有可回填的真实 location，不允许伪造，只能显式标记）。
+                if status != "unknown" and not is_legacy:
                     rep.fail(
                         f"{ident}：status={status!r} 时 location 不得为空/占位"
                     )
@@ -746,29 +774,37 @@ def check_artifact_indexes(root: Path, runs: dict, claim_ids: set, rep: Report) 
                     _check_entry_checksum(root, e, ident, location, rep)
 
 
-def _load_claims(root: Path, rep: Report) -> tuple[dict, set[str]]:
+def _load_claims(root: Path, rep: Report) -> tuple[dict, set[str], set[str]]:
     doc, entries = _load_indexed(root, "lab/research/claims.yaml", "claims", rep, "claims")
     _check_schema_version(doc, "lab/research/claims.yaml", rep)
     by_id = _entries_by_id(entries, "claims", rep)
+    legacy_ids: set[str] = set()
     for cid, claim in by_id.items():
         status = claim.get("status")
         if status not in {"proposed", "partial", "supported", "refuted", "retired"}:
             rep.fail(f"claim {cid}：status 非法：{status!r}")
         if status != "proposed" and not _filled(claim.get("title")):
             rep.fail(f"claim {cid}：status={status!r} 时 title 不得为空/占位")
-    return by_id, set(by_id)
+        if _check_governance_marker(claim, f"claim {cid}", rep):
+            legacy_ids.add(cid)
+    return by_id, set(by_id), legacy_ids
 
 
-def check_evidence(root: Path, runs: dict, rep: Report) -> tuple[dict, set[str]]:
-    """Validate evidence and return both all entries and claim-eligible IDs.
+def check_evidence(root: Path, runs: dict, rep: Report) -> tuple[dict, set[str], set[str]]:
+    """Validate evidence and return all entries, claim-eligible IDs, and legacy IDs.
 
     Unreferenced scaffold rows may remain in the template, but they are never
-    eligible evidence and therefore cannot raise a claim's strength.
+    eligible evidence and therefore cannot raise a claim's strength. Entries
+    explicitly marked governance_status=legacy_unverified (issue #63 D1) are not
+    FAILed for missing run_id/config, but they never enter valid_ids either — they
+    land in legacy_ids, which lets a claim keep referencing them without contributing
+    strength or being treated as a broken/placeholder reference.
     """
     doc, entries = _load_indexed(root, "lab/research/evidence.yaml", "evidence", rep, "evidence")
     _check_schema_version(doc, "lab/research/evidence.yaml", rep)
     by_id = _entries_by_id(entries, "evidence", rep)
     valid_ids: set[str] = set()
+    legacy_ids: set[str] = set()
     # 交叉引用目标：覆盖范围内的 index 类型（Phase B 自动随白名单扩展）。
     ids_by_type = {t: _index_ids(root, t)[0] for t in COVERED_INDEX_TYPES}
     ref_fields = ("metric_source", "checkpoint", "data_split")
@@ -781,16 +817,18 @@ def check_evidence(root: Path, runs: dict, rep: Report) -> tuple[dict, set[str]]
             rep.fail(f"{ident}：commit 缺失或占位；active evidence 不得跳过校验")
             continue
         sub = Report()
+        is_legacy = _check_governance_marker(e, ident, sub)
         if not _filled(e.get("supports_claim")):
             sub.fail(f"{ident}：supports_claim 缺失或占位")
         if e.get("grade") not in GRADE_RANK:
             sub.fail(f"{ident}：grade 缺失、占位或非法：{e.get('grade')!r}")
         for field in ("command", "config"):
-            if not _filled(e.get(field)):
+            if not _filled(e.get(field)) and not is_legacy:
                 sub.fail(f"{ident}：{field} 缺失或占位")
         run_id = e.get("run_id")
         if not _filled(run_id):
-            sub.fail(f"{ident}：run_id 缺失或占位（evidence 必须可回溯到 run）")
+            if not is_legacy:
+                sub.fail(f"{ident}：run_id 缺失或占位（evidence 必须可回溯到 run）")
         else:
             _check_run_closed(runs, run_id, ident, sub)
         for field in ref_fields:
@@ -835,17 +873,32 @@ def check_evidence(root: Path, runs: dict, rep: Report) -> tuple[dict, set[str]]
                 )
         rep.extend(sub)
         if not sub.fails and not sub.unknowns and _filled(eid):
-            valid_ids.add(eid)
-    return by_id, valid_ids
+            if is_legacy:
+                legacy_ids.add(eid)
+            else:
+                valid_ids.add(eid)
+    return by_id, valid_ids, legacy_ids
 
 
 def check_claim_evidence_edges(
-    claims_by_id: dict, evidence_by_id: dict, valid_evidence_ids: set[str], rep: Report,
+    claims_by_id: dict,
+    evidence_by_id: dict,
+    valid_evidence_ids: set[str],
+    legacy_evidence_ids: set[str],
+    legacy_claim_ids: set[str],
+    rep: Report,
 ) -> dict[str, list[str]]:
-    """Validate bidirectional claim↔evidence ownership and return eligible edges."""
+    """Validate bidirectional claim↔evidence ownership and return eligible edges.
+
+    legacy_evidence_ids（governance_status=legacy_unverified）参与结构性归属边校验
+    （supports_claim 必须存在、双向列出），但既不进 eligible 也不因「占位/不完整」被
+    FAIL——它们是显式标记的历史存量，不是新数据不合规。legacy_claim_ids 同理放行
+    「status∈{partial,supported} 但 eligible 为空」这一条，其余检查不变。
+    """
     owned: dict[str, list[str]] = {}
     declared: dict[str, set[str]] = {}
-    for evidence_id in sorted(valid_evidence_ids):
+    recognized_evidence_ids = valid_evidence_ids | legacy_evidence_ids
+    for evidence_id in sorted(recognized_evidence_ids):
         owner = evidence_by_id[evidence_id].get("supports_claim")
         if owner not in claims_by_id:
             rep.fail(
@@ -870,6 +923,19 @@ def check_claim_evidence_edges(
             if evidence is None:
                 rep.fail(f"claim {cid}：引用不存在的 evidence={evidence_id}")
                 continue
+            if evidence_id in legacy_evidence_ids:
+                owner = evidence.get("supports_claim")
+                if owner != cid:
+                    rep.fail(
+                        f"claim {cid}：evidence={evidence_id} 的 supports_claim={owner!r}，"
+                        "归属边不匹配"
+                    )
+                else:
+                    rep.ok(
+                        f"claim {cid}：evidence={evidence_id} 是 legacy_unverified，"
+                        "归属边有效但不贡献 claim 强度"
+                    )
+                continue
             if evidence_id not in valid_evidence_ids:
                 rep.fail(
                     f"claim {cid}：evidence={evidence_id} 仍是占位/不完整记录，"
@@ -886,11 +952,15 @@ def check_claim_evidence_edges(
             eligible.append(evidence_id)
         declared[cid] = seen_refs
         owned[cid] = eligible
-        if claim.get("status") in {"partial", "supported"} and not eligible:
+        if (
+            claim.get("status") in {"partial", "supported"}
+            and not eligible
+            and cid not in legacy_claim_ids
+        ):
             rep.fail(
                 f"claim {cid}：status={claim.get('status')} 但没有有效且 supports_claim 归属匹配的 evidence"
             )
-    for evidence_id in sorted(valid_evidence_ids):
+    for evidence_id in sorted(recognized_evidence_ids):
         owner = evidence_by_id[evidence_id].get("supports_claim")
         if owner in claims_by_id and evidence_id not in declared.get(owner, set()):
             rep.fail(
@@ -1329,11 +1399,11 @@ def check_release_gates_structured(
 
 def run_checks(root: Path, rep: Report) -> None:
     runs = _load_runs(root, rep)
-    claims_by_id, claim_ids = _load_claims(root, rep)
+    claims_by_id, claim_ids, legacy_claim_ids = _load_claims(root, rep)
     check_artifact_indexes(root, runs, claim_ids, rep)
-    evidence_by_id, valid_evidence_ids = check_evidence(root, runs, rep)
+    evidence_by_id, valid_evidence_ids, legacy_evidence_ids = check_evidence(root, runs, rep)
     claim_evidence = check_claim_evidence_edges(
-        claims_by_id, evidence_by_id, valid_evidence_ids, rep
+        claims_by_id, evidence_by_id, valid_evidence_ids, legacy_evidence_ids, legacy_claim_ids, rep
     )
     check_deliverables_index(root, claims_by_id, claim_evidence, rep)
     check_claim_markers(

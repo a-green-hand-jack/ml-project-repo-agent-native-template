@@ -8,6 +8,7 @@ contract_for:
 related_files:
   - template-sync.py
   - sync-codex-adapters.py
+  - init-governance-data.py
   - ANATOMY.md
   - ../template-manifest.toml
   - ../lab/evals/template-sync/run-template-sync-smoke.py
@@ -48,6 +49,7 @@ fixture evidence 单独在 `../lab/evals/bootstrap/run-bootstrap-smoke.py`（复
 | **TS-8** atomic-commit-and-interrupt-honesty | 版本文件用「同目录临时文件 + `os.replace`」写入；替换前失败/中断保持旧值、无孤儿临时文件、旧值仍可解析；替换后中断必须如实报告 `version_advanced=true` 且 `result=unknown`，不得声称 `version_kept`/伪造 rollback | production-path positive + forbidden | `check_atomic_write_fail`、`check_commit_interrupt`（before/after 两支） |
 | **TS-9** idempotent-rerun | 对已追平的下游立即重跑是真正 no-op：`result` 仍 `pass`、版本不动、`apply_changed` 为空 | production-path positive | `check_happy_and_idempotent` 的幂等重跑段 |
 | **TS-10** adapter-check-context（issue #67） | `sync-codex-adapters.py --check` 的 generated manifest 断言按 `--context {source,downstream,auto}` 区分合同：`source` 保留 #61 的 tracked exact-set（generated manifest 精确等于 `expected_files()`）；`downstream` 不要求已 `git add`，只要求 `template-manifest.toml` 把每个 expected adapter path 分类为 generated，正确但未跟踪的输出必须 PASS；`auto`（CLI 默认）按 `.template.toml` 角色锚点判定 source/downstream，锚点是 symlink 或无法解析为合法 TOML 时 fail-closed（非零退出、明确报错），绝不静默降级为较弱检查；磁盘 missing/stale/unexpected 检查对两种 context 都无条件执行；`write()` 输出区分实际 changed 计数与 expected 总数，不再无论是否改动都声称写了全部 | production-path positive + forbidden，真实 `git init` fixture（非 mock） | `check_untracked_generated_adapters`（`lab/evals/bootstrap/run-bootstrap-smoke.py`：真实 adopt-style 未跟踪 adapters 下 downstream PASS、显式 source 仍 FAIL、missing/stale/unexpected 仍 FAIL、malformed/symlink 锚点 fail-closed） |
+| **TS-11** governance-data-gap-report（issue #63 D1） | apply 后若 plan 里存在新创建（此前下游不存在）、匹配 `scripts/check-*.py`/`scripts/validate-*.py` 的 framework 文件，receipt 新增 `governance_data_gap` 字段：`new_validators`（新落地路径清单）+ `gap`（`init-governance-data.py --dry-run` 的诚实 changed/skipped/flagged 计数，脚本不存在或预览异常时为 `null`/`{"error":...}`，不影响 sync 本身结果）+ `suggested_command`；validator 已存在（本次 action≠create）时 `governance_data_gap` 为 `null`；template-sync 全程绝不自动执行 init（下游数据文件字节不变） | production-path positive + forbidden | `check_governance_data_gap_report`（首次落地 3 个 G1 validator 断言字段与 gap 计数非空、命中已知缺口、数据文件未被动过；第二次同步已存在 validator 断言字段为 `null`） |
 
 ## template-sync Contract 变更矩阵（breaking vs non-breaking）
 
@@ -55,7 +57,7 @@ fixture evidence 单独在 `../lab/evals/bootstrap/run-bootstrap-smoke.py`（复
 
 | 变更 | 判级 | 说明 |
 | --- | --- | --- |
-| 弱化/删除 TS-1..TS-9 任一规则（如允许版本在 validator 成功前推进、允许 generated 裸拷贝、放宽 MAJOR gate、伪造 rollback） | **MAJOR** | 默认视为实现 bug，不得为让测试变绿而改弱本文件；改变承诺需 human 在 issue/PR 明确批注批准 |
+| 弱化/删除 TS-1..TS-11 任一规则（如允许版本在 validator 成功前推进、允许 generated 裸拷贝、放宽 MAJOR gate、伪造 rollback、静默不报 governance_data_gap、自动执行 init） | **MAJOR** | 默认视为实现 bug，不得为让测试变绿而改弱本文件；改变承诺需 human 在 issue/PR 明确批注批准 |
 | receipt schema 增字段（向后兼容，既有字段语义不变） | MINOR | 下游读取代码通常无需改造 |
 | receipt schema 删除/重命名既有字段、`result` 枚举增删值 | **MAJOR** | 下游解析 receipt 的代码可能失败 |
 | 五类 ownership 语义变化（如 scaffold 改为总是覆盖、merge 哨兵约定改变） | **MAJOR** | 直接影响下游文件的实际落地结果 |
