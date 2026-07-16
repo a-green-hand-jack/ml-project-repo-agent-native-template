@@ -63,6 +63,70 @@
   --delete-branch` 在本地分支被 worktree 占用时会连远端删除一起中止，合并后需
   `git push origin --delete <branch>` 兜底（#50/#51 的残留远端分支已补删）。
 
+## 2026-07-16 P3 完成 + P4 方案待批（主 agent：都督·统·P2收口）
+
+- **P3/#63 完成**：candidate `2ce1278`（执行官 干将·迁·下游数据层，sonnet-5·high·bypass）经
+  fresh review 一轮 REQUEST CHANGES（MAJOR-1：`validate-governance.py:210` 漏 legacy 豁免，
+  reviewer 师爷·审·数据迁移 opus-4-8 自构探针发现）→ 修复 + 回归固化（撤销→FAIL→恢复→OK 杀伤力
+  验证双方独立完成）→ delta re-review **APPROVE** → **PR #70** merge，`origin/main = 35c9bd5`，
+  #63 关闭。交付：`scripts/init-governance-data.py`（幂等、零造假、诚实计数）+ 三 validator 及
+  `check_evidence_chain()` 的 legacy 三态 + receipt `governance_data_gap`。ELF fixture 验收
+  4-FAIL→全绿→幂等，writer/reviewer 独立复现一致。B1/B2/B3 三个设计决策均获 reviewer 裁断成立
+  （contract_version 保持 2 正确）。
+- **P3 过程事故（已修复+复盘）**：writer copytree 了 ELF worktree（.git 指针致共享元数据被 /tmp
+  副本改写）；文件字节零损伤，HEAD/index 按指定顺序修复三重验证；教训固化：**复制 worktree 一律
+  git clone/git archive**。ELF worktree 现基线：status 全空 @ 4f1a9ec。
+- **P3 清场完成**：两 agent 归档、worktree 删除、topic 分支本地+远端删除、/tmp fixtures 清理。
+- **P4（#54 G1 + #59 G6）方案已写入两 issue 待 human review**：单一入口
+  `lab/evals/qualification/run-qualification.py`（--group g1|g6|all；正例+负例隔离 /tmp fixture；
+  复用既有 --self-test 优先；JSON+MD 双证据落 `lab/docs/audits/qualification/`；同 commit 重跑
+  一致；runner 不挂进 governance；缺陷开独立 issue 不顺手修）。**human 批准后才建分支/agent。**
+  P5–P8 冻结。#52 路线图已同步。
+- 本地 main 仅领先 origin 一个 memory checkpoint commit，未 push。
+
+## 2026-07-16 P2 收口完成（主 agent：都督·统·P2收口，前名 军师·谋·P2收口）
+
+- **P2 局势**：#62 已经 PR #66 合入 `main@934f42c`（= origin/main）；#60 approved candidate =
+  `origin/fix/60-adoption-template-anchor@5e40ad3`（两轮 fresh APPROVE，未合入）；本地
+  `p2a-60-adoption-template-anchor@1dc232a` 是 #60+#62 集成证据分支，**未合并、不可当残留清理**。
+- **#67（P2c blocker）**：human 2026-07-16 批准 D1–D3 全部推荐方案（issue 正文复选框/状态行/评论已同步）。
+  执行官 **干将·改·双境合同**（claude-sonnet-5·high·auto，Paseo worktree
+  `~/.paseo/worktrees/1kaz3672/fix-67-downstream-adapter-context`）交付 candidate
+  **`7992478`**（+branch status `7e12b87`），branch `fix/67-downstream-adapter-context`，base `main@934f42c`。
+  内容：`sync-codex-adapters.py --context {source,downstream,auto}` 拆分（source 保留 #61 exact-set；
+  downstream 不要求进 git index 但磁盘 missing/stale/unexpected 仍严查；malformed/symlink 锚点
+  fail-closed）；`write()` 诚实计数 `changed N/expected M`；bootstrap-smoke 新增真实 git-index 回归
+  （修复前 FAIL 已复现）。详见 `memory/branches/67-downstream-adapter-context.md`（在该分支上）。
+- **fresh review**：**师爷·审·双境合同**（claude-opus-4-8·high，独立 session）verdict **APPROVE**，
+  无 BLOCKER/MAJOR；独立复现 pre-fix FAIL + 全套门禁复跑全绿；3 个 MINOR/NIT 仅记录（空 TOML 锚点
+  边界、check-agent-harness auto 时序假设 LOW、contract_version 1→2 判级合理）。主 agent 亦独立复跑
+  bootstrap/adoption/template-sync smoke + governance strict 全绿。
+- **#67 已合入（2026-07-16 下午）**：human 授权 push+PR+merge 一并执行。**PR #68** merge 后
+  `origin/main = 604a02a`；remote topic `fix/67-downstream-adapter-context` 已删；本地 main 已 rebase
+  到 origin/main 之上（memory checkpoint commit 在顶）。
+- **#60 集成合入（P2 完成，2026-07-16 下午）**：干将·改·双境合同建
+  `integrate/60-adoption-anchor-refresh`（base `604a02a`）双亲 merge `a73143c`（5e40ad3 未改写；
+  冲突恰两处均双侧保留：bootstrap-smoke import、scripts/README 注释）。三方验证一致：writer 自验
+  全绿；主 agent 机械核查（merge 与自动合并树仅差 8 行冲突标记）；师爷·审·双境合同独立 /tmp fixture
+  复现端到端——真实 adopt → `.template.toml`（origin 正确，v1.3.8）→ 同版本首次 sync
+  **receipt=pass（原 P2 失败点为 partial）**、CONTRACT=framework 字节一致、38 generated adapters
+  全程 untracked 仍通过 → 二次 sync 幂等（`apply_changed=[]`）→ fixture 内 `--check` 报
+  `context=downstream OK`，verdict **APPROVE** 无 BLOCKER/MAJOR。human 授权后 **PR #69** merge，
+  `origin/main = deeda67`。证据：main 上 `memory/branches/integrate-60-refresh.md`、PR #68/#69 正文。
+- **issue 状态**：#67、#60 随 PR 自动关闭；#62 手工关闭（最终验收达成）；#52 已留 P2 完成评论。
+  **#63/P3–P8 继续冻结，等 human 启动下一阶段。**
+- **清场完成**：远端删 `fix/67-downstream-adapter-context`、`fix/60-adoption-template-anchor`、
+  `integrate/60-adoption-anchor-refresh`；本地删 `p2a-60-adoption-template-anchor`（双亲已进 main）、
+  `61-codex-adapter-ownership`、`fix/48-lifecycle-verified`、`root-contract-template-framework`、
+  `fix/67-*`、`integrate/60-*`；移除 `/tmp/ml-template-61-integration-a01c3fe` worktree；Paseo 归档
+  干将·改·双境合同（e6335bbd）、师爷·审·双境合同（347186cc）及 `fix-67-downstream-adapter-context`
+  worktree，roster 置 done。证据分支保留：`test/52-gate-check`、`elf-replay-sync-v14rc`、
+  `worktree-case+elf-template-replay`、`research/paper-positioning`（无关活跃工作）。
+- **已知 NIT（不阻断，留给后续）**：adopt prove 阶段 pre-sync `governance_rc=1` 属预期（首次 sync
+  后转绿）；空但可解析的 `.template.toml` 判 downstream（正常流程不可达）；`--context auto` 依赖
+  anchor 先写后 check 的时序（现有调用点均满足，LOW）。
+- 本地 main 仅领先 origin/main 一个 memory checkpoint commit，未 push（push main 需 human 放行）。
+
 ## 当前 objective
 
 2026-07-14 human 明确授权发布当前本地 `main`：#18 的 fresh runtime 证据证伪 Codex hook
