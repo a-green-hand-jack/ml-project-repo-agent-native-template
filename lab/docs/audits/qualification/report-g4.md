@@ -1,7 +1,7 @@
 # G4 control-plane scenario report
 
-- 被测 commit：`b588d59a2c276f7e5d0bd25786ac9f2f943fbfeb`
-- 生成时间：2026-07-17T06:34:53.172779+00:00
+- 被测 commit：`f953704bff483a032d8933c0264a8bcd63fbbb65`
+- 生成时间：2026-07-17T11:20:55.092132+00:00
 - 生成时工作树是否 dirty：True
 - 结果：7/7 PASS（self-test backstop：76 项全部通过，覆盖 5 个脚本）
 
@@ -37,15 +37,15 @@
     "status": "active",
     "stored_status": "active",
     "heartbeat_age_minutes": 0.0,
-    "heartbeat": "2026-07-17T06:34:47Z",
+    "heartbeat": "2026-07-17T11:20:50Z",
     "task": "G4 demo A",
-    "worktree": "/home/user/.paseo/worktrees/1kaz3672/g4-control-plane",
-    "branch": "g4-dual-agent-verification",
+    "worktree": "/home/user/.paseo/worktrees/1kaz3672/fix-74-75-gaps",
+    "branch": "fix/74-75-qualification-strict-gaps",
     "paseo_id": "-",
     "paseo_presence": "unknown(no-paseo)",
     "unread_inbox": 0,
     "owned_paths": [],
-    "state_file": "/tmp/g4-1-a1an07fw/memory/agents/干将·改·g4demo-A.yaml"
+    "state_file": "/tmp/g4-1-34s4bb6z/memory/agents/干将·改·g4demo-A.yaml"
   }
 ]
 ```
@@ -55,15 +55,15 @@
     "status": "stale",
     "stored_status": "active",
     "heartbeat_age_minutes": 31.0,
-    "heartbeat": "2026-07-17T06:03:48Z",
+    "heartbeat": "2026-07-17T10:49:50Z",
     "task": "G4 demo A",
-    "worktree": "/home/user/.paseo/worktrees/1kaz3672/g4-control-plane",
-    "branch": "g4-dual-agent-verification",
+    "worktree": "/home/user/.paseo/worktrees/1kaz3672/fix-74-75-gaps",
+    "branch": "fix/74-75-qualification-strict-gaps",
     "paseo_id": "-",
     "paseo_presence": "unknown(no-paseo)",
     "unread_inbox": 0,
     "owned_paths": [],
-    "state_file": "/tmp/g4-1-a1an07fw/memory/agents/干将·改·g4demo-A.yaml"
+    "state_file": "/tmp/g4-1-34s4bb6z/memory/agents/干将·改·g4demo-A.yaml"
   }
 ]
 ```
@@ -79,8 +79,8 @@
 - negative: ok=True
 ```
 no_ref: [mailbox] 失败：kind=decision 是关键消息，必须 --ref 指向 repo 落盘记录（验收 #5）
-escape: [mailbox] 失败：--ref 逃逸控制面根（/tmp/g4-2-za27yiek）：../outside.md
-abs: [mailbox] 失败：--ref 拒绝绝对路径：/tmp/g4-2-za27yiek/memory/handoffs/demo.md（用控制面 repo 内的相对路径）
+escape: [mailbox] 失败：--ref 逃逸控制面根（/tmp/g4-2-m8zgn3uy）：../outside.md
+abs: [mailbox] 失败：--ref 拒绝绝对路径：/tmp/g4-2-m8zgn3uy/memory/handoffs/demo.md（用控制面 repo 内的相对路径）
 ```
 
 ### T-G4-3 — PASS
@@ -89,12 +89,12 @@ abs: [mailbox] 失败：--ref 拒绝绝对路径：/tmp/g4-2-za27yiek/memory/han
 - notes: 正例：A 先 register 明细 owned_path（文件级，非目录）→ handoff → ack 前查 A/B 状态确认未转移 → B ack → 转移进 B + A 收到 ack 回执。负例：C 只拥有父目录 shared/、想转移其子文件shared/detail.txt → ack 拒绝（不做目录所有权分裂）、消息保持 pending、C 的 owned_paths 不变。
 - positive: ok=True
 ```
-[mailbox] handoff a6962a47 accepted；转移 paths：['shared/detail.txt']；回执 fa477026
-[mailbox] handoff 已发起：a6962a47（pending，等待 师爷·审·g4demo-B ack）
+[mailbox] handoff c1f5b562 accepted；转移 paths：['shared/detail.txt']；回执 f35a2720
+[mailbox] handoff 已发起：c1f5b562（pending，等待 师爷·审·g4demo-B ack）
 ```
 - negative: ok=True
 ```
-[mailbox] 失败：handoff d4a337df 被拒：待转移路径无法从发起方「干将·改·g4demo-C」完整移出——shared/detail.txt（发起方拥有的是目录 shared/：不做目录所有权分裂，先让发起方 register 拆细 owned_paths 再 handoff）
+[mailbox] 失败：handoff 4c3976bf 被拒：待转移路径无法从发起方「干将·改·g4demo-C」完整移出——shared/detail.txt（发起方拥有的是目录 shared/：不做目录所有权分裂，先让发起方 register 拆细 owned_paths 再 handoff）
 ```
 
 ### T-G4-4 — PASS
@@ -123,38 +123,38 @@ abs: [mailbox] 失败：--ref 拒绝绝对路径：/tmp/g4-2-za27yiek/memory/han
 - notes: 正例：declared worktree == 实际 toplevel → clean。负例：把 A 的 declared worktree 改成另一目录（elsewhere），传入不同的 --actual-toplevel → 报错并点名两个具体路径。
 - positive: ok=True
 ```
-[conflicts] worktree 一致：干将·改·g4demo-A @ /tmp/g4-5-vmnwwf2j/actual-toplevel
+[conflicts] worktree 一致：干将·改·g4demo-A @ /tmp/g4-5-h4bl6558/actual-toplevel
 ```
 - negative: ok=True
 ```
-[conflicts] agent「干将·改·g4demo-A」登记的 worktree 是 /tmp/g4-5-vmnwwf2j/elsewhere，但当前写入发生在 /tmp/g4-5-vmnwwf2j/actual-toplevel。疑似写错 worktree——先 pwd + git rev-parse --show-toplevel 核对，或更新状态文件（python scripts/agent-state.py register）。确属误报/human 授权可 AGENT_CONFLICT_SKIP=1 显式放行（先与对方 agent/监控员协调）。
+[conflicts] agent「干将·改·g4demo-A」登记的 worktree 是 /tmp/g4-5-h4bl6558/elsewhere，但当前写入发生在 /tmp/g4-5-h4bl6558/actual-toplevel。疑似写错 worktree——先 pwd + git rev-parse --show-toplevel 核对，或更新状态文件（python scripts/agent-state.py register）。确属误报/human 授权可 AGENT_CONFLICT_SKIP=1 显式放行（先与对方 agent/监控员协调）。
 ```
 
 ### T-G4-6 — PASS
 
 - promise: agent-status 聚合视图（±Paseo 降级）
-- notes: 正例：--no-paseo 纯 repo 视图列出 A/B 的 status/heartbeat/unread。负例两分支：(a) 本机真实 paseo CLI 可用但 agent 未登记 paseo_id → presence='-'，不 raise；(b) PATH 剥掉 paseo 二进制模拟缺 Paseo → 全体 presence 降级为 unknown(no-paseo)，exit 仍为 0。
+- notes: 正例：--no-paseo 纯 repo 视图列出 A/B 的 status/heartbeat/unread。负例两分支：(a) 本机真实 paseo CLI 可用但 agent 未登记 paseo_id → presence='-'，不 raise；本机若没装 paseo CLI，这条断言天然无法证明（会自然落进 unknown(no-paseo)，与分支 b 同构），标 UNAVAILABLE（而非误判 FAIL 或伪造 PASS）；(b) PATH 剥掉 paseo 二进制模拟缺 Paseo → 全体 presence 降级为 unknown(no-paseo)，exit 仍为 0，这条断言不依赖本机是否真装 paseo，永远跑。
 - positive: ok=True
 ```
     "name": "干将·改·g4demo-A",
     "status": "active",
     "stored_status": "active",
     "heartbeat_age_minutes": 0.0,
-    "heartbeat": "2026-07-17T06:34:50Z",
+    "heartbeat": "2026-07-17T11:20:52Z",
     "task": "demo A",
-    "worktree": "/home/user/.paseo/worktrees/1kaz3672/g4-control-plane",
-    "branch": "g4-dual-agent-verification",
+    "worktree": "/home/user/.paseo/worktrees/1kaz3672/fix-74-75-gaps",
+    "branch": "fix/74-75-qualification-strict-gaps",
     "paseo_id": "-",
     "paseo_presence": "unknown(no-paseo)",
     "unread_inbox": 0,
     "owned_paths": [],
-    "state_file": "/tmp/g4-6-q6j69142/memory/agents/干将·改·g4demo-A.yaml"
+    "state_file": "/tmp/g4-6-t_811feo/memory/agents/干将·改·g4demo-A.yaml"
   }
 ]
 ```
 - negative: ok=True
 ```
-no_pid presence=-
+no_pid presence=- (paseo_installed=True)
 no_cli presences=['unknown(no-paseo)', 'unknown(no-paseo)']
 ```
 
@@ -164,7 +164,7 @@ no_cli presences=['unknown(no-paseo)', 'unknown(no-paseo)']
 - notes: 正例：`_register_child`（--register 子 agent 模式的库函数，猴补 ROSTER 到隔离路径，与脚本自身 --self-test 同款手法）重复调用幂等；同 paseo-id 换名字模拟改名 → roster 行原位替换（非追加），状态 yaml 随新名字一致存在。负例：空名字调用真实 CLI（该路径本就在写任何文件前提前返回）→ exit 0 优雅提示，且验证真实 .agent-identity/roster 字节前后不变（未被误触碰）。已知边界（如实记录、非缺陷）：控制面没有统一 rename 原语，改名后旧名字对应的状态 yaml 不会被自动清理/合并，只是不再被 roster 引用。
 - positive: ok=True
 ```
-| 干将·改·g4demo-C改名 | 干将·改 | g4demo-C改名 | demo-branch (wt) | pid-g4-7 | active | 2026-07-17 09:34 | memory/agents/干将·改·g4demo-C改名.yaml |
+| 干将·改·g4demo-C改名 | 干将·改 | g4demo-C改名 | demo-branch (wt) | pid-g4-7 | active | 2026-07-17 14:20 | memory/agents/干将·改·g4demo-C改名.yaml |
 ```
 - negative: ok=True
 ```
