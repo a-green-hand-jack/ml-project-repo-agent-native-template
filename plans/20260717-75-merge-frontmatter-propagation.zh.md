@@ -1,7 +1,7 @@
 # #75 缺口① merge 分类锚文件 frontmatter 结构键传播 交互式计划
 
-Status: draft · 2026-07-17 · ref: issue #75 缺口①；human 已拍板「真修，走 plan」（PR #76 合入说明，
-块 C 由 `memory/branches/74-75-strict-gaps.md` 转本 plan 深化）
+Status: approved · 2026-07-17 · ref: human 于 2026-07-17 经都督·统·治理路线批准方案 ①b（issue #75
+缺口①；四个待拍板问题均已收敛，见「Human 批注区」「当前决策」）
 
 > 这是 human 与 agent 的协商界面：agent 写初稿 → human 在文件里批注 → agent 读 diff、收敛计划 →
 > 每次采纳的修订做一个小 commit。**本 plan 只覆盖设计与决策收敛，approved 后才移交
@@ -239,8 +239,9 @@ relation 字段，不静默）——④不再作为独立终态，而是①b 的
 
 ## Branch / worktree
 
-草稿阶段：`plan/75-merge-frontmatter`（本 worktree）。approved 后按 `worktree-pr-flow` 另开
-独立实现分支（建议 `fix/75-typed-relation-propagation`，具体命名由实现阶段执行官定）。
+草稿阶段：`plan/75-frontmatter-merge`。approved 后按 `worktree-pr-flow` 另开独立实现分支
+`fix/75-typed-relation-propagation`（本 plan 转 approved 的 commit 即落在该分支的独立
+worktree 内，实现阶段沿用同一分支，不再另开）。
 
 ## Linked issue / PR
 
@@ -266,21 +267,46 @@ issue #75（父 #52 P5，源 #58，round1 前例 #60–#63）；块 A/B 已由 P
 - [x] 深化四候选方案对比（新增①a/①b 拆分，明确 union 语义与 parser 复用两个待决问题）
 - [x] 给出推荐方案与理由
 - [x] 起草实现计划（供 approved 后移交）
-- [ ] human 批注收敛
-- [ ] 状态 draft → in-review → approved
-- [ ] 移交 `worktree-pr-flow` 另开分支实现
+- [x] human 批注收敛
+- [x] 状态 draft → approved（human 于 2026-07-17 经都督·统·治理路线一次性批注定稿，跳过独立
+      in-review 停留期；四个 `[?]` 问题均已收敛，见下方批注区）
+- [ ] 移交 `worktree-pr-flow` 另开分支实现（本 plan 批准的独立实现分支：
+      `fix/75-typed-relation-propagation`）
 
 ## Human 批注区
 
-（待 human 批注；批注前缀约定：`[OK]` 采纳 / `[改]` 要求修改 / `[?]` 未决）
+（批注前缀约定：`[OK]` 采纳 / `[改]` 要求修改 / `[?]` 未决——以下四条为 human 于 2026-07-17
+经都督·统·治理路线对「需要 human 拍板的具体问题」逐条批注，无遗留 `[?]`/`[改]`）
+
+1. `[OK]` 认可「新增 TS-12 ≠ 弱化 TS-3」定性——TS-12 是与 merge 哨兵机制正交的新增窄字段追平
+   通道，不改写 TS-3 既有措辞与其「块外内容原样保留」的适用范围；采纳①b、排除①a/②/③。
+2. `[OK]` 接受 `children`/`contracts` 的 union（只增不删）语义、`parent`/`contract_for.owner`
+   的「下游已声明则保留、缺失才从上游补齐」语义；不引入「上游权威覆盖」选项——上游显式删除
+   某 typed relation 条目的场景维持本 plan 既定的非目标（留给 TS-2 既有 MAJOR gate 人工
+   reconcile）。
+3. `[OK]` `template-sync.py` 复用（而非独立重实现）`check-anatomy-drift.py` 的 restricted
+   frontmatter parser（`_frontmatter`/`_extract_scalar`/`_extract_scalar_list`/
+   `_extract_dict_list`），保一致；不提炼第三个共享模块，也不接受「各自实现+一致性测试」的
+   长期漂移风险。
+4. `[OK]` 实现走本独立分支 `fix/75-typed-relation-propagation`（不复用已关闭的
+   `fix/74-75-qualification-strict-gaps`），按 `worktree-pr-flow` 惯例开 fresh worktree。
 
 ## 当前决策
 
-（尚无——待 human 批注后填写，收敛时把「需要 human 拍板的具体问题」逐条落成决策记录于此）
+「需要 human 拍板的具体问题」四条已逐一收敛为正式决策（human 于 2026-07-17 经都督·统·治理
+路线批准，对应「Human 批注区」同序号）：
+
+1. **批准新增 TS-12**（不修改 TS-3 措辞本身）——推荐方案 ①b 采纳，②/③/①a 排除。
+2. **`children`/`contracts` union 语义（只增不删）批准**，不做「上游权威覆盖」——本轮非目标
+   维持不变。
+3. **parser 复用方式：`template-sync.py` 复用 `check-anatomy-drift.py` 的 restricted
+   parser**，不各自实现。具体复用形态（`import`/移植为共享函数）留给实现阶段按最小改动面
+   自行判断，但不得产生第二份独立语法实现。
+4. **实现走独立分支 `fix/75-typed-relation-propagation`**，不复用 PR #76 已关闭分支。
 
 ## 未解决问题
 
-见「需要 human 拍板的具体问题」四条，均标 `[?]`，收敛前不得转 approved。
+（无——四条待拍板问题已全部收敛为「当前决策」，无遗留 `[?]`/`[改]`）
 
 ## 验证标准
 
