@@ -1,6 +1,6 @@
 {
   "meta": {
-    "commit": "35c9bd58820379bebebd1c93b0c747868fc882ae",
+    "commit": "3ada78ae09d439e3b27e91025426fc979274c731",
     "counts": {
       "custom_fixture": 4,
       "fail": 0,
@@ -8,7 +8,7 @@
       "reused_self_test": 5,
       "total": 9
     },
-    "generated_at": "2026-07-16T17:10:05.929174+00:00",
+    "generated_at": "2026-07-17T05:34:35.270132+00:00",
     "group": "g1",
     "runner": "lab/evals/qualification/run-qualification.py",
     "worktree_dirty": true

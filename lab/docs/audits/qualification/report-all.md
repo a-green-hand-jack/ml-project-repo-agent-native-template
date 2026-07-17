@@ -1,7 +1,7 @@
 # Qualification report — group=all
 
-- 被测 commit：`35c9bd58820379bebebd1c93b0c747868fc882ae`
-- 生成时间：2026-07-16T17:12:54.977090+00:00
+- 被测 commit：`3ada78ae09d439e3b27e91025426fc979274c731`
+- 生成时间：2026-07-17T05:33:43.013353+00:00
 - 生成时工作树是否 dirty：True
 - 结果：13/13 PASS（复用 self-test 5 项，自建 fixture 8 项）
 
