@@ -1,0 +1,51 @@
+#!/bin/sh
+# 仓库版 git pre-push hook：git 层地板，拦「push 到受保护分支（main/master）」。
+# 两表面通吃：Claude 表面另有 pre_tool_guard 拦 push main，但 Codex 表面真实 shell
+# push 不走 PreToolUse hook，此 git hook 是唯一 surface-agnostic 的兜底。
+#
+# 启用（每个 clone 一次性，git config 不随 clone 复制；bootstrap 已设）：
+#   git config core.hooksPath .githooks
+# 未配 core.hooksPath 时本 hook 不生效（与 pre-commit 同前提）。
+#
+# 逃生（与 pre-commit / pre_tool_guard.PUSH_ESCAPE_ENVS 一致）：
+#   CLAUDE_ALLOW_PUSH_MAIN=1 git push ...  或  CODEX_ALLOW_PUSH_MAIN=1 git push ...
+#   或 git push --no-verify（绕过所有 hook）。
+#
+# 协议：git 通过 stdin 逐行传 `<local ref> <local sha> <remote ref> <remote sha>`；
+# argv 传 `<remote-name> <remote-url>`。删除 ref（local sha 全 0）到受保护分支同样拦。
+# 路径锚定：真正的 git hook，不在 Claude PreToolUse 环境，无 $CLAUDE_PROJECT_DIR；
+# 但本 hook 无需读仓库文件，逻辑自足，不依赖 cwd。
+
+is_escape() {
+	# 归一化为小写后判断是否 ∈ {1,true,yes}
+	v=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+	case "$v" in
+	1 | true | yes) return 0 ;;
+	*) return 1 ;;
+	esac
+}
+
+if is_escape "$CLAUDE_ALLOW_PUSH_MAIN" || is_escape "$CODEX_ALLOW_PUSH_MAIN"; then
+	exit 0
+fi
+
+blocked=""
+while read -r local_ref local_sha remote_ref remote_sha; do
+	# 空行 / 无 remote_ref 跳过
+	[ -z "$remote_ref" ] && continue
+	case "$remote_ref" in
+	refs/heads/main | refs/heads/master)
+		blocked="$remote_ref"
+		break
+		;;
+	esac
+done
+
+if [ -n "$blocked" ]; then
+	echo "[pre-push] 拒绝：push 到受保护分支（$blocked）需 human 明确放行。" >&2
+	echo "  逃生：命令前加 CLAUDE_ALLOW_PUSH_MAIN=1 / CODEX_ALLOW_PUSH_MAIN=1，或 git push --no-verify。" >&2
+	echo "  topic/实验分支 push 不受限。" >&2
+	exit 1
+fi
+
+exit 0

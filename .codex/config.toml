@@ -74,9 +74,10 @@ command = 'python3 "$(git rev-parse --show-toplevel)/.claude/hooks/context_conti
 timeout = 30
 statusMessage = "Restoring status continuity"
 
-# agent 身份：SessionStart 若已命名则重申「你是 <name>」（Codex matcher 含 startup|resume|clear）
+# agent 身份：SessionStart 若已命名则重申「你是 <name>」。含 compact 与 Claude 表面对齐：
+# compact 丢上下文，重申身份更安全（Codex 0.144 SessionStart source 支持 compact）。
 [[hooks.SessionStart]]
-matcher = "startup|resume|clear"
+matcher = "startup|resume|clear|compact"
 
 [[hooks.SessionStart.hooks]]
 type = "command"

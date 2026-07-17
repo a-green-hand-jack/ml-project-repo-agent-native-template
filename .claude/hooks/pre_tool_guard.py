@@ -88,18 +88,70 @@ def _norm(path: str) -> str:
     return p
 
 
+def _repo_rel(path: str) -> str:
+    """把路径归一化为「相对 REPO_ROOT」形式，供受保护前缀匹配。
+
+    Claude 的 Edit/Write/NotebookEdit 传**绝对路径**，历史上直接对相对前缀
+    (`lab/data/` 等) 做 startswith 恒为 False → 保护是死代码。这里：
+    - 绝对路径：`resolve()` 后取 `relative_to(REPO_ROOT)`；不在 repo 内（受保护目录
+      都在 repo 内，故 repo 外路径本就不受保护）→ 返回原样，前缀不会命中。
+    - 相对路径：去引号 / 去 `./` 后原样返回（保持既有 apply_patch/相对路径行为不变）。
+    """
+    p = path.strip().strip('"').strip("'")
+    if os.path.isabs(p):
+        try:
+            return str(Path(p).resolve().relative_to(REPO_ROOT))
+        except (ValueError, OSError):
+            return p
+    if p.startswith("./"):
+        p = p[2:]
+    return p
+
+
 def _is_protected_file(path: str) -> bool:
-    p = _norm(path)
+    p = _repo_rel(path)
     if p in PROTECTED_FILES:
         return True
     return any(p.startswith(prefix) for prefix in PROTECTED_PREFIXES)
 
 
 def _touches_protected_dir(path: str) -> bool:
-    p = _norm(path).rstrip("/")
+    p = _repo_rel(path).rstrip("/")
     if p in PROTECTED_FILES:
         return True
     return any(p == d or p.startswith(d + "/") for d in PROTECTED_DIRS)
+
+
+def _is_write_redirect(tok: str) -> bool:
+    """token 是否为写重定向算子（`>` `>>` `>|` `&>` `&>>`；fd 数字被 shlex 拆成独立 token）。"""
+    s = tok.lstrip("&")
+    return s in (">", ">>", ">|")
+
+
+def _redirect_targets(raw_cmd: str) -> list[str]:
+    """提取写重定向（`>`/`>>`/`&>`/`N>`/`>|`）的目标路径。
+
+    `_commands()` 分段时丢弃了重定向算子后的目标，故这里单独在 token 流上扫描：
+    写重定向算子 token 的下一个非算子 token 即目标。到 /dev/null 之类的非受保护路径
+    天然不会命中受保护前缀，无需特判。解析失败保守返回空。"""
+    try:
+        lex = shlex.shlex(raw_cmd, posix=True, punctuation_chars=True)
+        lex.whitespace_split = True
+        toks = list(lex)
+    except ValueError:
+        return []
+    targets: list[str] = []
+    expect = False
+    for t in toks:
+        if expect:
+            expect = False
+            if t and set(t) <= set(";|&<>()"):  # 目标缺失（紧跟另一算子）→ 跳过
+                continue
+            targets.append(t)
+            continue
+        if _is_write_redirect(t):
+            expect = True
+    return targets
 
 
 def _dequote(cmd: str) -> str:
@@ -286,6 +338,13 @@ def _check_bash(raw_cmd: str) -> None:
     if DESTRUCTIVE_PROTECTED.search(_dequote(raw_cmd)):
         _block("破坏性命令触碰受保护数据/产物路径（含 find -exec 等嵌套）。删/移 bytes 走 human gate。")
 
+    # 写入受保护路径：重定向目标（> >> &> N> >|），到受保护目录/文件即拦。
+    for target in _redirect_targets(raw_cmd):
+        if _touches_protected_dir(target) or _is_protected_file(target):
+            _block(
+                f"受保护路径不可写：{target}。bytes/私有/产物只留 index，删改走 human gate。"
+            )
+
     # launch/kill/restart 类命令的 human gate 地板（registry 单一真源，薄接线）。
     launch_reason = _launch_gate_reason(raw_cmd)
     if launch_reason:
@@ -322,6 +381,15 @@ def _check_bash(raw_cmd: str) -> None:
             reason = _mvcp_reason(name, args)
             if reason:
                 _block(reason)
+        # touch / ln / tee 把内容或引用写进受保护路径：非选项参数触碰受保护目录/文件即拦。
+        if name in ("touch", "ln", "tee"):
+            for a in args:
+                if a.startswith("-"):
+                    continue
+                if _touches_protected_dir(a) or _is_protected_file(a):
+                    _block(
+                        f"受保护路径不可写：{a}。bytes/私有/产物只留 index，删改走 human gate。"
+                    )
         if name == "git" and args[:1] == ["push"]:
             if _git_push_protected(args[1:]) and not cmd_escape:
                 _block(

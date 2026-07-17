@@ -5,16 +5,25 @@
       "Agent(general-purpose)",
       "Edit(lab/data/**)",
       "Write(lab/data/**)",
+      "NotebookEdit(lab/data/**)",
       "Edit(lab/runs/**)",
       "Write(lab/runs/**)",
+      "NotebookEdit(lab/runs/**)",
       "Edit(lab/models/**)",
       "Write(lab/models/**)",
+      "NotebookEdit(lab/models/**)",
       "Edit(lab/infra/private/**)",
       "Write(lab/infra/private/**)",
+      "NotebookEdit(lab/infra/private/**)",
       "Edit(checkpoints/**)",
       "Write(checkpoints/**)",
+      "NotebookEdit(checkpoints/**)",
       "Edit(wandb/**)",
       "Write(wandb/**)",
+      "NotebookEdit(wandb/**)",
+      "Edit(mlruns/**)",
+      "Write(mlruns/**)",
+      "NotebookEdit(mlruns/**)",
       "Edit(.env)",
       "Write(.env)",
       "Bash(sudo *)",
@@ -238,7 +247,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash|Edit|Write",
+        "matcher": "Bash|Edit|Write|NotebookEdit",
         "hooks": [
           {
             "type": "command",
@@ -253,7 +262,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "ruff format \"$CLAUDE_FILE_PATHS\" 2>/dev/null || true"
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/format_changed_python.py\""
           },
           {
             "type": "command",

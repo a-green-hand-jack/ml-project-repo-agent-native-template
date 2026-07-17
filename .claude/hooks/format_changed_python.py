@@ -66,9 +66,6 @@ def _repo_python_files(paths: list[str]) -> list[str]:
 
 
 def main() -> None:
-    if shutil.which("ruff") is None:
-        sys.exit(0)
-
     raw = sys.stdin.read()
     event: dict = {}
     if raw.strip():
@@ -79,6 +76,15 @@ def main() -> None:
 
     paths = _repo_python_files(_candidate_paths(event))
     if not paths:
+        sys.exit(0)
+
+    if shutil.which("ruff") is None:
+        # advisory hook：ruff 缺失不阻断 agentic loop，但从静默改为可见提示。
+        print(
+            "[format_changed_python] ruff 不在 PATH：跳过格式化"
+            "（安装 ruff 或 uvx ruff 以启用）",
+            file=sys.stderr,
+        )
         sys.exit(0)
 
     try:
