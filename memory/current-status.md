@@ -1,5 +1,21 @@
 # current-status.md
 
+## 2026-07-17 #74/#75 修复收口（主 agent：都督·统·治理路线）
+
+- **PR #76 合入（`c681a18`）**：writer 干将·修·门禁缺口 + 独立 verifier 师爷·审·门禁缺口 分离作业。
+  - **块 A（#74）已修并 CONFIRMED**：`run-g4-scenario.py` 死代码 `unavailable=` 真接线——装 paseo→
+    T-G4-6 PASS 7/7、剥 PATH 模拟无 paseo→T-G4-6 UNAVAILABLE（不再误判 FAIL）。**#74 关闭**。
+    次要非阻断观察：UNAVAILABLE 时 runner 整体 exit 仍 1（该 runner 未接入任何 strict 门禁，不影响 CI）。
+  - **块 B（#75 缺口②）已修并 CONFIRMED**：`.template-sync-receipt.json` 加入 check-agent-harness
+    `ROOT_WHITELIST`（精确 membership）；独立造未知文件负例证明**白名单未被过度放宽**、g1 runner 9/9。
+- **块 C（#75 缺口①：merge 分类 ANATOMY.md frontmatter 不传播）→ human 拍板「真修，走 plan」**：
+  执行官调查确认它触及**锁定合同 TS-3**（merge 只换哨兵块）+ template-versioning doctrine，未擅改。
+  **下一步：派 interactive-plan-writer 起草改 TS-3/anatomy 的中文 plan doc 落 `plans/` 供 human 批注**，
+  收敛→批准→实现→独立 verifier。**#75 保持 open**（缺口②已修、缺口①走 plan）。
+- 证据：`memory/branches/74-75-strict-gaps.md`（writer 含块 C 调查+4 方案）、`74-75-verify.md`（独立复核）。
+- 两 agent + 两 worktree 归档，分支 `fix/74-75-qualification-strict-gaps` 本地+远端已删。
+- **v1.4.0 剩余**：块 C plan 真修（#75 缺口①）→ **G2（#55，最后一组）** → 发版门 P8。
+
 ## 2026-07-17 G5 收口（主 agent：都督·统·治理路线）
 
 - **#58 通过（默认门禁口径）**：G5 干净 ELF replay（P5）round2——硬分工更新者 A（干将·迁·ELF追平）
