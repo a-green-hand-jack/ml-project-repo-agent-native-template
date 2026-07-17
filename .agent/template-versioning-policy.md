@@ -69,8 +69,10 @@
 - 下游**不要改块内**——要改模板骨架走 ②（上报 issue）。项目特定内容一律写块外自定义区。
 - `validate-governance.py` 的 `check_merge_sentinels()` 强制每个 merge 文件都有成对哨兵，缺了即 FAIL
   （否则该文件会被 sync 整体跳过、静默漂移）。
-- **已知边界**：frontmatter 在块外，不随 sync 更新（哨兵不能放 frontmatter 前，否则破坏 `^---` 解析）。
-  frontmatter 的结构性变更需人工同步或把该文件改判为 framework。
+- frontmatter 在块外，不随本节描述的哨兵机制更新（哨兵不能放 frontmatter 前，否则破坏 `^---`
+  解析）——但 frontmatter 里的 `parent`/`children`/`contracts`/`contract_for` 四个 typed relation
+  窄字段，由 TS-12（`scripts/CONTRACT.md`）自动追平（union/补齐，只增不删），不再需要人工同步；
+  这四个字段之外的 frontmatter 结构性变更仍需人工同步或把该文件改判为 framework。
 
 ## 什么算「框架层」
 
