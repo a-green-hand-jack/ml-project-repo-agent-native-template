@@ -26,3 +26,6 @@
   `unverified_reason`/显式 warning)在 exit code 与 tracked-byte integrity 解耦后仍然可读、
   不被静默吞掉;与 Agent-R1 replay 是不同 repo 案例,覆盖不同的原生测试命令检测类型
   (`Makefile` `test:` target,而非 undetected)。
+- `qualification/`——issue #54/#59 的 A 层 qualification runner
+  (`lab/evals/qualification/run-qualification.py`)产出的 G1(9 项静态门禁)+ G6(4 项
+  Codex adapter parity)证据双形态(`report-{g1,g6,all}.{json,md}`),含被测 commit sha。
