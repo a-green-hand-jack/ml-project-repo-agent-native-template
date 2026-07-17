@@ -1,7 +1,8 @@
 # #75 缺口① merge 分类锚文件 frontmatter 结构键传播 交互式计划
 
-Status: approved · 2026-07-17 · ref: human 于 2026-07-17 经都督·统·治理路线批准方案 ①b（issue #75
-缺口①；四个待拍板问题均已收敛，见「Human 批注区」「当前决策」）
+Status: verified · 2026-07-17 · ref: human 批准方案 ①b 后已实现并合入 main（PR #77，commit
+d4680c3），独立 verifier 师爷·审·typed传播 APPROVE（memory/branches/75-typed-verify.md），issue #75
+已关闭
 
 > 这是 human 与 agent 的协商界面：agent 写初稿 → human 在文件里批注 → agent 读 diff、收敛计划 →
 > 每次采纳的修订做一个小 commit。**本 plan 只覆盖设计与决策收敛，approved 后才移交
