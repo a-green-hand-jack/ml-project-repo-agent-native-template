@@ -29,6 +29,7 @@
 """
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -112,10 +113,161 @@ def check_yaml() -> None:
                 errors.append(f"YAML 解析失败：{f.relative_to(REPO)}: {e}")
 
 
+class _RestrictedYamlError(Exception):
+    """受限解析器无法解析输入时抛出，让上层像 PyYAML 解析失败一样 fail-closed。"""
+
+
+def _strip_yaml_comment(line: str) -> str:
+    """去掉行内 `#` 注释；引号内的 `#` 与非空白前缀的 `#` 不算注释（对齐 PyYAML）。"""
+    out: list[str] = []
+    quote: str | None = None
+    prev_space = True  # 行首等价于「前面是空白」
+    for ch in line:
+        if quote is not None:
+            out.append(ch)
+            if ch == quote:
+                quote = None
+            prev_space = False
+        elif ch in ("'", '"'):
+            quote = ch
+            out.append(ch)
+            prev_space = False
+        elif ch == "#" and prev_space:
+            break
+        else:
+            out.append(ch)
+            prev_space = ch in (" ", "\t")
+    return "".join(out)
+
+
+def _restricted_scalar(raw: str):
+    """把标量文本还原成 Python 值（bool/null/int/float/inline-list/str），对齐本仓其它受限解析器。"""
+    v = raw.strip()
+    if not v:
+        return None
+    low = v.lower()
+    if low in ("null", "~"):
+        return None
+    if low == "true":
+        return True
+    if low == "false":
+        return False
+    if len(v) >= 2 and v[0] in ("'", '"') and v[-1] == v[0]:
+        return v[1:-1]  # 去引号（本仓数据无转义序列）
+    if v == "[]":
+        return []
+    if v.startswith("[") and v.endswith("]"):
+        inner = v[1:-1].strip()
+        return [_restricted_scalar(x) for x in inner.split(",") if x.strip()] if inner else []
+    if re.fullmatch(r"-?\d+", v):
+        return int(v)
+    if re.fullmatch(r"-?\d+\.\d+", v):
+        return float(v)
+    return v
+
+
+def _is_key_line(s: str) -> bool:
+    """判断一行是否是 `key: ...` 映射项（而非标量/行内列表/块列表项）。"""
+    if not s or s[0] in "\"'[{":
+        return False
+    idx = s.find(":")
+    if idx <= 0:
+        return False
+    after = s[idx + 1:]
+    return after == "" or after[0] == " "
+
+
+def _restricted_yaml_load(text: str) -> dict:
+    """无 PyYAML 时的受限块式解析器：支持扁平 mapping、块列表（标量项或 mapping 项）、
+    行内列表 `[a, b]`、带引号字符串、bool/null/数字。只覆盖本仓 research/*.yaml 的结构；
+    遇到不支持的结构抛 _RestrictedYamlError（fail-closed，不静默吞）。返回顶层 mapping。
+    """
+    if "\t" in text:
+        raise _RestrictedYamlError("含制表符（应用空格）")
+    toks: list[tuple[int, bool, str]] = []  # (indent, is_seq_marker, content)
+    for raw in text.splitlines():
+        line = _strip_yaml_comment(raw)
+        if not line.strip():
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        s = line.strip()
+        if s == "-":
+            toks.append((indent, True, ""))
+        elif s.startswith("- "):
+            toks.append((indent, True, ""))
+            toks.append((indent + 2, False, s[2:].strip()))
+        else:
+            toks.append((indent, False, s))
+    n = len(toks)
+
+    def parse(i: int, indent: int):
+        _, is_marker, content = toks[i]
+        if is_marker:
+            return parse_seq(i, indent)
+        if _is_key_line(content):
+            return parse_map(i, indent)
+        return _restricted_scalar(content), i + 1
+
+    def parse_seq(i: int, indent: int):
+        seq: list = []
+        while i < n and toks[i][0] == indent and toks[i][1]:
+            i += 1  # 吃掉序列项标记
+            if i < n and toks[i][0] > indent:
+                val, i = parse(i, toks[i][0])
+                seq.append(val)
+            else:
+                seq.append(None)
+        return seq, i
+
+    def parse_map(i: int, indent: int):
+        m: dict = {}
+        while i < n and toks[i][0] == indent and not toks[i][1]:
+            content = toks[i][2]
+            if not _is_key_line(content):
+                raise _RestrictedYamlError(f"无法解析行（期望 `key:`）：{content!r}")
+            key, _, val = content.partition(":")
+            key, val = key.strip(), val.strip()
+            i += 1
+            if val == "":
+                if i < n and toks[i][0] > indent:
+                    child, i = parse(i, toks[i][0])
+                    m[key] = child
+                else:
+                    m[key] = None
+            else:
+                m[key] = _restricted_scalar(val)
+        return m, i
+
+    if n == 0:
+        return {}
+    value, end = parse(0, toks[0][0])
+    if end != n:
+        raise _RestrictedYamlError(f"存在未能消费的行（第 {end} 个 token 起结构不受支持）")
+    return value if isinstance(value, dict) else {}
+
+
+_RESTRICTED_WARNED = False
+
+
+def _load_mapping(path: Path) -> dict:
+    """载入 YAML 顶层 mapping。有 PyYAML 时用 yaml.safe_load（行为逐字节不变）；
+    无 PyYAML 时回退内置受限解析器真跑检查。解析失败抛异常，由调用方 fail-closed 记 error。"""
+    global _RESTRICTED_WARNED
+    text = path.read_text(encoding="utf-8")
+    try:
+        import yaml  # type: ignore
+    except ImportError:
+        if not _RESTRICTED_WARNED:
+            warnings.append("未安装 PyYAML：治理语义检查改用内置受限解析器（非 PyYAML）执行")
+            _RESTRICTED_WARNED = True
+        return _restricted_yaml_load(text) or {}
+    return yaml.safe_load(text) or {}
+
+
 def check_evidence_chain() -> None:
     """证据链一致性 + overclaim 拦截（见 lab/research/ANATOMY.md、.agent/principles.md）。
 
-    只在有 PyYAML 时运行（需解析结构）；否则跳过并告警。
+    有 PyYAML 时用 yaml.safe_load；无则用内置受限解析器，语义检查照跑。
     规则：
     - 引用完整：claim.evidence[] 里的 ev id 必须存在；evidence.supports_claim 必须指向已知 claim。
     - overclaim：证据分层 log<metric<table<figure<paper-claim。
@@ -130,13 +282,8 @@ def check_evidence_chain() -> None:
     if not (claims_f.exists() and ev_f.exists()):
         return
     try:
-        import yaml  # type: ignore
-    except ImportError:
-        warnings.append("未安装 PyYAML：跳过证据链一致性检查")
-        return
-    try:
-        claims = (yaml.safe_load(claims_f.read_text(encoding="utf-8")) or {}).get("claims") or []
-        evlist = (yaml.safe_load(ev_f.read_text(encoding="utf-8")) or {}).get("evidence") or []
+        claims = (_load_mapping(claims_f)).get("claims") or []
+        evlist = (_load_mapping(ev_f)).get("evidence") or []
     except Exception as e:  # noqa: BLE001
         errors.append(f"证据链解析失败：{e}")
         return
@@ -221,13 +368,11 @@ def check_evidence_chain() -> None:
 
 def _load_claim_ids(research: Path):
     """读 lab/research/claims.yaml，返回真实 claim id 集合；解析失败返回 None。"""
-    import yaml  # type: ignore
-
     claims_f = research / "claims.yaml"
     if not claims_f.exists():
         return set()
     try:
-        claims = (yaml.safe_load(claims_f.read_text(encoding="utf-8")) or {}).get("claims") or []
+        claims = (_load_mapping(claims_f)).get("claims") or []
     except Exception:  # noqa: BLE001
         return None
     return {c.get("id") for c in claims if isinstance(c, dict)}
@@ -240,7 +385,7 @@ def _is_placeholder(value) -> bool:
 def check_release_gates() -> None:
     """发布闸门一致性（见 lab/research/ANATOMY.md）。
 
-    只在有 PyYAML 时运行；否则跳过并告警。
+    有 PyYAML 时用 yaml.safe_load；无则用内置受限解析器，语义检查照跑。
     规则：
     - gate_status 必须 ∈ {open, passed, blocked}。
     - 只有 gate_status != open 时才校验 for_claim：占位符（`<...>`）或引用未知 claim 均报错。
@@ -251,12 +396,7 @@ def check_release_gates() -> None:
     if not gates_f.exists():
         return
     try:
-        import yaml  # type: ignore
-    except ImportError:
-        warnings.append("未安装 PyYAML：跳过发布闸门一致性检查")
-        return
-    try:
-        gates = (yaml.safe_load(gates_f.read_text(encoding="utf-8")) or {}).get("gates") or []
+        gates = (_load_mapping(gates_f)).get("gates") or []
     except Exception as e:  # noqa: BLE001
         errors.append(f"release-gates.yaml 解析失败：{e}")
         return
@@ -285,7 +425,7 @@ def check_release_gates() -> None:
 def check_regression_matrix() -> None:
     """回归矩阵一致性（见 lab/research/ANATOMY.md）。
 
-    只在有 PyYAML 时运行；否则跳过并告警。
+    有 PyYAML 时用 yaml.safe_load；无则用内置受限解析器，语义检查照跑。
     规则：
     - check_kind 必须 ∈ {test, smoke, metric-threshold, numerical-equivalence}。
     - last_status 必须 ∈ {unknown, pass, fail}。
@@ -297,12 +437,7 @@ def check_regression_matrix() -> None:
     if not reg_f.exists():
         return
     try:
-        import yaml  # type: ignore
-    except ImportError:
-        warnings.append("未安装 PyYAML：跳过回归矩阵一致性检查")
-        return
-    try:
-        regs = (yaml.safe_load(reg_f.read_text(encoding="utf-8")) or {}).get("regressions") or []
+        regs = (_load_mapping(reg_f)).get("regressions") or []
     except Exception as e:  # noqa: BLE001
         errors.append(f"regression-matrix.yaml 解析失败：{e}")
         return
