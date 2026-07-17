@@ -31,4 +31,7 @@
   Codex adapter parity)证据双形态(`report-{g1,g6,all}.{json,md}`),含被测 commit sha;
   同目录下 `report-g4.{json,md}` 是 issue #57 的 D 层 G4 双 agent 场景驱动
   (`lab/evals/control-plane/run-g4-scenario.py`)产出的 7 项 T-ID 证据,格式同构但覆盖对象
-  不同(运行时多 agent 协作机制,非静态门禁)。
+  不同(运行时多 agent 协作机制,非静态门禁)。同目录下 `report-g3.md` 是 issue #56 的 D 层
+  workflow skills/commands 端到端演练:对 8 个 `.claude/skills/`/`.claude/commands/`
+  逐一走一个真实小任务/干跑留证据,判 PASS/FAIL/UNAVAILABLE;无独立驱动脚本(人工/agent
+  按各 SKILL.md 逐条执行,隔离干跑项用 `/tmp` fixture,不进 repo)。

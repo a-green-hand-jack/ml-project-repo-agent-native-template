@@ -29,6 +29,7 @@ release/version/tag，远端保持不变。
 | issue-16-experiment-control | Experiment lifecycle/control plane | local `main` merge `cbf6ab6`; source `ecf0c80`; feature branch/worktree retired | `plans/20260712-experiment-control-plane.zh.md` | APPROVE + integrated | Four-mode interpreter and strict integration checks passed. |
 | issue-17-evidence-chain | Artifact→evidence→claim→deliverable provenance | local `main` merge `405c542`; source `52f83aa`; feature branch/worktree retired | `plans/20260712-artifact-evidence-chain.zh.md` | APPROVE + integrated | Integration candidate was freshly re-reviewed after #16 status compatibility fix. |
 | issue-18-anatomy-parity | ANATOMY semantic parity and runtime evidence | `feat/18-anatomy-semantic-parity` / `.claude/worktrees/18-anatomy-semantic-parity` at `cebe427` | `plans/20260712-anatomy-semantic-parity.zh.md` | code APPROVE / final runtime pending | Integrate #13 compatibility, complete C1-C7/X1-X7 with `--require-fresh`, then run exact-HEAD fresh review. |
+| issue-56-g3-skills | G3 工作流 skills/commands 端到端演练（8 个 T-ID） | `test/g3-skills-walkthrough` / `/home/user/.paseo/worktrees/1kaz3672/g3-skills-walkthrough` | _none_ | in progress | 完成剩余 T-ID→写 report-g3.md+分支报告→开 PR（不 merge）。 |
 
 ### Handoff note — issue-12b-semantic-classification（2026-07-13）
 
@@ -48,6 +49,16 @@ release/version/tag，远端保持不变。
 - 后续 fresh reviews 又发现 canonical/fallback state leaf symlink 与 persisted classification 重验缺口；
   分别在 `7ff5720`、`f33ff9c` fail-closed 修复，并把 B smoke 扩到 21 场景。最终独立 Codex reviewer
   对 `f33ff9c` 给出 `APPROVE`；本地集成同时保留 C 的 6 个专项负向场景与 clean pass 断言。
+
+### Boundary note — issue-56-g3-skills（2026-07-17）
+
+- 由 `session-boundary-control` skill 演练触发（issue #56，父 issue #52 P7）：任务树已分叉出
+  8 个 T-ID 子任务（T-G3-1~T-G3-8，逐一走查 `.claude/skills/`/`.claude/commands/`），命中
+  「任务树出现 ≥2 个子任务」边界信号，判定动作 = branch（登记子任务节点，非 clear/compact）。
+- T-G3-1~T-G3-4 已完成（worktree-pr-flow S2 清单起草中、spawn in-session 子 agent 演示、
+  subagent-routing launch packet、interactive-plan-doc 隔离干跑），T-G3-5（本 skill）执行中，
+  T-G3-6/7/8 待做；无独立 plan doc，授权来自 issue #56 口头交代。
+- 未改 `memory/current-status.md`（父 session 都督·统·治理路线维护，本次不动）。
 
 ## Merge / review order
 
