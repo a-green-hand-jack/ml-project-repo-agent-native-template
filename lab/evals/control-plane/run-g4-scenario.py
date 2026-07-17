@@ -395,11 +395,21 @@ def t_g4_6() -> dict:
                             unread_B=entries.get(B, {}).get("unread_inbox"))
 
         # 负例分支 a：agent 未登记 paseo_id，但环境里 paseo CLI 真实可用（默认带 paseo 交叉校验）
-        # → presence 优雅降级为 "-"，不 raise。
+        # → presence 优雅降级为 "-"，不 raise。这条断言只在本机真装了 paseo CLI 时才有意义——若
+        # 本机没装 paseo，agent-status.py 的 paseo_live_ids() 本身就会返回 None，presence 会整体
+        # 降级成 "unknown(no-paseo)"（与分支 b 的模拟环境同构），"-" 这条断言在这种机器上永远无法
+        # 被证明，不是缺陷。此时按文件顶部文档过的 UNAVAILABLE 语义标记（而非伪造 PASS 或误判
+        # FAIL）：接线 outcome(unavailable=...)。
+        paseo_installed = shutil.which("paseo") is not None
         p_no_pid = run("agent-status.py", ["--json", "--root", str(root)], root)
         entries_no_pid = {e["name"]: e for e in json.loads(p_no_pid.stdout or "[]")}
-        no_pid_ok = (p_no_pid.returncode == 0
-                     and entries_no_pid.get(A, {}).get("paseo_presence") == "-")
+        no_pid_presence = entries_no_pid.get(A, {}).get("paseo_presence")
+        if paseo_installed:
+            no_pid_ok = p_no_pid.returncode == 0 and no_pid_presence == "-"
+            no_pid_unavailable = False
+        else:
+            no_pid_ok = p_no_pid.returncode == 0 and no_pid_presence == "unknown(no-paseo)"
+            no_pid_unavailable = True
 
         # 负例分支 b：PATH 里去掉 paseo 二进制，模拟"缺 Paseo"→ 全部 presence 降级为
         # unknown(no-paseo)，不 raise。
@@ -413,16 +423,20 @@ def t_g4_6() -> dict:
 
         neg_ok = no_pid_ok and no_cli_ok
         negative = outcome(neg_ok,
-                            f"no_pid presence={entries_no_pid.get(A, {}).get('paseo_presence')}\n"
+                            f"no_pid presence={no_pid_presence} (paseo_installed={paseo_installed})\n"
                             f"no_cli presences="
                             f"{[e.get('paseo_presence') for e in entries_no_cli.values()]}",
-                            no_pid_ok=no_pid_ok, no_cli_ok=no_cli_ok)
+                            no_pid_ok=no_pid_ok, no_cli_ok=no_cli_ok,
+                            unavailable=no_pid_unavailable)
     return make_result(
         tid, "agent-status 聚合视图（±Paseo 降级）",
         positive, negative,
         "正例：--no-paseo 纯 repo 视图列出 A/B 的 status/heartbeat/unread。负例两分支：(a) 本机"
-        "真实 paseo CLI 可用但 agent 未登记 paseo_id → presence='-'，不 raise；(b) PATH 剥掉 "
-        "paseo 二进制模拟缺 Paseo → 全体 presence 降级为 unknown(no-paseo)，exit 仍为 0。",
+        "真实 paseo CLI 可用但 agent 未登记 paseo_id → presence='-'，不 raise；本机若没装 paseo "
+        "CLI，这条断言天然无法证明（会自然落进 unknown(no-paseo)，与分支 b 同构），标 "
+        "UNAVAILABLE（而非误判 FAIL 或伪造 PASS）；(b) PATH 剥掉 paseo 二进制模拟缺 Paseo → 全体 "
+        "presence 降级为 unknown(no-paseo)，exit 仍为 0，这条断言不依赖本机是否真装 paseo，永远"
+        "跑。",
     )
 
 

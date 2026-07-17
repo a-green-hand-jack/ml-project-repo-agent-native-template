@@ -208,21 +208,40 @@ def t_g1_4() -> dict:
 def t_g1_5() -> dict:
     tid, group, validator = "T-G1-5", "g1", "scripts/check-agent-harness.py"
     with fixture("g1-5-pos") as fx:
+        # 模拟下游用默认路径跑过一次 template-sync.py --commit 后的根目录状态（issue #75
+        # 缺口②回归）：receipt 文件必须在 ROOT_WHITELIST 里，不能被误判为根污染。
+        (fx / ".template-sync-receipt.json").write_text(
+            json.dumps({"schema": "template-sync-receipt/v1", "result": "pass"}) + "\n",
+            encoding="utf-8",
+        )
         proc = run_script(fx, validator, ["--strict"])
-        positive = mk_outcome(proc, proc.returncode == 0)
+        out = proc.stdout + proc.stderr
+        no_receipt_pollution_warning = ".template-sync-receipt.json" not in out
+        positive = mk_outcome(proc, proc.returncode == 0 and no_receipt_pollution_warning,
+                               {"injection": "根目录放一份 .template-sync-receipt.json（默认 sync 落盘路径），"
+                                             "期望 --strict 仍 OK 且不告警该文件"})
     with fixture("g1-5-neg") as fx:
         target = fx / ".claude" / "hooks" / "subagent_report_index.py"
         assert target.exists(), "预期 hook 脚本不存在，fixture 与预期不符"
         target.unlink()
+        # 顺带证明 ROOT_WHITELIST 加了 receipt 文件后没有被顺手改宽：一个真正未知的根文件仍应
+        # 触发根污染告警（负例本身用 --strict，告警在 strict 下会算进 FAIL 计数）。
+        (fx / "_qual_unknown_root_probe.md").write_text("throwaway\n", encoding="utf-8")
         proc = run_script(fx, validator, ["--strict"])
         out = proc.stdout + proc.stderr
         located = "hook 脚本不存在：.claude/hooks/subagent_report_index.py" in out
-        negative = mk_outcome(proc, proc.returncode != 0 and located,
-                               {"injection": "删除 .claude/hooks/subagent_report_index.py（settings.json 与 .codex/config.toml 均引用）"})
+        pollution_still_detected = "_qual_unknown_root_probe.md" in out and "根目录疑似污染" in out
+        negative = mk_outcome(proc, proc.returncode != 0 and located and pollution_still_detected,
+                               {"injection": "删除 .claude/hooks/subagent_report_index.py（settings.json 与 "
+                                             ".codex/config.toml 均引用）+ 根目录放一个真正未知文件",
+                                "pollution_still_detected": pollution_still_detected})
     return make_result(
         tid, group, validator, "custom-fixture", positive, negative,
-        "负例删一处被 .claude/settings.json hooks 声明引用的脚本文件，触发 check_settings() 的"
-        "hook 存在性校验。",
+        "正例额外覆盖 issue #75 缺口②回归：根目录放一份 template-sync.py 默认路径落盘的 "
+        ".template-sync-receipt.json，证明 --strict 不再误判根污染。负例删一处被 "
+        ".claude/settings.json hooks 声明引用的脚本文件（触发 check_settings() 的 hook 存在性"
+        "校验）同时在根目录放一个真正未知文件，证明 ROOT_WHITELIST 加了 receipt 后依旧能拦真"
+        "污染，没有被顺手改宽。",
     )
 
 
