@@ -28,4 +28,7 @@
   (`Makefile` `test:` target,而非 undetected)。
 - `qualification/`——issue #54/#59 的 A 层 qualification runner
   (`lab/evals/qualification/run-qualification.py`)产出的 G1(9 项静态门禁)+ G6(4 项
-  Codex adapter parity)证据双形态(`report-{g1,g6,all}.{json,md}`),含被测 commit sha。
+  Codex adapter parity)证据双形态(`report-{g1,g6,all}.{json,md}`),含被测 commit sha;
+  同目录下 `report-g4.{json,md}` 是 issue #57 的 D 层 G4 双 agent 场景驱动
+  (`lab/evals/control-plane/run-g4-scenario.py`)产出的 7 项 T-ID 证据,格式同构但覆盖对象
+  不同(运行时多 agent 协作机制,非静态门禁)。
