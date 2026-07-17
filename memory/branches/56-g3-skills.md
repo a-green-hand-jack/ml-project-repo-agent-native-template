@@ -31,8 +31,9 @@ HEAD 与声明 base 完全一致；**push/PR 前二次核对**：`git rev-parse 
 
 ## Linked issue / PR
 
-issue #56（子任务），父 issue #52（P7）。PR 见下方「Exit condition」（待本文件所在 commit 完成
-后开，不 merge）。
+issue #56（子任务），父 issue #52（P7）。**PR #73**
+（https://github.com/a-green-hand-jack/ml-project-repo-agent-native-template/pull/73），
+base=main，head=`56-g3-skills`，未 merge，等独立 verifier + human。
 
 ## Owned paths
 
@@ -224,6 +225,6 @@ T-ID 与隔离纪律），照案执行。
 - [x] 隔离干跑项（T-G3-4/T-G3-8，+T-G3-7 fixture）零泄漏核验通过。
 - [x] 治理门禁（`validate-governance.py --strict`）+ `check-same-commit.py --staged` 回归绿。
 - [x] branch status 完整（本文件）。
-- [ ] commits push 到当前分支（`56-g3-skills`）。
-- [ ] 开 PR（base main，正文中文，说明 8 T-ID 结论 + 证据路径 + 2 条真实发现），不 merge，等
-      独立 verifier + human。
+- [x] commits push 到当前分支（`56-g3-skills`，commit `c6f85a1`）。
+- [x] 开 PR（**#73**，base main，正文中文，说明 8 T-ID 结论 + 证据路径 + 2 条真实发现），
+      不 merge，等独立 verifier + human。
