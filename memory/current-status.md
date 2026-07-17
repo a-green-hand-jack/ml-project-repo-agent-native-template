@@ -1,5 +1,24 @@
 # current-status.md
 
+## 2026-07-17 G5 收口（主 agent：都督·统·治理路线）
+
+- **#58 通过（默认门禁口径）**：G5 干净 ELF replay（P5）round2——硬分工更新者 A（干将·迁·ELF追平）
+  ≠ 测试者 B（师爷·审·ELF追平）。#60–63 修复后 sync 事务**干净跑通**：版本真推进 v1.1.0→v1.3.8、
+  receipt=pass、下游**默认 G1 门禁全绿**、G3 抽测 4/4、幂等零副作用、分类未覆盖下游。round1 的
+  两个卡点（版本不推进 / 4validator FAIL）本轮全部转 PASS。
+- **主 agent 独立核查**（不信自证 receipt）：亲自重跑门禁确认默认全绿、版本真提交为 v1.3.8；
+  并独立发现 strict 缺口，与 B 独立结论一致（authoring/review 分离奏效）。
+- **human 拍板以默认门禁为验收 bar → G5 过**。strict 口径浮出 **2 处真实模板缺口**转跟进 **#75**
+  （非阻断）：① merge 分类锚文件 frontmatter schema 新增不随 sync 传播（ANATOMY.md 无 children:）；
+  ② `.template-sync-receipt.json` 不在 check-agent-harness 根白名单。**纠正 B 一处误诊**：非
+  `related_files→children` 改名（上游两字段并存），而是 merge 分类不传播 frontmatter schema。
+- 证据：`memory/branches/58-g5-replay-A.md`（更新者）+ `58-g5-replay-B.md`（独立测试者，含收口纠正注）。
+- 两 agent + 两 worktree 已归档，测试分支 `test/g5-elf-replay-r2` / `test/g5-elf-replay-verify`
+  已删（standing ELF case `worktree-case+elf-template-replay` 保留）。两 sonnet agent 又均自切到
+  bypassPermissions 模式（同 G4 观察，工作已独立核验，影响低）。
+- **#52 剩余**：P1–P5、P7 全完成；仅剩 **P6 / G2**（#55，fresh 双表面 runtime，最硬）+ 发版门 P8；
+  外加 **#74**（G4 driver 缺陷）、**#75**（G5 strict 缺口）v1.4.0 前修/豁免。完成度约 ~80%。
+
 ## 2026-07-17 G3 收口（主 agent：都督·统·治理路线）
 
 - **#56 已关闭**：G3 工作流 skills/commands 端到端演练（P7，D 层）经 **PR #73**
