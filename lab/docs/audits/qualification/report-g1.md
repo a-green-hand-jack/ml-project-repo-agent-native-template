@@ -1,8 +1,8 @@
 # Qualification report — group=g1
 
-- 被测 commit：`3ada78ae09d439e3b27e91025426fc979274c731`
-- 生成时间：2026-07-17T05:34:35.270132+00:00
-- 生成时工作树是否 dirty：True
+- 被测 commit：`d8e05f62acb5ce3d746d4aa4969ec5a5ef4d1953`
+- 生成时间：2026-07-17T11:29:22.667089+00:00
+- 生成时工作树是否 dirty：False
 - 结果：9/9 PASS（复用 self-test 5 项，自建 fixture 4 项）
 
 | T-ID | validator | mode | status | notes |
@@ -11,7 +11,7 @@
 | T-G1-2 | `scripts/check-anatomy-drift.py` | self-test-reuse | PASS | 复用 --self-test：内嵌 governed_components 断链(governed-index-missing) / orphan(governed-index-orphan) / owner 不一致(governed-index-mismatch) 三类对抗 fixture （scripts/check-anatomy-drift.py 源码 620-640 行区间），逐条 PASS/FAIL 均无条件打印。 |
 | T-G1-3 | `scripts/check-doc-lifecycle.py` | self-test-reuse | PASS | 复用 --self-test：内嵌"锚点/注册表状态矛盾被报错"与"跃迁 approved 缺段"两类场景（对应「非法状态转移」——doc-lifecycle 校验的是锚点/注册表一致性 + 跃迁时字段齐全，不是像 validate-experiment-state 那样的显式有向状态机图，如实标注该差异，不过度声称）。 |
 | T-G1-4 | `scripts/check-same-commit.py` | custom-fixture | PASS | fixture 用 git clone（需要真实 git 历史支持 --staged diff）；正例证明合规改动放行，负例证明结构改动未同步更新 anatomy 会被拦。 |
-| T-G1-5 | `scripts/check-agent-harness.py` | custom-fixture | PASS | 负例删一处被 .claude/settings.json hooks 声明引用的脚本文件，触发 check_settings() 的hook 存在性校验。 |
+| T-G1-5 | `scripts/check-agent-harness.py` | custom-fixture | PASS | 正例额外覆盖 issue #75 缺口②回归：根目录放一份 template-sync.py 默认路径落盘的 .template-sync-receipt.json，证明 --strict 不再误判根污染。负例删一处被 .claude/settings.json hooks 声明引用的脚本文件（触发 check_settings() 的 hook 存在性校验）同时在根目录放一个真正未知文件，证明 ROOT_WHITELIST 加了 receipt 后依旧能拦真污染，没有被顺手改宽。 |
 | T-G1-6 | `scripts/check-capability-catalog.py` | self-test-reuse | PASS | 复用 --self-test：16 个 catalog 对抗场景含显式 "missing"（能力未登记，scripts/check-capability-catalog.py:459/379）用例；该 self-test 只在失败时打印case 标签，正常通过时静默——exit 0 + 无 FAIL 行即为全部 16+5 场景符合预期的证据。 |
 | T-G1-7 | `scripts/check-provenance-chain.py` | self-test-reuse | PASS | 复用 --self-test：7+ 个悬空引用负例（evidence/claim/dataset/checkpoint/review/figure，scripts/check-provenance-chain.py:1712-2001 区间的 negative-dangling-* 用例族）；_run_case 只在失败时 append，正常通过时静默。 |
 | T-G1-8 | `scripts/validate-experiment-state.py` | self-test-reuse | PASS | 复用 --self-test：显式非法状态转换用例（run-skip-approval「planned → running」跳过 approved、run-zombie「done → running」回转，命中 scripts/validate-experiment-state.py:233 的状态机拒绝规则）；expect() 只在失败时打印，正常通过时静默。 |
@@ -147,17 +147,18 @@ ERROR .gitignore 未提及受保护路径：lab/data
 ### T-G1-5 — PASS
 
 - validator: `scripts/check-agent-harness.py`（mode=custom-fixture, reused_self_test=False）
-- notes: 负例删一处被 .claude/settings.json hooks 声明引用的脚本文件，触发 check_settings() 的hook 存在性校验。
+- notes: 正例额外覆盖 issue #75 缺口②回归：根目录放一份 template-sync.py 默认路径落盘的 .template-sync-receipt.json，证明 --strict 不再误判根污染。负例删一处被 .claude/settings.json hooks 声明引用的脚本文件（触发 check_settings() 的 hook 存在性校验）同时在根目录放一个真正未知文件，证明 ROOT_WHITELIST 加了 receipt 后依旧能拦真污染，没有被顺手改宽。
 - positive: exit=0 ok=True
 ```
 [check-agent-harness] OK — 0 error(s), 0 warning(s)
 ```
-- negative: exit=1 ok=True injection='删除 .claude/hooks/subagent_report_index.py（settings.json 与 .codex/config.toml 均引用）'
+- negative: exit=1 ok=True injection='删除 .claude/hooks/subagent_report_index.py（settings.json 与 .codex/config.toml 均引用）+ 根目录放一个真正未知文件'
 ```
+WARN  根目录疑似污染（不在白名单）：_qual_unknown_root_probe.md —— 长文/报告/实验记录不应堆在 root
 WARN  DESIGN.md 能力清单过时：hooks 写 11，实际 10。更新 DESIGN.md §10 清单表（repo-doc-steward 职责）。
 ERROR hook 脚本不存在：.claude/hooks/subagent_report_index.py（SubagentStop）
 ERROR Codex hook 脚本不存在：.claude/hooks/subagent_report_index.py（SubagentStop）
-[check-agent-harness] FAIL — 2 error(s), 1 warning(s)
+[check-agent-harness] FAIL — 2 error(s), 2 warning(s)
 ```
 
 ### T-G1-6 — PASS

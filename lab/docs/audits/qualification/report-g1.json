@@ -1,6 +1,6 @@
 {
   "meta": {
-    "commit": "3ada78ae09d439e3b27e91025426fc979274c731",
+    "commit": "d8e05f62acb5ce3d746d4aa4969ec5a5ef4d1953",
     "counts": {
       "custom_fixture": 4,
       "fail": 0,
@@ -8,10 +8,10 @@
       "reused_self_test": 5,
       "total": 9
     },
-    "generated_at": "2026-07-17T05:34:35.270132+00:00",
+    "generated_at": "2026-07-17T11:29:22.667089+00:00",
     "group": "g1",
     "runner": "lab/evals/qualification/run-qualification.py",
-    "worktree_dirty": true
+    "worktree_dirty": false
   },
   "results": [
     {
@@ -90,15 +90,17 @@
       "id": "T-G1-5",
       "mode": "custom-fixture",
       "negative": {
-        "evidence": "WARN  DESIGN.md 能力清单过时：hooks 写 11，实际 10。更新 DESIGN.md §10 清单表（repo-doc-steward 职责）。\nERROR hook 脚本不存在：.claude/hooks/subagent_report_index.py（SubagentStop）\nERROR Codex hook 脚本不存在：.claude/hooks/subagent_report_index.py（SubagentStop）\n[check-agent-harness] FAIL — 2 error(s), 1 warning(s)",
+        "evidence": "WARN  根目录疑似污染（不在白名单）：_qual_unknown_root_probe.md —— 长文/报告/实验记录不应堆在 root\nWARN  DESIGN.md 能力清单过时：hooks 写 11，实际 10。更新 DESIGN.md §10 清单表（repo-doc-steward 职责）。\nERROR hook 脚本不存在：.claude/hooks/subagent_report_index.py（SubagentStop）\nERROR Codex hook 脚本不存在：.claude/hooks/subagent_report_index.py（SubagentStop）\n[check-agent-harness] FAIL — 2 error(s), 2 warning(s)",
         "exit_code": 1,
-        "injection": "删除 .claude/hooks/subagent_report_index.py（settings.json 与 .codex/config.toml 均引用）",
-        "ok": true
+        "injection": "删除 .claude/hooks/subagent_report_index.py（settings.json 与 .codex/config.toml 均引用）+ 根目录放一个真正未知文件",
+        "ok": true,
+        "pollution_still_detected": true
       },
-      "notes": "负例删一处被 .claude/settings.json hooks 声明引用的脚本文件，触发 check_settings() 的hook 存在性校验。",
+      "notes": "正例额外覆盖 issue #75 缺口②回归：根目录放一份 template-sync.py 默认路径落盘的 .template-sync-receipt.json，证明 --strict 不再误判根污染。负例删一处被 .claude/settings.json hooks 声明引用的脚本文件（触发 check_settings() 的 hook 存在性校验）同时在根目录放一个真正未知文件，证明 ROOT_WHITELIST 加了 receipt 后依旧能拦真污染，没有被顺手改宽。",
       "positive": {
         "evidence": "[check-agent-harness] OK — 0 error(s), 0 warning(s)",
         "exit_code": 0,
+        "injection": "根目录放一份 .template-sync-receipt.json（默认 sync 落盘路径），期望 --strict 仍 OK 且不告警该文件",
         "ok": true
       },
       "reused_self_test": false,
