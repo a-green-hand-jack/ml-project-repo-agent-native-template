@@ -1,5 +1,22 @@
 # current-status.md
 
+## 2026-07-17 G4 收口（主 agent：都督·统·治理路线）
+
+- **#57 已关闭**：G4 多 agent 控制面全链路（P7，D 层「双 agent 场景」）经 **PR #72**
+  squash-merged（`a6152b6`）。writer 干将·演·控制面 + 独立 verifier 师爷·审·控制面 分离作业：
+  7/7 T-ID 独立 CONFIRMED-PASS（负例逐一验证真拒绝、非吞异常）、5 脚本 76 项 self-test 独立
+  计数吻合、场景两跑 `jq` 结构逐字节一致、**隔离零泄漏两跑确认**（D 层证据命门）、
+  `validate-governance --strict` 全绿。总裁决 **APPROVE**。
+- 证据：`lab/evals/control-plane/run-g4-scenario.py`+README、
+  `lab/docs/audits/qualification/report-g4.{json,md}`、writer 报告
+  `memory/branches/57-g4-control-plane.md`、独立复核报告 `memory/branches/57-g4-verify.md`
+  （原文随复核 worktree 归档丢失、由主 agent 如实转录回 main，provenance 已注明）。
+- 两个 agent + 两个 worktree 已归档，分支 `g4-dual-agent-verification` 本地+远端已删。
+- 三条非阻断观察（分支命名漂移、`agent_name_set` 无统一 rename 原语、T-G4-6 降级负例本机需
+  剥 PATH）已记录，双方独立核实属实。
+- **#52 剩余**：P5（G5 干净 ELF replay，#58）、P6（G2 fresh 双表面 runtime，#55）、
+  P7 另一半（G3 skills 全量，#56）仍冻结/未开；全过后 v1.4.0（human 批）。
+
 ## 2026-07-17 P4 收口（主 agent：都督·统·治理路线）
 
 - **#54/#59 已关闭**：P4 qualification runner 经 **PR #71** merged（`fda5ef0`）。13/13 T-ID
