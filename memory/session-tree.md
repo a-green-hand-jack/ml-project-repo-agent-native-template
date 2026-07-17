@@ -29,7 +29,7 @@ release/version/tag，远端保持不变。
 | issue-16-experiment-control | Experiment lifecycle/control plane | local `main` merge `cbf6ab6`; source `ecf0c80`; feature branch/worktree retired | `plans/20260712-experiment-control-plane.zh.md` | APPROVE + integrated | Four-mode interpreter and strict integration checks passed. |
 | issue-17-evidence-chain | Artifact→evidence→claim→deliverable provenance | local `main` merge `405c542`; source `52f83aa`; feature branch/worktree retired | `plans/20260712-artifact-evidence-chain.zh.md` | APPROVE + integrated | Integration candidate was freshly re-reviewed after #16 status compatibility fix. |
 | issue-18-anatomy-parity | ANATOMY semantic parity and runtime evidence | `feat/18-anatomy-semantic-parity` / `.claude/worktrees/18-anatomy-semantic-parity` at `cebe427` | `plans/20260712-anatomy-semantic-parity.zh.md` | code APPROVE / final runtime pending | Integrate #13 compatibility, complete C1-C7/X1-X7 with `--require-fresh`, then run exact-HEAD fresh review. |
-| issue-56-g3-skills | G3 工作流 skills/commands 端到端演练（8 个 T-ID） | `test/g3-skills-walkthrough` / `/home/user/.paseo/worktrees/1kaz3672/g3-skills-walkthrough` | _none_ | in progress | 完成剩余 T-ID→写 report-g3.md+分支报告→开 PR（不 merge）。 |
+| issue-56-g3-skills | G3 工作流 skills/commands 端到端演练（8 个 T-ID） | local `main` merge `3211825`（PR #73）；分支/worktree 已归档 | _none_（授权来自 issue #56） | APPROVE + integrated | 8/8 有结论（6 PASS + 1 UNAVAILABLE-by-design + T-G3-6 PASS 含真实发现）；独立 verifier 师爷·审·工作流 APPROVE；干跑零泄漏成立。G4 driver 缺陷另开 #74。 |
 
 ### Handoff note — issue-12b-semantic-classification（2026-07-13）
 
@@ -59,6 +59,9 @@ release/version/tag，远端保持不变。
   subagent-routing launch packet、interactive-plan-doc 隔离干跑），T-G3-5（本 skill）执行中，
   T-G3-6/7/8 待做；无独立 plan doc，授权来自 issue #56 口头交代。
 - 未改 `memory/current-status.md`（父 session 都督·统·治理路线维护，本次不动）。
+- **收口（2026-07-17，都督·统·治理路线）**：8 个 T-ID 全部走完，PR #73 经独立 verifier
+  APPROVE 后 squash-merge `3211825`、#56 关闭；本条 boundary 结束。G4 driver UNAVAILABLE
+  死代码缺陷（T-G3-6 发现、verifier 独立坐实）另开跟进 #74。
 
 ## Merge / review order
 

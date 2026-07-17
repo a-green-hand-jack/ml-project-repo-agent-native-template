@@ -1,5 +1,24 @@
 # current-status.md
 
+## 2026-07-17 G3 收口（主 agent：都督·统·治理路线）
+
+- **#56 已关闭**：G3 工作流 skills/commands 端到端演练（P7，D 层）经 **PR #73**
+  squash-merged（`3211825`）。writer 干将·演·工作流 + 独立 verifier 师爷·审·工作流 分离：
+  8/8 T-ID 独立确认——6 CONFIRMED-PASS + T-G3-7 CONFIRMED-UNAVAILABLE-by-design（本 repo 是
+  上游模板本身非下游）+ T-G3-6 PASS 含真实发现；**干跑零泄漏独立成立**（plans/doc-lifecycle/
+  experiment-ledger 字节未动）；门禁独立复跑全绿。总裁决 **APPROVE**。
+- 证据：`lab/docs/audits/qualification/report-g3.md`、`memory/branches/56-g3-skills.md`（writer）、
+  `memory/branches/56-g3-verify.md`（独立复核，原文随 worktree 归档丢失、如实转录回 main）。
+- **衍生 #74**：G3 的 pr-review 复审 G4 driver 时发现、verifier 独立坐实——
+  `run-g4-scenario.py` UNAVAILABLE 降级为死代码、无 paseo CLI 机器上 T-G4-6 负例误判 FAIL。
+  MINOR，不影响本轮 G4 结论（本机装了 paseo），但 v1.4.0 前应修或 human 豁免。
+- 两 agent + 两 worktree 已归档，分支 `56-g3-skills` 本地+远端已删，`memory/session-tree.md`
+  stale 行已更新。
+- **另清理**：并发遗留 orchestrator「都督·统·P2收口」(`98b55ecc`，P2/#67 已完成) 与本 session
+  共用同一 main checkout，属冲突隐患，经 human 批准已归档；现仅本 session 单一 orchestrator。
+- **#52 剩余**：**P7 已全数完成（G3+G4）**；剩 **P5**（G5 干净 ELF replay，#58）、**P6**
+  （G2 fresh 双表面 runtime，#55）两组；全过后 v1.4.0（human 批）。资格测试完成度约 ~70%。
+
 ## 2026-07-17 G4 收口（主 agent：都督·统·治理路线）
 
 - **#57 已关闭**：G4 多 agent 控制面全链路（P7，D 层「双 agent 场景」）经 **PR #72**
