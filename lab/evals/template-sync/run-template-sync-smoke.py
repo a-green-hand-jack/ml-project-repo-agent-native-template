@@ -52,6 +52,16 @@ Scenarios (each asserts the P0 transactional contract of issue #35):
 - timeout_unknown: a validator that never returns within --timeout yields
   receipt result=unknown (never pass), keeps the old version, and exits
   non-zero;
+- typed_relation_propagation (issue #75 缺口①, TS-12): a merge file with a
+  downstream-declared `children` entry gets the union of upstream's extra
+  entries appended (not overwritten) and a missing `parent` filled in from
+  upstream, while the merge sentinel swap (TS-3) and the tail outside it stay
+  untouched; a scaffold file with a downstream-declared `contracts` component
+  keeps its own owner value (not clobbered by upstream's) while gaining a new
+  upstream-only component; a merge file with no typed-relation frontmatter at
+  all is a pure no-op; the receipt's `typed_relation_sync` field reports
+  exactly the touched files; an immediate rerun makes zero further changes
+  (idempotent, already-converged union);
 - major_gate: a MAJOR jump without --allow-major is a strict pre-write no-op
   (exit 2, version untouched, no receipt written); with --allow-major it
   proceeds and advances;
@@ -203,6 +213,91 @@ GOVERNANCE_VALIDATOR_NAMES = (
     "check-provenance-chain.py",
     "init-governance-data.py",
 )
+
+# issue #75 缺口①（TS-12）：typed relation 窄字段 union/补齐追平。真实
+# scripts/check-anatomy-drift.py 提供 restricted frontmatter parser（复用，不重实现），
+# 故意不用 gen/** 规则——这个 fixture 只关心 merge/scaffold 的 frontmatter 追平，不重复
+# 五类 ownership 的覆盖面（那部分 check_happy_and_idempotent 已经测过）。
+TYPED_RELATION_MANIFEST = """\
+[[rule]]
+glob = ".template.toml"
+kind = "project"
+[[rule]]
+glob = "VERSION"
+kind = "framework"
+[[rule]]
+glob = "template-manifest.toml"
+kind = "framework"
+[[rule]]
+glob = "merge-typed.md"
+kind = "merge"
+[[rule]]
+glob = "merge-plain.md"
+kind = "merge"
+[[rule]]
+glob = "scaf-typed.md"
+kind = "scaffold"
+"""
+
+
+def build_typed_relation_upstream(root: Path) -> None:
+    write(root / "VERSION", "v1.1.0\n")
+    write(root / "template-manifest.toml", TYPED_RELATION_MANIFEST)
+    write(
+        root / "merge-typed.md",
+        "---\n"
+        "parent: root.md\n"
+        "children:\n"
+        "  - a.md\n"
+        "  - b.md\n"
+        "---\n"
+        f"UP-HEAD\n{SENT_BEGIN}\nUPSTREAM BLOCK v2\n{SENT_END}\nUP-TAIL\n",
+    )
+    write(
+        root / "merge-plain.md",
+        f"UP-HEAD-PLAIN\n{SENT_BEGIN}\nUPSTREAM PLAIN v2\n{SENT_END}\nUP-TAIL-PLAIN\n",
+    )
+    write(
+        root / "scaf-typed.md",
+        "---\n"
+        "contracts:\n"
+        "  - component: c1\n"
+        "    owner: owner-up.md\n"
+        "  - component: c2\n"
+        "    owner: owner-c2.md\n"
+        "---\n"
+        "UPSTREAM SCAFFOLD SEED\n",
+    )
+
+
+def build_typed_relation_downstream(root: Path) -> None:
+    (root / "scripts").mkdir(parents=True, exist_ok=True)
+    shutil.copy2(SCRIPT, root / "scripts" / "template-sync.py")
+    shutil.copy2(REPO / "scripts" / "check-anatomy-drift.py", root / "scripts" / "check-anatomy-drift.py")
+    write(root / "scripts" / "sync-codex-adapters.py", GEN_OK)
+    write(root / "scripts" / "validate-governance.py", VAL_OK)
+    write(root / ".template.toml", '[template]\norigin = "acme/downstream"\nversion = "v1.0.0"\n')
+    write(
+        root / "merge-typed.md",
+        "---\n"
+        "children:\n"
+        "  - c.md\n"
+        "---\n"
+        f"DOWN-HEAD\n{SENT_BEGIN}\nDOWNSTREAM BLOCK v1\n{SENT_END}\nDOWN-TAIL\n",
+    )
+    write(
+        root / "merge-plain.md",
+        f"DOWN-HEAD-PLAIN\n{SENT_BEGIN}\nDOWNSTREAM PLAIN v1\n{SENT_END}\nDOWN-TAIL-PLAIN\n",
+    )
+    write(
+        root / "scaf-typed.md",
+        "---\n"
+        "contracts:\n"
+        "  - component: c1\n"
+        "    owner: owner-down.md\n"
+        "---\n"
+        "DOWNSTREAM SCAFFOLD CONTENT\n",
+    )
 
 
 def fail(label: str, proc: subprocess.CompletedProcess[str] | None = None) -> int:
@@ -363,6 +458,68 @@ def check_governance_data_gap_report(tmp: Path) -> int:
         return fail(f"validator 已存在时不该再报 governance_data_gap，得到 {data2.get('governance_data_gap')}", proc2)
 
     print("[template-sync-smoke] governance_data_gap OK")
+    return 0
+
+
+def check_typed_relation_propagation(tmp: Path) -> int:
+    """issue #75 缺口①（TS-12）：merge/scaffold 且下游已存在的文件，若声明了
+    parent/children/contracts/contract_for，sync 额外做窄字段 union/补齐追平——list 字段
+    只增不删、scalar 字段下游已声明则保留，且完全不影响 TS-3 的哨兵块替换与块外内容。"""
+    up = tmp / "up-tr"
+    down = tmp / "down-tr"
+    receipt = tmp / "receipt-tr.json"
+    build_typed_relation_upstream(up)
+    build_typed_relation_downstream(down)
+
+    proc = run_sync(down, up, receipt)
+    if proc.returncode != 0:
+        return fail("typed relation propagation sync should pass", proc)
+    r = read_json(receipt)
+    if r["result"] != "pass":
+        return fail(f"typed relation sync receipt result should be pass, got {r['result']}", proc)
+
+    merged = (down / "merge-typed.md").read_text(encoding="utf-8")
+    if "parent: root.md" not in merged:
+        return fail(f"downstream missing parent must be filled in from upstream, got:\n{merged}", proc)
+    if "- c.md" not in merged or "- a.md" not in merged or "- b.md" not in merged:
+        return fail(f"children must be the union of downstream + upstream entries, got:\n{merged}", proc)
+    if "DOWNSTREAM BLOCK v1" in merged or "UPSTREAM BLOCK v2" not in merged:
+        return fail(f"TS-3 merge sentinel swap must still happen unaffected by TS-12, got:\n{merged}", proc)
+    if "DOWN-HEAD" not in merged or "DOWN-TAIL" not in merged:
+        return fail(f"TS-3 tail outside the sentinel must still be preserved, got:\n{merged}", proc)
+
+    plain = (down / "merge-plain.md").read_text(encoding="utf-8")
+    if "DOWN-HEAD-PLAIN" not in plain or "UPSTREAM PLAIN v2" not in plain:
+        return fail(f"a merge file with no typed-relation frontmatter must be a pure TS-12 no-op "
+                    f"(only the TS-3 sentinel swap happens), got:\n{plain}", proc)
+
+    scaf = (down / "scaf-typed.md").read_text(encoding="utf-8")
+    if "owner: owner-down.md" not in scaf:
+        return fail(f"downstream-declared component c1 must keep its own owner, not be "
+                    f"overwritten by upstream's owner-up.md, got:\n{scaf}", proc)
+    if "component: c2" not in scaf or "owner: owner-c2.md" not in scaf:
+        return fail(f"a new upstream-only component (c2) must be appended, got:\n{scaf}", proc)
+    if "DOWNSTREAM SCAFFOLD CONTENT" not in scaf:
+        return fail(f"scaffold body content must be untouched by TS-12, got:\n{scaf}", proc)
+
+    tr = r.get("typed_relation_sync")
+    if not tr or not tr.get("applied"):
+        return fail(f"receipt must report typed_relation_sync with applied=true, got {tr}", proc)
+    changed_paths = {c["path"] for c in tr["changes"]}
+    if changed_paths != {"merge-typed.md", "scaf-typed.md"}:
+        return fail(f"typed_relation_sync.changes must cover exactly the two touched files, "
+                    f"got {changed_paths}", proc)
+
+    # idempotent rerun: the union has already converged -> zero further typed-relation changes.
+    rerun = run_sync(down, up, receipt)
+    if rerun.returncode != 0:
+        return fail("typed relation idempotent rerun should exit 0", rerun)
+    r2 = read_json(receipt)
+    if r2["result"] != "pass":
+        return fail(f"typed relation idempotent rerun should stay pass, got {r2['result']}", rerun)
+    if r2.get("typed_relation_sync") is not None:
+        return fail(f"typed relation idempotent rerun must report no further changes, "
+                    f"got {r2.get('typed_relation_sync')}", rerun)
     return 0
 
 
@@ -1160,6 +1317,7 @@ def main() -> int:
             check_generated_stale_rogue_unexpected,
             check_adapter_ownership_exact_set,
             check_governance_data_gap_report,
+            check_typed_relation_propagation,
             check_interrupt_unknown,
             check_commit_interrupt,
             check_timeout_unknown,

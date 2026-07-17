@@ -54,6 +54,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 GOVERNANCE_VALIDATOR_GLOBS = ("scripts/check-*.py", "scripts/validate-*.py")
+# TS-12（issue #75 缺口①）：typed relation 窄字段追平只对这两类生效。framework 已经整体
+# 字节覆盖（含 frontmatter），追平后天然一致，重复计算是无意义的空 diff；project/generated
+# 维持既有「不碰」/「不裸拷贝」承诺不变，见 scripts/CONTRACT.md TS-12。
+TYPED_RELATION_KINDS = frozenset({"merge", "scaffold"})
+_TYPED_RELATION_SUBKEY = {"contracts": "owner", "contract_for": "anatomy"}
 
 DOWNSTREAM = Path(__file__).resolve().parent.parent
 SEMVER_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
@@ -187,8 +192,12 @@ class PlanItem:
     writes: bool
 
 
-def plan_sync(upstream: Path, rules: list[dict]) -> list[PlanItem]:
-    """纯计划：只读上下游，决定每条上游文件的动作，不写任何文件。dry-run/apply 共用。"""
+def plan_sync(upstream: Path, rules: list[dict], mod) -> list[PlanItem]:
+    """纯计划：只读上下游，决定每条上游文件的动作，不写任何文件。dry-run/apply 共用。
+
+    mod：`_load_anatomy_relation_parser()` 的结果（可能为 None），TS-12 typed relation
+    追平复用它的 restricted frontmatter parser。
+    """
     plan: list[PlanItem] = []
     for rel in upstream_files(upstream):
         kind = classify(rel, rules)
@@ -232,6 +241,19 @@ def plan_sync(upstream: Path, rules: list[dict]) -> list[PlanItem]:
                     plan.append(PlanItem(rel, kind, "merge-unchanged", False))
         else:
             plan.append(PlanItem(rel, kind, "unclassified", False))
+            continue
+
+        # TS-12：merge/scaffold 且下游已存在的文件，额外算一次 typed relation 窄字段
+        # union/补齐 diff，与上面的哨兵/scaffold 主动作正交并存（同一路径可能既需要
+        # merge-update 又需要 typed-relation-update）。plan-time 用当前磁盘 dst 计算——
+        # merge/scaffold 的主动作从不touch frontmatter，两者读到的 dst 字节在本次 run 内
+        # 保持一致，diff 不会因为执行顺序而失真。
+        if mod is not None and kind in TYPED_RELATION_KINDS and dst.exists():
+            down_text = dst.read_text(encoding="utf-8", errors="replace")
+            up_text = src.read_text(encoding="utf-8", errors="replace")
+            new_text, _changes = typed_relation_new_text(mod, down_text, up_text)
+            if new_text is not None:
+                plan.append(PlanItem(rel, kind, "typed-relation-update", True))
     return plan
 
 
@@ -240,9 +262,10 @@ def plan_sync(upstream: Path, rules: list[dict]) -> list[PlanItem]:
 class ApplyResult:
     written: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    typed_relation_changes: list[dict] = field(default_factory=list)
 
 
-def apply_plan(plan: list[PlanItem], upstream: Path) -> ApplyResult:
+def apply_plan(plan: list[PlanItem], upstream: Path, mod) -> ApplyResult:
     """按计划落地文件（非 dry-run 才调用）。逐条捕获 OSError，不让半途异常吞掉证据。"""
     res = ApplyResult()
     for item in plan:
@@ -257,6 +280,13 @@ def apply_plan(plan: list[PlanItem], upstream: Path) -> ApplyResult:
                 down_block = sentinel_block(down_text)
                 # 只替换定位到的那一块（count=1），避免子串在文件他处重复时误伤。
                 dst.write_text(down_text.replace(down_block, up_block, 1), encoding="utf-8")
+            elif item.action == "typed-relation-update":
+                down_text = dst.read_text(encoding="utf-8", errors="replace")
+                up_text = src.read_text(encoding="utf-8", errors="replace")
+                new_text, changes = typed_relation_new_text(mod, down_text, up_text)
+                if new_text is not None:
+                    dst.write_text(new_text, encoding="utf-8")
+                    res.typed_relation_changes.append({"path": item.path, "fields": changes})
             else:
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 dst.write_bytes(src.read_bytes())
@@ -269,7 +299,7 @@ def apply_plan(plan: list[PlanItem], upstream: Path) -> ApplyResult:
 def build_manifest(plan: list[PlanItem], applied: ApplyResult, upstream: Path,
                    apply_changed: list[str], generated_outputs: list[str],
                    excluded: list[str], after_gen: dict[str, str],
-                   rules: list[dict]) -> dict:
+                   rules: list[dict], mod) -> dict:
     """基于**真实**磁盘快照的 manifest。
 
     - expected：plan 里 writes=True 的路径（我们打算改的）。
@@ -297,6 +327,13 @@ def build_manifest(plan: list[PlanItem], applied: ApplyResult, upstream: Path,
         elif item.action == "merge-update":
             up_block = sentinel_block(src.read_text(encoding="utf-8", errors="replace"))
             if up_block is None or up_block not in dst.read_text(encoding="utf-8", errors="replace"):
+                landed = False
+        elif item.action == "typed-relation-update":
+            # 回读校验：追平后重新算 diff，仍有残留 gap 才算未生效（TS-12 只增不删，
+            # 不能靠字节相等判定——union 后 dst 与 src frontmatter 本就不会完全相同）。
+            down_text = dst.read_text(encoding="utf-8", errors="replace")
+            up_text = src.read_text(encoding="utf-8", errors="replace")
+            if mod is None or _typed_relation_ops(mod, down_text, up_text):
                 landed = False
         elif dst.read_bytes() != src.read_bytes():
             landed = False
@@ -341,6 +378,170 @@ def build_manifest(plan: list[PlanItem], applied: ApplyResult, upstream: Path,
             "content_mismatches": sorted(set(gen_content_mismatches)),
         },
     }
+
+
+# ── typed relation sync（TS-12，issue #75 缺口①）───────────────────────────
+# merge 分类锚文件（如根 ANATOMY.md）只换哨兵块，frontmatter 原样保留（TS-3）；这条独立、
+# 加法式规则只对 parent/children/contracts/contract_for 四个窄字段做 union/补齐追平，
+# 不改写 TS-3「块外内容原样保留」的适用范围，也不touch frontmatter 其余字段或任何 body 内容。
+# 复用 check-anatomy-drift.py 的 restricted frontmatter parser（human 2026-07-17 决策点 3），
+# 不另起一套语法实现。
+
+
+def _load_anatomy_relation_parser(downstream: Path):
+    """下游尚未落地 check-anatomy-drift.py（老版本模板）时返回 None——TS-12 静默跳过，
+    不阻塞其余 sync 阶段；下游走完整体框架升级后自然会拿到该脚本，typed relation 追平
+    随下一次 sync 自动补上。
+    """
+    mod_path = downstream / "scripts" / "check-anatomy-drift.py"
+    if not mod_path.is_file():
+        return None
+    try:
+        spec = importlib.util.spec_from_file_location("_ts_anatomy_drift", mod_path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        return mod
+    except Exception:  # noqa: BLE001  best-effort：解析失败不阻塞其余 sync 阶段
+        return None
+
+
+def _fm_field_spans(fm: str) -> dict[str, tuple[int, int]]:
+    """扫描 frontmatter 顶层字段的行范围 {key: (start, end)}（end 不含）。只用于定位 TS-12
+    要写入/追加的四个 typed relation 字段，不是通用 YAML 解析——顶层字段=行首无缩进的
+    `key: ...`；缩进的延续行归属上一个顶层字段。
+    """
+    lines = fm.split("\n")
+    spans: dict[str, tuple[int, int]] = {}
+    cur_key: str | None = None
+    cur_start = 0
+    for i, line in enumerate(lines):
+        m = re.match(r"^([A-Za-z0-9_.-]+):", line)
+        if m:
+            if cur_key is not None:
+                spans[cur_key] = (cur_start, i)
+            cur_key = m.group(1)
+            cur_start = i
+    if cur_key is not None:
+        spans[cur_key] = (cur_start, len(lines))
+    return spans
+
+
+def _typed_relation_ops(mod, down_text: str, up_text: str) -> list[dict]:
+    """算出需要写入 downstream frontmatter 的 union/补齐操作（plan 批准的 ①b 语义）：
+
+    - children/contracts（list 语义）：上游 ∪ 下游，按 component/值去重，只增不删。
+    - parent、contract_for 各条目的 anatomy（scalar 语义）：下游已声明则保留，缺失才补齐。
+
+    返回空列表 = 无需改动（幂等：已追平，或上游/下游都没有这些字段）。
+    """
+    down_fm = mod._frontmatter(down_text)
+    up_fm = mod._frontmatter(up_text)
+    if down_fm is None or up_fm is None:
+        return []
+
+    spans = _fm_field_spans(down_fm)
+    ops: list[dict] = []
+
+    down_has_parent, _down_parent = mod._extract_scalar(down_fm, "parent")
+    up_has_parent, up_parent = mod._extract_scalar(up_fm, "parent")
+    if not down_has_parent and up_has_parent and up_parent:
+        ops.append({
+            "key": "parent", "mode": "new", "lines": [f"parent: {up_parent}"],
+            "change": {"key": "parent", "action": "new-field", "value": up_parent},
+        })
+
+    down_children = mod._extract_scalar_list(down_fm, "children")
+    up_children = mod._extract_scalar_list(up_fm, "children")
+    missing_children = [x for x in up_children if x not in down_children]
+    if missing_children:
+        new_lines = [f"  - {x}" for x in missing_children]
+        if "children" in spans:
+            ops.append({
+                "key": "children", "mode": "append", "lines": new_lines,
+                "change": {"key": "children", "action": "append", "added": missing_children},
+            })
+        else:
+            ops.append({
+                "key": "children", "mode": "new", "lines": ["children:"] + new_lines,
+                "change": {"key": "children", "action": "new-field", "added": missing_children},
+            })
+
+    for key, sub in _TYPED_RELATION_SUBKEY.items():
+        down_entries, _ = mod._extract_dict_list(down_fm, key)
+        up_entries, _ = mod._extract_dict_list(up_fm, key)
+        down_components = {e.get("component") for e in down_entries if e.get("component")}
+        added: list[dict] = []
+        new_lines = []
+        for e in up_entries:
+            comp, val = e.get("component"), e.get(sub)
+            if not comp or not val or comp in down_components:
+                continue  # 上游本身残缺/重复 component 交给 check-anatomy-drift 报 schema 违规
+            down_components.add(comp)
+            added.append({"component": comp, sub: val})
+            new_lines.append(f"  - component: {comp}")
+            new_lines.append(f"    {sub}: {val}")
+        if not new_lines:
+            continue
+        if key in spans:
+            ops.append({
+                "key": key, "mode": "append", "lines": new_lines,
+                "change": {"key": key, "action": "append", "added": added},
+            })
+        else:
+            ops.append({
+                "key": key, "mode": "new", "lines": [f"{key}:"] + new_lines,
+                "change": {"key": key, "action": "new-field", "added": added},
+            })
+    return ops
+
+
+def _apply_typed_relation_ops(fm: str, ops: list[dict]) -> str:
+    lines = fm.split("\n")
+    spans = _fm_field_spans(fm)
+    append_ops = sorted(
+        (op for op in ops if op["mode"] == "append"),
+        key=lambda op: spans[op["key"]][1], reverse=True,
+    )
+    for op in append_ops:
+        _, end = spans[op["key"]]
+        lines[end:end] = op["lines"]
+    for op in ops:
+        if op["mode"] == "new":
+            lines.extend(op["lines"])
+    return "\n".join(lines)
+
+
+def typed_relation_new_text(mod, down_text: str, up_text: str) -> tuple[str | None, list[dict]]:
+    """返回 (新的 downstream 全文 或 None, 本次改动的 change 记录列表)。
+
+    只重写 frontmatter 里四个 typed relation 字段对应的行，不touch 其余 frontmatter 字段与任何
+    body/哨兵块内容。None = 无需改动（幂等）。
+    """
+    ops = _typed_relation_ops(mod, down_text, up_text)
+    if not ops:
+        return None, []
+    m = re.search(r"^(---\s*\n)(.*?)(\n---)", down_text, re.DOTALL)
+    if not m:
+        return None, []  # 理论上不会发生（_frontmatter 已确认存在）；fail-safe 不改
+    new_fm = _apply_typed_relation_ops(m.group(2), ops)
+    new_text = down_text[: m.start(2)] + new_fm + down_text[m.end(2) :]
+    return new_text, [op["change"] for op in ops]
+
+
+def preview_typed_relation_changes(plan: list[PlanItem], upstream: Path, mod) -> list[dict]:
+    """dry-run 用：预览 typed-relation-update 计划项会改哪些字段，不写任何文件。"""
+    if mod is None:
+        return []
+    out = []
+    for pi in plan:
+        if pi.action != "typed-relation-update":
+            continue
+        down_text = (DOWNSTREAM / pi.path).read_text(encoding="utf-8", errors="replace")
+        up_text = (upstream / pi.path).read_text(encoding="utf-8", errors="replace")
+        _new_text, changes = typed_relation_new_text(mod, down_text, up_text)
+        if changes:
+            out.append({"path": pi.path, "fields": changes})
+    return out
 
 
 def newly_landed_validators(plan: list[PlanItem]) -> list[str]:
@@ -392,7 +593,9 @@ def classification_summary(plan: list[PlanItem]) -> dict:
     for p in plan:
         key = p.kind if p.kind in out else "unclassified"
         out[key].append(p.path)
-    return {k: sorted(v) for k, v in out.items()}
+    # set()：一条路径可能同时有主动作 + typed-relation-update 两个 PlanItem（同 kind），
+    # 去重避免同一路径在 receipt 分类清单里出现两次。
+    return {k: sorted(set(v)) for k, v in out.items()}
 
 
 # ── atomic version write ─────────────────────────────────────────────────────
@@ -584,9 +787,10 @@ def main() -> int:
     rules = tomllib.loads(manifest_f.read_text(encoding="utf-8")).get("rule", [])
 
     src_id = source_identity(upstream)
+    anatomy_mod = _load_anatomy_relation_parser(DOWNSTREAM)
 
     # ── plan ───────────────────────────────────────────────────────────────
-    plan = plan_sync(upstream, rules)
+    plan = plan_sync(upstream, rules, anatomy_mod)
     warn_merge = [pi.path for pi in plan if pi.action in ("merge-warn-upstream", "merge-warn-downstream")]
     warn_unclassified = [pi.path for pi in plan if pi.action == "unclassified"]
     n_overwrite = sum(1 for pi in plan if pi.action == "overwrite")
@@ -594,14 +798,18 @@ def main() -> int:
     n_merge = sum(1 for pi in plan if pi.action == "merge-update")
     n_project = sum(1 for pi in plan if pi.action == "skip-project")
     n_scaffold_kept = sum(1 for pi in plan if pi.action == "keep-scaffold")
+    n_typed_relation = sum(1 for pi in plan if pi.action == "typed-relation-update")
 
     print(f"\n计划：覆盖(framework) {n_overwrite} · 新建 {n_create} · merge 换块 {n_merge}"
-          f" · 保护(project) {n_project} · scaffold 保留 {n_scaffold_kept}")
+          f" · 保护(project) {n_project} · scaffold 保留 {n_scaffold_kept}"
+          f" · typed relation 追平 {n_typed_relation}")
     for pi in plan:
         if pi.action in ("overwrite", "merge-update"):
             print(f"  ~ {pi.path}")
         elif pi.action in ("create", "merge-create"):
             print(f"  + {pi.path}")
+        elif pi.action == "typed-relation-update":
+            print(f"  ^ {pi.path}（typed relation 追平，TS-12）")
     for w in warn_merge:
         print(f"  WARN merge: {w}（哨兵块缺失，跳过；需人工 reconcile）")
     for u in warn_unclassified:
@@ -633,6 +841,7 @@ def main() -> int:
                      + [f"unclassified:{w}" for w in warn_unclassified]),
         "failure": None,
         "governance_data_gap": None,
+        "typed_relation_sync": None,
     }
 
     # ── dry-run 早退：不写任何文件、不推进版本、不验证 ──────────────────────
@@ -650,6 +859,11 @@ def main() -> int:
             }
             print(f"\n提醒：本次 sync 会新落地门禁 validator：{new_validators}；"
                   "真实 sync 后建议跑 python scripts/init-governance-data.py --dry-run 预览数据层缺口。")
+        typed_relation_preview = preview_typed_relation_changes(plan, upstream, anatomy_mod)
+        if typed_relation_preview:
+            receipt["typed_relation_sync"] = {"applied": False, "changes": typed_relation_preview}
+            print(f"\n提醒：本次 sync 会做 typed relation 追平（TS-12，未落地，见 receipt）："
+                  f"{[c['path'] for c in typed_relation_preview]}")
         print("\n[dry-run] 未落地任何文件、未推进版本、未验证。")
         emit_receipt(receipt, args)
         return 0
@@ -657,8 +871,10 @@ def main() -> int:
     # ── apply（先给下游拍前快照，用于基于真实磁盘的 changed-path 证据）──────
     excluded = snapshot_exclusions(args)
     before_apply = snapshot_tree(DOWNSTREAM, excluded)
-    applied = apply_plan(plan, upstream)
+    applied = apply_plan(plan, upstream, anatomy_mod)
     after_apply = snapshot_tree(DOWNSTREAM, excluded)
+    if applied.typed_relation_changes:
+        receipt["typed_relation_sync"] = {"applied": True, "changes": applied.typed_relation_changes}
 
     # ── verify：生成器（其产物计入真实 changed-path，单列 generated_outputs）──
     print("\n=== 重建 Codex 适配 ===", flush=True)
@@ -694,7 +910,7 @@ def main() -> int:
     apply_changed = diff_snap(before_apply, after_apply)
     generated_outputs = diff_snap(after_apply, after_gen)
     manifest = build_manifest(plan, applied, upstream, apply_changed, generated_outputs,
-                              sorted(excluded), after_gen, rules)
+                              sorted(excluded), after_gen, rules, anatomy_mod)
     receipt["manifest"] = manifest
     apply_ok = not applied.errors and not manifest["missing"] and not manifest["unexpected"]
     receipt["stages"]["apply"] = "ok" if apply_ok else "fail"
