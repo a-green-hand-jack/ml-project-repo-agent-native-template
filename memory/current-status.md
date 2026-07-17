@@ -1,5 +1,16 @@
 # current-status.md
 
+## 2026-07-17 G2/#55 收口——发版门被 #78 阻断（主 agent：都督·统·治理路线）
+
+- **G2（P6，最后一组）测试执行完成，总结论 FAIL**：两个非实现者 fresh session 独立实测双表面 runtime
+  enforcement（Claude + Codex），各写各报告。证据 `memory/branches/55-g2-claude.md` + `55-g2-codex.md`。
+- **7 处缺陷 → 开 #78（分级）**：P0 发版阻断 D1 Codex 保护路径写入无技术拦截、D2 Codex push main 无拦截、
+  D3 Claude pre_tool_guard 对 Edit/Write 绝对路径是死代码（靠 permissions.deny 兜底）、D4 Codex identity 链未完成；
+  P1 D5 formatter hook（接线不符文档 + ruff 缺失静默）；P2 D6 NotebookEdit matcher 盲区、D7 compact 身份重申不等价。
+- **核心发现**：模板 runtime 保护承诺两个表面都有真实缺口（Codex 几乎无技术地板、Claude guard hook 本体死代码）。
+- human 拍板全部开 issue、分级真修再发版。**发版门 P8 被 #78 的 P0（D1–D4）阻断**。
+- **v1.4.0 剩余**：G1–G6 六组全部执行完成；仅剩 #78 P0 真修/豁免 → 发版门 P8。
+
 ## 2026-07-17 #75 缺口①真修收口（主 agent：都督·统·治理路线）
 
 - **PR #77 合入（`d4680c3`）**：#75 缺口①（merge 分类锚文件 frontmatter schema 新增不随 sync
