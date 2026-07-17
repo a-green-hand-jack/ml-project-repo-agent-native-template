@@ -1,5 +1,34 @@
 # current-status.md
 
+## 2026-07-17 #75 缺口①真修收口（主 agent：都督·统·治理路线）
+
+- **PR #77 合入（`d4680c3`）**：#75 缺口①（merge 分类锚文件 frontmatter schema 新增不随 sync
+  传播）走完整 plan 流程真修——`plans/20260717-75-merge-frontmatter-propagation.zh.md`
+  （human 批准方案 ①b：新增独立 **TS-12**，不弱化/不改 TS-3 措辞）。
+  - **实现**：`template-sync.py` 新增 TS-12——merge/scaffold 类型文件的 typed-relation
+    frontmatter 字段（parent/children/contracts/contract_for）窄范围 union/backfill：
+    list 字段只增不删、scalar 字段下游已声明时不覆盖，复用 check-anatomy-drift.py 的
+    restricted parser（未重新实现）；receipt 新增 `typed_relation_sync` 字段。
+    `scripts/CONTRACT.md` 新增 TS-12 条目、`.agent/anatomy-protocol.md` +
+    `.agent/template-versioning-policy.md` 同步；smoke 套件新增 19 场景。
+  - **独立 verifier（师爷·审·typed传播）APPROVE**：另造隔离 fixture（非 writer smoke test）
+    独立复现 ELF replay strict FAIL→OK 转绿；union/负例语义独立成立（下游自定义
+    owner/children 条目不被覆盖）；非 typed 字段/body/哨兵块外内容逐字节未动；TS-3 措辞
+    字符级未改（git diff 确认）；幂等（重跑 0 变更）；门禁全套（validate-governance
+    --strict、smoke、check-anatomy-drift --self-test 16/16）全绿。唯一非阻断发现
+    （plan doc lifecycle 卡在 approved 未推进）已在合入前由主 agent 顺手补齐
+    （approved→implementing，任务树补勾选）。
+  - 证据：`memory/branches/75-typed-relation-impl.md`（writer，含 ELF replay 复验）、
+    `memory/branches/75-typed-verify.md`（独立复核）。
+- **#75 全部关闭**（缺口②/PR #76 之前已修；缺口①/PR #77 本次修）。squash merge 触发
+  GitHub 自动关闭。
+- worktree/agent 清理：verifier 师爷·审·typed传播（`bf0d8597`）已归档；writer
+  干将·修·typed传播 更早已归档（列表已不可见）；worktree
+  `fix-75-typed-relation-propagation` 已删；分支 `fix/75-typed-relation-propagation`
+  本地+远端已删。
+- **v1.4.0 剩余**：**#74、#75 均已清**。仅剩 **G2（#55，P6，fresh 双表面 runtime，
+  最后一组、最硬一块）** → 发版门 P8（CHANGELOG/VERSION/tag/release，需单独 human 批）。
+
 ## 2026-07-17 #74/#75 修复收口（主 agent：都督·统·治理路线）
 
 - **PR #76 合入（`c681a18`）**：writer 干将·修·门禁缺口 + 独立 verifier 师爷·审·门禁缺口 分离作业。
