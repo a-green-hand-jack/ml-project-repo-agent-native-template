@@ -186,11 +186,11 @@ docs:
   - id: plan-20260717-75-merge-frontmatter-propagation
     path: plans/20260717-75-merge-frontmatter-propagation.zh.md
     kind: plan
-    status: approved
+    status: implementing
     issue: "#75"
     branch: fix/75-typed-relation-propagation
     worktree: null
-    approval: "human 于 2026-07-17 经都督·统·治理路线批准方案 ①b：认可新增 TS-12 不弱化 TS-3；接受 children/contracts union 只增不删、parent/contract_for 缺失才补齐语义；template-sync.py 复用 check-anatomy-drift.py 的 restricted parser；实现走独立分支 fix/75-typed-relation-propagation（四个待拍板问题详见 plan doc「Human 批注区」「当前决策」）"
+    approval: "human 于 2026-07-17 经都督·统·治理路线批准方案 ①b：认可新增 TS-12 不弱化 TS-3；接受 children/contracts union 只增不删、parent/contract_for 缺失才补齐语义；template-sync.py 复用 check-anatomy-drift.py 的 restricted parser；实现走独立分支 fix/75-typed-relation-propagation（四个待拍板问题详见 plan doc「Human 批注区」「当前决策」）。实现完成，独立 verifier 师爷·审·typed传播 APPROVE（memory/branches/75-typed-verify.md），待 PR #77 合入后转 verified"
     upstream: []
     downstream: []
     superseded_by: null

@@ -270,8 +270,9 @@ issue #75（父 #52 P5，源 #58，round1 前例 #60–#63）；块 A/B 已由 P
 - [x] human 批注收敛
 - [x] 状态 draft → approved（human 于 2026-07-17 经都督·统·治理路线一次性批注定稿，跳过独立
       in-review 停留期；四个 `[?]` 问题均已收敛，见下方批注区）
-- [ ] 移交 `worktree-pr-flow` 另开分支实现（本 plan 批准的独立实现分支：
-      `fix/75-typed-relation-propagation`）
+- [x] 移交 `worktree-pr-flow` 另开分支实现（本 plan 批准的独立实现分支：
+      `fix/75-typed-relation-propagation`；实现 + 独立 verifier（师爷·审·typed传播）APPROVE，
+      详见 `memory/branches/75-typed-relation-impl.md` / `75-typed-verify.md`）
 
 ## Human 批注区
 
