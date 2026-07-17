@@ -182,3 +182,15 @@ docs:
     upstream: []
     downstream: []
     superseded_by: null
+
+  - id: plan-20260717-75-merge-frontmatter-propagation
+    path: plans/20260717-75-merge-frontmatter-propagation.zh.md
+    kind: plan
+    status: draft
+    issue: "#75"
+    branch: plan/75-merge-frontmatter
+    worktree: null
+    approval: null
+    upstream: []
+    downstream: []
+    superseded_by: null
