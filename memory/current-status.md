@@ -1,5 +1,18 @@
 # current-status.md
 
+## 2026-07-17 P4 收口（主 agent：都督·统·治理路线）
+
+- **#54/#59 已关闭**：P4 qualification runner 经 **PR #71** merged（`fda5ef0`）。13/13 T-ID
+  正负例 PASS；D2 可重复性经主 agent 独立 review worktree 复跑验证（results 逐字节一致，
+  仅 meta.commit 合法差异）。执行官干将·铸·资格评测与 writer/review 两个 worktree 均已归档，
+  分支本地远端已删。
+- 两条 validator 观察待 human 定级（详见 `memory/branches/54-qualification-runner.md`）：
+  ① check-doc-lifecycle 无跨时间状态倒退检测；② outcome-ledger sample fixture 负例级联半径宽。
+- 本地 main 曾领先 1 个 checkpoint commit（629b132）与 PR #71 分叉，已 merge 收拢（6bcd378）
+  并 push；工作树 clean。
+- **#52 剩余**：G2（runtime enforcement，fresh 双表面）、G3（skills 全量）、G4（多 agent
+  控制面）三组未开测；全过后 v1.4.0（human 批）。
+
 > **活文件**。这是当前状态的单一真相源。每次 session 结束、compact 前、完成小目标时更新。
 > fresh session 应能只读本文件 + `session-tree.md` 就接续工作。
 
