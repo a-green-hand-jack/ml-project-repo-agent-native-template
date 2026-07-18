@@ -1,5 +1,25 @@
 # current-status.md
 
+## 2026-07-18 分支/worktree 清理 + 功能说明 issue #82/#83 建立（主 agent：都督·统·治理路线）
+
+- **worktree/分支清理（human 指令，archive tag 后删，全可恢复）**：清掉 6 个死枝并删对应
+  worktree —— `test/g2-claude-runtime-fresh`、`test/g2-codex-runtime-fresh`（0 独有提交，#55
+  CLOSED）、`worktree-case+elf-template-replay`（13）、`elf-replay-sync-v14rc`（14，#58 CLOSED）、
+  `plan/75-frontmatter-merge`（1，#75 PR #77 已合）、`worktree-case+agent-r1-adoption-replay`（4，
+  旧 adoption replay）；本地删已合入的 `fix/75-typed-relation-propagation`。删前各打 `archive/*`
+  annotated tag 推远端（`archive/elf-replay-v14rc`/`elf-replay-sync-v14rc`/`plan-75-frontmatter-merge`/
+  `agent-r1-adoption-replay`）——**未合并提交全部可恢复**。3 个 Paseo 托管 worktree 走 MCP
+  `archive_worktree` 退出（遵守 paseo-private：MCP 优先、未重启 daemon）。**现状**：远端只剩
+  `main` + `research/paper-positioning`；worktree 同；无游离 Paseo agent。全程 gh api 独立核实。
+- **新开功能说明 issue（对齐 writing-paper-template #21/#24）**：
+  - **#82** 📖《本模板提供了什么 & 怎么实现的》——能力六组（安全两层 / subagent 路由 / anatomy
+    防漂移 / 证据链反 overclaim / 状态记忆 / recipe+能力登记）逐条「功能→源文件→验证状态」，建立在
+    `DESIGN.md` + G1–G6 结果上；**诚实单列已知边界**（Codex hook 地板未自动加载 #78 D1/D4 待 P8；
+    git 层 `.githooks/pre-push` 是当前 Codex 表面唯一生效地板；#79/#78-D3 标已真修）。
+  - **#83** 📎《ELF case 端到端验证 + 变异压测》——**#82 的原生 sub-issue**；复用既有 ELF case
+    （archive tag 已留），baseline 登记 + 质量门全绿 + 五类变异探针（overclaim/provenance/结构/
+    保护路径/良性对照）计划。**下一步**：在 #83 下先定 case 刷新方案再实作。
+
 ## 2026-07-18 自主窗口：#72 纠错 + #79 绿灯幻觉修复 + #78 P0 部分真修（主 agent：都督·统·治理路线）
 
 - **#72 属误号（纠正）**：前序污染环境曾把「validate-governance 绿灯幻觉」挂到 #72，但
