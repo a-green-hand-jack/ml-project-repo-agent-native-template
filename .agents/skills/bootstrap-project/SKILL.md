@@ -62,8 +62,10 @@ CODEOWNERS owner、`PROJECT.md` 内容、要不要删无用目录的步骤（本
      判定的。
 5. 把上一步的 human todo 列表转成给 human 的简短清单，明确标注哪些是「已自动完成」（`.template.toml`、
    `core.hooksPath`、Codex adapters、governance）、哪些「仍需 human」（CODEOWNERS、PROJECT.md、
-   删减目录、**Codex trust 本 repo**——这条无法脚本化，Codex 的 `.codex/config.toml` hooks 要先被
-   human trust 才会加载）。
+   删减目录、**Codex trust 本 repo**——在该 repo 启动 Codex 后运行 `/hooks`，逐项审阅并显式信任；
+   退出后启动 fresh session，再运行 `python scripts/check-codex-hook-runtime.py --status`。只有
+   `TRUSTED_AND_LOADED` 才能声明已加载；缺 receipt 必须保守报 `UNTRUSTED_OR_NOT_LOADED`。撤销同样
+   走 `/hooks` 禁用 non-managed hooks）。
 
 ## 验证命令
 
@@ -72,12 +74,14 @@ python lab/evals/bootstrap/run-bootstrap-smoke.py
 python /path/to/new-project/scripts/validate-governance.py --strict
 python /path/to/new-project/scripts/check-agent-harness.py --strict
 python /path/to/new-project/scripts/sync-codex-adapters.py --check
+python /path/to/new-project/scripts/check-codex-hook-runtime.py --manifest
+python /path/to/new-project/scripts/check-codex-hook-runtime.py --status
 git diff --check
 ```
 
-三个 validator 只能证明 Claude/Codex 两侧配置与 adapter 的**静态自洽**；不能证明当前 Codex
-session 已经 trust 本 repo、已加载 project hooks。这一条运行时证据需要从目标 repo 启动一个
-fresh Codex session 另行确认（见 plan A5），不能用静态检查结果替代。
+前三个 validator 与 `--manifest` 只能证明 Claude/Codex 两侧配置、adapter 与 hook bundle 的
+**静态自洽**；不能证明当前 Codex session 已 trust 本 repo。`--status` 必须读取 fresh SessionStart
+写出的、与当前 bundle SHA 一致的 receipt 才返回 `TRUSTED_AND_LOADED`，不能用静态结果替代。
 
 ## 失败时的 handoff
 

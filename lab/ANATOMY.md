@@ -36,6 +36,7 @@ maintenance: |
 `evals/bootstrap/`、`evals/template-sync/`（`template-sync.py` 的故障注入 smoke，无独立 anatomy）、
 `evals/qualification/`（issue #54/#59 的 A 层 G1/G6 qualification runner，无独立 anatomy）、
 `evals/control-plane/`（issue #57 的 D 层 G4 双 agent 场景驱动，无独立 anatomy）、
+`evals/codex-hooks/`（issue #89 的 project-hook bundle/receipt synthetic regression；真实 trust 仍需 `/hooks` + fresh session）、
 `reports/cc-workflow/`、`docs/{reference,research-narrative,audits}/`
 为 leaf/scaffold，只有 `README.md` 或单脚本 smoke，无独立 anatomy（`docs/` 三个子目录的用途见
 `human/decisions/20260709-lab-docs-reference-and-external-vendor-placement.md`；`reference/`、

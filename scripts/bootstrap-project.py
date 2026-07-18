@@ -332,10 +332,11 @@ def human_todo_items(target: Path) -> list[dict[str, Any]]:
         {
             "id": "codex-trust",
             "path": ".codex/config.toml",
-            "detected_state": "unknown",
+            "detected_state": "untrusted-until-runtime-receipt",
             "action": (
-                "在 Codex 里 trust 本 repo，否则 project hooks/config 不会加载"
-                "（out-of-band 前提，脚本无法代做、也无法可靠探测）"
+                "在该 repo 启动 Codex，运行 /hooks 审阅并信任 project hooks；退出后启动 fresh "
+                "session，再运行 python scripts/check-codex-hook-runtime.py --status。"
+                "缺 receipt 时不得宣称 runtime 已受保护；撤销也走 /hooks"
             ),
         },
         {

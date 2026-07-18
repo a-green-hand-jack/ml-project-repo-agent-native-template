@@ -208,6 +208,21 @@ def check_codex_config() -> None:
     elif "pip" not in rules.read_text(encoding="utf-8", errors="replace"):
         warn(".codex/rules/default.rules 未见 pip install 禁止规则")
 
+    trust_check = REPO / "scripts" / "check-codex-hook-runtime.py"
+    if not trust_check.exists():
+        err("缺少 scripts/check-codex-hook-runtime.py（Codex hook bundle/runtime receipt 门禁）")
+    else:
+        proc = subprocess.run(
+            [sys.executable, str(trust_check), "--check"],
+            cwd=str(REPO),
+            text=True,
+            capture_output=True,
+            timeout=30,
+        )
+        if proc.returncode != 0:
+            detail = (proc.stdout + proc.stderr).strip()
+            err(f"Codex hook bundle 不自洽：{detail}")
+
 
 def check_codex_adapters() -> None:
     sync_script = REPO / "scripts" / "sync-codex-adapters.py"

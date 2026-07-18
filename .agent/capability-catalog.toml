@@ -565,7 +565,7 @@ path_boundaries = "跑清单化检查，不擅自修复越界"
 adapters = [".agents/skills/command-weekly-maintenance/SKILL.md"]
 completion_contract = "维护清单逐项检查结果"
 
-# ============================ hooks（8）============================
+# ============================ hooks（9）============================
 # 正式 hook = 真实被 .claude/settings.json / .codex/config.toml 挂载为 hook command 的脚本
 # （校验器 _discover_hooks 以注册表面为 canonical）。helper/setter（context_usage /
 # agent_identity / agent_name_set）不是正式 hook capability，故不登记、不豁免——它们不在
@@ -682,3 +682,17 @@ human_gates = []
 path_boundaries = "只注入命名指令/身份，不写仓库状态"
 adapters = []
 completion_contract = "无名 agent 收到命名指令与自知"
+
+[[capability]]
+id = "hook.codex_runtime_receipt"
+kind = "hook"
+name = "codex_runtime_receipt"
+path = ".claude/hooks/codex_runtime_receipt.py"
+status = "registered"
+inputs = "Codex SessionStart：当前 repo 与 hook bundle SHA"
+outputs = ".codex/runtime/hook-receipt.json（gitignored runtime 加载证据）"
+validators = ["scripts/check-codex-hook-runtime.py", "scripts/check-agent-harness.py"]
+human_gates = ["Codex `/hooks` 显式审阅/信任/撤销"]
+path_boundaries = "只写 gitignored .codex/runtime receipt；不读写用户全局 trust 内部状态"
+adapters = []
+completion_contract = "fresh Codex SessionStart 产生与当前 bundle 一致的可观察 receipt"

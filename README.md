@@ -85,8 +85,10 @@ python scripts/bootstrap-project.py . --origin <owner/repo>
 - 填写 `PROJECT.md`：研究对象、active family、trunk、remote/worktree 策略。
 - 把 `.github/CODEOWNERS` 里的 `@a-green-hand-jack` 换成该项目真实 owner。
 - 删掉用不到的目录（模板是「一次建好，按需删减」，不是「一定全用」）。
-- 若使用 Codex，**信任本 repo 的 `.codex/` project config**——这一步无法脚本化，Codex 的 hooks
-  要先被 human trust 才会加载；`bootstrap-project.py` 只能把这一步列成待办，不能代做。
+- 若使用 Codex，在该 repo 启动 Codex 后运行 **`/hooks`**，逐项审阅并信任 `.codex/` project hooks；
+  退出后启动 fresh session，运行 `python scripts/check-codex-hook-runtime.py --status`，只有
+  `TRUSTED_AND_LOADED` 才表示 runtime 已加载。撤销也在 `/hooks` 中禁用对应 non-managed hooks；
+  `bootstrap-project.py` 只列出这个 human gate，不代做用户级信任。
 - 在 `.reference-docs/` 里保留或更新你信奉的 doctrine 版本。
 
 ## 迁移已有 repo（Adopt existing repo）
