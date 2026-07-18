@@ -16,9 +16,18 @@ Status: draft · <YYYY-MM-DD> · <ref：approval 证据/初稿说明>
 
 ## Linked issue / PR
 
+- parent issue：<拆分自哪个 parent；无则填 none>
+- child issue / phase：<本 plan 对应的 child issue 与阶段：prepare/freeze | execute/observe | 单阶段>
+
 ## Allowed paths
 
 ## Forbidden paths
+
+## 实验冻结面（仅实验类 plan；非实验填 n/a）
+- frozen commit：<freeze commit hash；未冻结填 pending>
+- allowed writes：<执行阶段允许写入的路径，如 trace/result/state/log>
+- forbidden writes：<冻结面：config/prompt/schema/adapter/strategy/runner/产品源码>
+- on drift：需改冻结面时——把 run 标 `calibration/invalid`、停止评分、转 child issue，不现场修补后继续
 
 ## 任务树
 - [ ] Parent task

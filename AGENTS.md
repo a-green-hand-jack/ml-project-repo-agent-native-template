@@ -29,6 +29,20 @@
 
 `git push` 到 topic/实验分支是 `allow`（agent 可做）；push 到 `main`/`master` 由 hook 拦，需 human 显式放行 `CLAUDE_ALLOW_PUSH_MAIN=1` 或 `CODEX_ALLOW_PUSH_MAIN=1`。其余外部副作用一律走 human gate，见 `.agent/human-gates.md` 与 `.agent/autonomous-window.md`。
 
+## issue topology（长任务拆分）
+
+长任务不塞进一个 issue。出现下列**任一**情况就拆 linked child / sub-issue：
+
+- 会产出独立 PR；
+- 会有独立的实验 run；
+- 出现独立 blocker；
+- 需要不同 owner / worktree；
+- parent issue 已混入多个阶段（如「准备冻结」与「执行观测」并存）。
+
+parent issue 只保留：**目标、已接受决策、child issue 索引、最终汇总**——不承载每个 run 的流水账。child issue 自带 owner / scope / stop condition / 回链到 parent。
+
+**非目标**：不要求所有小任务都拆（单 PR、单阶段、单 owner 的任务留在原 issue）；不自动批量建 child issue。
+
 ## 能力是 repo-local 的
 
 项目相关的 agent / skill / command / hook canonical 源放在 `.claude/`，Codex adapters 放在 `.codex/` 与 `.agents/`，不装到 user 全局。行为契约放 `.agent/`，结构地图放 `ANATOMY.md`，门禁放 `scripts/`。

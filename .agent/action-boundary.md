@@ -38,6 +38,16 @@
 - 文件编辑：`Edit`/`Write`（受保护路径除外，被 deny + hook 挡）。
 - 跑 repo validator：`python scripts/*.py`。
 
+## execution-only agent（评分 run 中）
+
+评分 run 处于「执行观测」阶段（见 `plans/README.md` 两阶段协议），其 execution-only agent 的允许动作**只**包括：
+
+- 运行冻结好的实验、读取；
+- 写 trace / result / state / log；
+- 机械汇总、报告。
+
+schema / prompt / adapter / strategy / runner / 依赖 / 产品源码属**准备或修复阶段**的冻结面——execution-only agent 在评分 run 中**不得修改**。发现冻结面缺陷：把当前 run 标 `calibration/invalid`、停止评分、转 child issue 回准备阶段，不边改边评分。
+
 ## 副作用半径原则
 
 选择动作时按「错了会怎样」判断：浪费 GPU、污染数据、误导论文、影响导师/合作者可见材料 —— 半径越大越要走 `human-gates.md`。checkpoint / data / remote 至少四层保护：permissions + hook + validator + artifact index。
