@@ -198,11 +198,11 @@ docs:
   - id: plan-20260718-83-elf-case-refresh
     path: plans/20260718-83-elf-case-refresh.zh.md
     kind: plan
-    status: draft
+    status: implementing
     issue: "#83"
-    branch: null
-    worktree: null
-    approval: null
+    branch: case/elf-refresh-v2
+    worktree: .
+    approval: "#88 执行阶段 kickoff：总调度授权重新 clone lillian039/ELF 公共仓 + case 分支 commit/push（不开 PR/merge/close，验收留主调度）；plan「按默认走」6 项默认已定稿（见 Human 批注区）；ELF v2 冻结 adoption baseline 落成，证据 lab/docs/audits/elf-refresh-v2-baseline.md + memory/branches/88-elf-refresh-v2-A.md"
     upstream: []
     downstream: []
     superseded_by: null

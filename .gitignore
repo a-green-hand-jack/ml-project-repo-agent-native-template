@@ -93,6 +93,13 @@ memory/agents/*
 memory/mailbox/*
 !memory/mailbox/README.md
 
+# 外部 vendored 第三方源码：bytes 不进 Git（含其自带 .git），只登记 provenance。
+# 见 human/decisions/20260709-lab-docs-reference-and-external-vendor-placement.md（F6）；
+# provenance 记录在 lab/docs/reference/provenance.md。整个 clone 目录被忽略，
+# git 不递归进入；只保留说明 README（与 lab/code/imported/ 的 tracked adoption 面不同）。
+lab/code/external/*
+!lab/code/external/README.md
+
 # 编辑器 / OS
 .DS_Store
 .idea/

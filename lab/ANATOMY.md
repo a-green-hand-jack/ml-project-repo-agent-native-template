@@ -39,8 +39,9 @@ maintenance: |
 `evals/codex-hooks/`（issue #89 的 project-hook bundle/receipt synthetic regression；真实 trust 仍需 `/hooks` + fresh session）、
 `reports/cc-workflow/`、`docs/{reference,research-narrative,audits}/`
 为 leaf/scaffold，只有 `README.md` 或单脚本 smoke，无独立 anatomy（`docs/` 三个子目录的用途见
-`human/decisions/20260709-lab-docs-reference-and-external-vendor-placement.md`；`reference/`、
-`research-narrative/` 目前无真实内容，暂未物理创建，仅 `audits/` 已落地）。
+`human/decisions/20260709-lab-docs-reference-and-external-vendor-placement.md`；`research-narrative/`
+目前无真实内容，暂未物理创建；`reference/`（provenance 记录，见 `docs/reference/provenance.md`）
+与 `audits/` 已落地）。
 
 ## State（意图）
 

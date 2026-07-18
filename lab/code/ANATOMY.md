@@ -11,7 +11,8 @@ maintenance: |
 
 ## What this is
 
-实现层。承载全部可执行代码，按职责分五个子目录。当前为 template scaffold，描述意图结构。
+实现层。承载全部可执行代码，按职责分子目录（五个 scaffold 子目录 + 按需出现的
+`external/` vendored 面）。当前为 template scaffold，描述意图结构。
 
 ## Composition
 
@@ -25,6 +26,7 @@ Children:
 | `scripts/` | 脚本 | README only |
 | `tests/` | 测试 | README only |
 | `experiments/` | 实验入口 | README only |
+| `external/` | 外部 vendored 第三方源码（bytes gitignored，只读引用，provenance 在 `../docs/reference/provenance.md`） | README only（按需出现） |
 
 ## Connections（意图）
 
