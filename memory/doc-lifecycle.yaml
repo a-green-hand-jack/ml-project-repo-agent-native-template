@@ -194,3 +194,15 @@ docs:
     upstream: []
     downstream: []
     superseded_by: null
+
+  - id: plan-20260718-83-elf-case-refresh
+    path: plans/20260718-83-elf-case-refresh.zh.md
+    kind: plan
+    status: draft
+    issue: "#83"
+    branch: null
+    worktree: null
+    approval: null
+    upstream: []
+    downstream: []
+    superseded_by: null
