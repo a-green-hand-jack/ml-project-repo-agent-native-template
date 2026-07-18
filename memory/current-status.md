@@ -1,5 +1,27 @@
 # current-status.md
 
+## 2026-07-18 issue 拓扑整理 + 功能 case portfolio / P8 发布入口（主 agent：都督·统·治理路线）
+
+- **本轮只做 issue 治理与历史清理，未启动执行 agent/case**。功能说明 **#82** 设为 pinned 长期父
+  issue，原生 case 子 issue：**#83 ELF refresh**、**#86 Agent-R1 adoption replay v2**、
+  **#87 Marque 真实下游 adoption→sync→feedback**。
+- **ELF #83 按 issue topology 拆阶段**：#88 更新者 A（clone/迁移/adoption baseline/frozen SHA）→
+  #84 独立测试者 B targeted smoke（validator/TS-12/#78/#79/#80）→ #85 full replay、mutation matrix、
+  ledger/report 收口。一次只激活一个阶段；当前仍未建 branch/worktree、plan lifecycle 仍为 draft。
+- **v1.4.0 / runtime**：#52 改写为 v3——G1-G6 均已执行；G2 是 `COMPLETE WITH FINDINGS`。
+  #78 中 D2/D3/D5/D6/D7 已修，剩 D1/D4 迁移到 **#89 Codex hook trust/runtime closure** 后关闭
+  #78。**#90** 是 P8 exact-candidate qualification + VERSION/CHANGELOG/tag/release（human gate）。
+  #89/#90 均为 #52 原生 sub-issue。
+- **LingTai tracking 收口**：#48 的 S2/S3 已完成；S1 runtime/evidence owner 已迁到 #89 与
+  #82/#83/#86/#87，#49 已同步，故 #48 关闭。
+- **Bridge 线整理**：#24 保留 tracker；#28 标已完成；#26/#27 设为 #24 原生 sub-issue，状态明确
+  `BLOCKED/DEFERRED`，等待 Bridge schema/message/version contract 冻结，入口前不建分支/agent。
+- **paper 线按 human 决策暂缓**：#25/#29 以 `not planned` 关闭，#25 unpin；11 个未合并论文定位/
+  review 提交以远端 annotated tag **`archive/paper-positioning-v5`** 固化（指向 `8bcb6c9`），随后删除
+  `research/paper-positioning` worktree 与本地/远端 branch；未来重启时建新 paper goal，不复活陈旧状态。
+- **下游闭环**：Marque（私有仓，默认 `dev`，已有 agent-native 平面但未见 `.template.toml`）选为
+  #87 case，同时回链 #19/#11；写入 Marque 仍须该仓 human gate，本轮未对 Marque 做任何修改。
+
 ## 2026-07-18 分支/worktree 清理 + 功能说明 issue #82/#83 建立（主 agent：都督·统·治理路线）
 
 - **worktree/分支清理（human 指令，archive tag 后删，全可恢复）**：清掉 6 个死枝并删对应
