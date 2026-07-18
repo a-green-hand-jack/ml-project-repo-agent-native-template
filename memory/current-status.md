@@ -1,5 +1,28 @@
 # current-status.md
 
+## 2026-07-18 自主窗口：#72 纠错 + #79 绿灯幻觉修复 + #78 P0 部分真修（主 agent：都督·统·治理路线）
+
+- **#72 属误号（纠正）**：前序污染环境曾把「validate-governance 绿灯幻觉」挂到 #72，但
+  `gh api` 双通道核实 **#72 实为已合并的 G4 control-plane PR**，全量扫描确认此前**并无**对应 issue。
+  真实缺陷据实处理（见下），未改任何承诺。
+- **#79 合入（squash `bbd54fa`）——绿灯幻觉修复**：`validate-governance.py` 三项核心语义检查
+  （证据链/overclaim、发布闸门、回归矩阵）原在**无 PyYAML** 时只 WARN 就 return，默认模式静默放绿。
+  改为内置受限块式解析器回退真跑（对齐仓库 `_parse_restricted` doctrine，PyYAML 可选但检查照跑）。
+  独立 verifier 自造四类负例，两条路径等价 FAIL；有 PyYAML 逐字节不变。
+- **#78 P0 部分真修 → PR #80 合入（squash `e683af6`）**：writer/verifier 分离 + 独立 APPROVE。
+  - **D3（P0）**：`pre_tool_guard._is_protected_file`/`_touches_protected_dir` 对 Claude 绝对路径
+    是死代码 → 新增 `_repo_rel()` 归一化；mlruns 缺口覆盖。
+  - **D3/Bash（P0）**：`_check_bash` 新增拦 `>`/`>>`/`&>`/`tee`/`touch`/`ln` 写受保护路径向量。
+  - **D2（P0）**：新增 `.githooks/pre-push`（surface-agnostic git 层地板，Claude+Codex 通吃）拦 push main。
+  - **D6/D5/D7**：NotebookEdit matcher 补齐；formatter 改调 `format_changed_python.py`+ruff 缺失可见；
+    Codex identity matcher 加 compact。回归验证原地板仍拦、正常操作不误伤。
+- **残留 P0：D1（Codex apply_patch 向量）/ D4（Codex identity 链）** —— 只读调查定论：整条 Codex
+  PreToolUse enforcement 建立在「Codex 与 Claude 同 schema + 尊重 exit 2」的**未验证假设**上，仓内无
+  一手依据。**下一步：起隔离 Codex 真机 dump 真实 hook payload schema + 测 exit 2 是否 deny**，据此
+  真修 matcher/dispatch 或给出 codex-cli 限制结论供 human 在 P8 豁免。**发版门 P8 仍受 D1/D4 约束。**
+- **v1.4.0 剩余**：#78 仅剩 D1/D4（Codex runtime，取证中）→ 发版门 P8。其余开放 issue 多为长周期
+  research 目标（#22/#25/#29/#24/#26/#27/#19），非本窗口可收口。
+
 ## 2026-07-17 G2/#55 收口——发版门被 #78 阻断（主 agent：都督·统·治理路线）
 
 - **G2（P6，最后一组）测试执行完成，总结论 FAIL**：两个非实现者 fresh session 独立实测双表面 runtime
