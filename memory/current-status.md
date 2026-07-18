@@ -2,7 +2,13 @@
 
 ## 2026-07-18 issue 拓扑整理 + 功能 case portfolio / P8 发布入口（主 agent：都督·统·治理路线）
 
-- **本轮只做 issue 治理与历史清理，未启动执行 agent/case**。功能说明 **#82** 设为 pinned 长期父
+- **标签治理**：按 human 要求补齐全部开放/历史 issue 的 GitHub labels；复核后无零标签 issue。
+- **#89 bug 处理中**：仓内修复候选已提交并推送 topic branch
+  `fix/89-codex-hook-trust@be3cc57`。实现 exact hook/script bundle SHA、Codex `SessionStart`
+  runtime receipt、`UNTRUSTED_OR_NOT_LOADED` 诚实降级、bootstrap/adoption `/hooks` trust/撤销流程；
+  bootstrap smoke、定向 trust regression、strict governance 全绿。尚未越过 PR/merge gate，也未修改
+  用户全局 trust；真实 `/hooks` + fresh session D1/D4 复验完成前 #89 保持 open、#90 不发布。
+- **case portfolio 整理轮未启动执行 agent/case**。功能说明 **#82** 设为 pinned 长期父
   issue，原生 case 子 issue：**#83 ELF refresh**、**#86 Agent-R1 adoption replay v2**、
   **#87 Marque 真实下游 adoption→sync→feedback**。
 - **ELF #83 按 issue topology 拆阶段**：#88 更新者 A（clone/迁移/adoption baseline/frozen SHA）→
