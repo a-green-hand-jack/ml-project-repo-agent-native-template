@@ -27,8 +27,13 @@
   窗口不自动做。**已有真实缓解**：D2 `.githooks/pre-push` 是 git 层 surface-agnostic 地板，Codex push
   main 也拦（不依赖 Codex hook）。**发版门 P8 建议**：(1) bootstrap 加 Codex hook 信任注册并真机复验，
   或 (2) 收窄承诺为「Claude+git 层地板，Codex 技术地板依赖用户级 hook 注册」，或 (3) human 豁免。
-- **v1.4.0 剩余**：#78 仅剩 D1/D4（Codex runtime，取证中）→ 发版门 P8。其余开放 issue 多为长周期
-  research 目标（#22/#25/#29/#24/#26/#27/#19），非本窗口可收口。
+- **#53 已修并关闭（PR #81 合入 `5c6596e`）**：issue topology 拆分 + 实验 prepare/freeze vs
+  execute/observe 硬隔离，纯文档/模板级最小 diff（AGENTS/plans/action-boundary/plan-doc 模板/两个
+  lab README），writer/verifier 分离 + 独立 APPROVE。
+- **v1.4.0 剩余**：#78 仅剩 D1/D4（Codex runtime hook 信任注册，需 human P8 决策）→ 发版门 P8。
+  本窗口已把所有**可无风险自主收口**的 issue 收完（#79/#53 全关，#78 P0 大半真修）。其余开放 issue
+  是**长周期 research/架构**（#22 North Star / #24 三仓契约 / #25 paper-goal / #26·#27 bridge /
+  #29 paper-experiment / #19 下游闭环）或**活体 tracker**（#48/#49/#11）——非一夜可诚实收口，未强关。
 
 ## 2026-07-17 G2/#55 收口——发版门被 #78 阻断（主 agent：都督·统·治理路线）
 
