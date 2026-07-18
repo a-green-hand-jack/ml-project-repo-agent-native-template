@@ -83,6 +83,9 @@ build/
 .agent-identity
 memory/agents-roster.md
 
+# Codex project-hook runtime receipt（本机/session 证据，不进 Git）
+.codex/runtime/
+
 # 多 agent 控制面运行时状态（状态明细 + mailbox 内容，同 roster 先例——
 # 见 .agent/multi-agent-control-plane.md；schema/脚本在框架层，内容不入 git）
 memory/agents/*

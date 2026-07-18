@@ -9,7 +9,7 @@ matcher = "^(Bash|apply_patch|Edit|Write)$"
 
 [[hooks.PreToolUse.hooks]]
 type = "command"
-command = 'python3 "$(git rev-parse --show-toplevel)/.claude/hooks/pre_tool_guard.py"'
+command = 'CODEX_HOOK_BUNDLE_SHA=d7e28f2bdb1d53f9759fd0029c4c0d53772afb8ddd5e453320ed3dd41f7d89f9 python3 "$(git rev-parse --show-toplevel)/.claude/hooks/pre_tool_guard.py"'
 timeout = 30
 statusMessage = "Checking repo safety floor"
 
@@ -18,13 +18,13 @@ matcher = "^(apply_patch|Edit|Write)$"
 
 [[hooks.PostToolUse.hooks]]
 type = "command"
-command = 'python3 "$(git rev-parse --show-toplevel)/.claude/hooks/format_changed_python.py"'
+command = 'CODEX_HOOK_BUNDLE_SHA=d7e28f2bdb1d53f9759fd0029c4c0d53772afb8ddd5e453320ed3dd41f7d89f9 python3 "$(git rev-parse --show-toplevel)/.claude/hooks/format_changed_python.py"'
 timeout = 30
 statusMessage = "Formatting changed Python files"
 
 [[hooks.PostToolUse.hooks]]
 type = "command"
-command = 'python3 "$(git rev-parse --show-toplevel)/.claude/hooks/zh_review_advisory.py"'
+command = 'CODEX_HOOK_BUNDLE_SHA=d7e28f2bdb1d53f9759fd0029c4c0d53772afb8ddd5e453320ed3dd41f7d89f9 python3 "$(git rev-parse --show-toplevel)/.claude/hooks/zh_review_advisory.py"'
 timeout = 30
 statusMessage = "Checking Chinese-default docs"
 
@@ -33,7 +33,7 @@ matcher = "^.*$"
 
 [[hooks.PreCompact.hooks]]
 type = "command"
-command = 'python3 "$(git rev-parse --show-toplevel)/.claude/hooks/pre_compact_memory_check.py"'
+command = 'CODEX_HOOK_BUNDLE_SHA=d7e28f2bdb1d53f9759fd0029c4c0d53772afb8ddd5e453320ed3dd41f7d89f9 python3 "$(git rev-parse --show-toplevel)/.claude/hooks/pre_compact_memory_check.py"'
 timeout = 30
 statusMessage = "Checking memory freshness"
 
@@ -42,7 +42,7 @@ matcher = "^.*$"
 
 [[hooks.SubagentStop.hooks]]
 type = "command"
-command = 'python3 "$(git rev-parse --show-toplevel)/.claude/hooks/subagent_report_index.py"'
+command = 'CODEX_HOOK_BUNDLE_SHA=d7e28f2bdb1d53f9759fd0029c4c0d53772afb8ddd5e453320ed3dd41f7d89f9 python3 "$(git rev-parse --show-toplevel)/.claude/hooks/subagent_report_index.py"'
 timeout = 30
 statusMessage = "Indexing subagent report"
 
@@ -54,14 +54,14 @@ statusMessage = "Indexing subagent report"
 
 [[hooks.UserPromptSubmit.hooks]]
 type = "command"
-command = 'python3 "$(git rev-parse --show-toplevel)/.claude/hooks/context_threshold_notice.py"'
+command = 'CODEX_HOOK_BUNDLE_SHA=d7e28f2bdb1d53f9759fd0029c4c0d53772afb8ddd5e453320ed3dd41f7d89f9 python3 "$(git rev-parse --show-toplevel)/.claude/hooks/context_threshold_notice.py"'
 timeout = 30
 statusMessage = "Checking context usage"
 
 # agent 身份：首个 prompt 若未命名则注入自命名指令（对齐 Claude 表面）
 [[hooks.UserPromptSubmit.hooks]]
 type = "command"
-command = 'python3 "$(git rev-parse --show-toplevel)/.claude/hooks/agent_identity_hook.py"'
+command = 'CODEX_HOOK_BUNDLE_SHA=d7e28f2bdb1d53f9759fd0029c4c0d53772afb8ddd5e453320ed3dd41f7d89f9 python3 "$(git rev-parse --show-toplevel)/.claude/hooks/agent_identity_hook.py"'
 timeout = 30
 statusMessage = "Agent self-naming"
 
@@ -70,7 +70,7 @@ matcher = "compact|clear"
 
 [[hooks.SessionStart.hooks]]
 type = "command"
-command = 'python3 "$(git rev-parse --show-toplevel)/.claude/hooks/context_continuity.py"'
+command = 'CODEX_HOOK_BUNDLE_SHA=d7e28f2bdb1d53f9759fd0029c4c0d53772afb8ddd5e453320ed3dd41f7d89f9 python3 "$(git rev-parse --show-toplevel)/.claude/hooks/context_continuity.py"'
 timeout = 30
 statusMessage = "Restoring status continuity"
 
@@ -81,6 +81,15 @@ matcher = "startup|resume|clear|compact"
 
 [[hooks.SessionStart.hooks]]
 type = "command"
-command = 'python3 "$(git rev-parse --show-toplevel)/.claude/hooks/agent_identity_hook.py"'
+command = 'CODEX_HOOK_BUNDLE_SHA=d7e28f2bdb1d53f9759fd0029c4c0d53772afb8ddd5e453320ed3dd41f7d89f9 python3 "$(git rev-parse --show-toplevel)/.claude/hooks/agent_identity_hook.py"'
 timeout = 30
 statusMessage = "Reasserting agent identity"
+
+# 可观察 runtime receipt：只有 project hooks 真被 Codex trust/load 后才会写
+# `.codex/runtime/hook-receipt.json`（gitignored）。与其它 hook 共用 bundle SHA；
+# 任一被调用脚本变化时 validator 要求刷新本配置，Codex `/hooks` 会重新审阅定义。
+[[hooks.SessionStart.hooks]]
+type = "command"
+command = 'CODEX_HOOK_BUNDLE_SHA=d7e28f2bdb1d53f9759fd0029c4c0d53772afb8ddd5e453320ed3dd41f7d89f9 python3 "$(git rev-parse --show-toplevel)/.claude/hooks/codex_runtime_receipt.py"'
+timeout = 30
+statusMessage = "Recording Codex project-hook receipt"

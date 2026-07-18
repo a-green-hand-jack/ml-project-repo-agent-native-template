@@ -26,15 +26,19 @@ def count_glob(target: Path, pattern: str) -> int:
 
 
 def codex_trust_item() -> dict[str, Any]:
-    """Fixed, caller-independent text: Codex trust is always an out-of-band
-    human prerequisite, whether the repo was just bootstrapped or adopted."""
+    """Fixed, caller-independent trust workflow for bootstrap and adoption.
+
+    Codex officially exposes trust review through the interactive `/hooks`
+    browser. We never parse or mutate user-global trust internals.
+    """
     return {
         "id": "codex-trust",
-        "status": "needs-human",
+        "status": "untrusted-until-runtime-receipt",
         "note": (
-            "Codex 的 `.codex/config.toml` hooks 需 human 先 trust 本 repo 才加载；"
-            "bootstrap/adoption 都无法代做，也没有稳定可脚本读取的 trust/provenance API "
-            "可用于自动判定，因此保守标注 needs-human，不猜测已生效。"
+            "在该 repo 启动 Codex，运行 `/hooks`，逐项核对来源/command/bundle SHA 后显式信任；"
+            "退出并启动 fresh session，再运行 `python scripts/check-codex-hook-runtime.py --status`。"
+            "只有状态为 TRUSTED_AND_LOADED 才证明 project hooks 已加载；缺 receipt 必须保持 "
+            "UNTRUSTED_OR_NOT_LOADED。撤销也走 `/hooks` 禁用 non-managed hooks。"
         ),
     }
 

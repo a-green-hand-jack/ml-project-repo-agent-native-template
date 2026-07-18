@@ -3,6 +3,7 @@ related_files:
   - ../ANATOMY.md
   - CONTRACT.md
   - check-agent-harness.py
+  - check-codex-hook-runtime.py
   - check-anatomy-drift.py
   - check-capability-catalog.py
   - check-doc-lifecycle.py
@@ -47,6 +48,7 @@ Codex adapter 同步脚本把 `.claude/` canonical 能力生成到 `.codex/` 与
 | 文件 | 角色 | 对应 doctrine |
 | --- | --- | --- |
 | `check-agent-harness.py` | 结构/必需文件/根污染/四件套/能力索引/settings/DESIGN 清单 校验 | `.agent/repo-editing-guardrails.md` · `repo-documentation-topology.md` |
+| `check-codex-hook-runtime.py` | Codex project-hook bundle 审计与 runtime receipt：列出 exact hook/script SHA、刷新/校验共享 bundle 标记；fresh SessionStart receipt 与当前 bundle 一致时才报 `TRUSTED_AND_LOADED`，不读取/改写用户全局 trust 内部状态 | issue #89 · `.agent/action-boundary.md` |
 | `check-anatomy-drift.py` | ANATOMY related_files 与 line citation 漂移 + 120 行硬上限 | `.agent/anatomy-protocol.md` |
 | `validate-governance.py` | 聚合 harness/anatomy/doc-lifecycle/outcome-ledger/实验状态/provenance-chain/capability-catalog 七个子检查 + gitignore/YAML/tracked-bytes + 证据链一致性(overclaim 拦截，含 `governance_status=legacy_unverified` 存量豁免，issue #63 D1，与另两个子检查同一套语义) | `.agent/action-boundary.md` · `artifact-policy.md` · `principles.md` |
 | `check-capability-catalog.py` | 声明式能力目录 `.agent/capability-catalog.toml` ↔ 真实 `.claude/` 能力面 ↔ 生成 adapter 的三向一致：登记齐全(missing)/无幽灵条目(unexpected)/adapter parity + schema(profile=research, chassis-spec pin/compatibility)；`--self-test` 跑内嵌对抗 fixture | `.agent/tool-skill-interface.md` · `.agent/capability-catalog.toml` · issue #28 |
