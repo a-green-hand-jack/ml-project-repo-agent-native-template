@@ -1,5 +1,20 @@
 # current-status.md
 
+## 2026-07-18 #89 Codex hook trust/runtime fresh-session 复验通过（主 agent：都督·统·治理路线）
+
+- **PR #91 已 squash merge**：main exact candidate
+  `4d1d598229dd3063b9a084b4f488ca71ce15f40a` 提供 exact bundle SHA、SessionStart runtime receipt、
+  `UNTRUSTED_OR_NOT_LOADED` 诚实降级及 bootstrap/adoption `/hooks` trust/撤销流程。
+- **真实 `/hooks` 信任完成**：Codex CLI 0.144 TTY 中 `/hooks` 显示 10 个项目 hooks 待 review，
+  human 已授权后按界面执行 trust all；重新启动全新 session 不再出现 review 提示。
+- **fresh-session D1/D4 PASS**：session `019f763c-9301-7d70-93db-a15b1a801808` 首个 turn 后
+  receipt 为 `TRUSTED_AND_LOADED`（bundle
+  `d7e28f2bdb1d53f9759fd0029c4c0d53772afb8ddd5e453320ed3dd41f7d89f9`）；D4 通过规定
+  `agent_name_set.py` 落盘为 `师爷·验·D4复验` 且 `identity_observable: true`；D1 对
+  `lab/data/codex-d1-deny-probe.txt` 的真实写入被拒，允许路径 probe 成功。
+- **证据 owner**：`memory/branches/89-codex-hooks-fresh-verify.md`。证据 PR 合入并关闭 #89 后，
+  #90 P8 exact-candidate qualification 解阻；本条不等同于自动发布 v1.4.0。
+
 ## 2026-07-18 issue 拓扑整理 + 功能 case portfolio / P8 发布入口（主 agent：都督·统·治理路线）
 
 - **标签治理**：按 human 要求补齐全部开放/历史 issue 的 GitHub labels；复核后无零标签 issue。
