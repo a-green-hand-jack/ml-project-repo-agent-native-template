@@ -16,10 +16,17 @@
   - **D2（P0）**：新增 `.githooks/pre-push`（surface-agnostic git 层地板，Claude+Codex 通吃）拦 push main。
   - **D6/D5/D7**：NotebookEdit matcher 补齐；formatter 改调 `format_changed_python.py`+ruff 缺失可见；
     Codex identity matcher 加 compact。回归验证原地板仍拦、正常操作不误伤。
-- **残留 P0：D1（Codex apply_patch 向量）/ D4（Codex identity 链）** —— 只读调查定论：整条 Codex
-  PreToolUse enforcement 建立在「Codex 与 Claude 同 schema + 尊重 exit 2」的**未验证假设**上，仓内无
-  一手依据。**下一步：起隔离 Codex 真机 dump 真实 hook payload schema + 测 exit 2 是否 deny**，据此
-  真修 matcher/dispatch 或给出 codex-cli 限制结论供 human 在 P8 豁免。**发版门 P8 仍受 D1/D4 约束。**
+- **残留 P0：D1/D4（Codex runtime）—— 本机真机取证完成，根因确定**（见
+  `memory/branches/78-codex-hook-trust-finding.md`）：Codex 0.144 的 project `.codex/config.toml` hook
+  要**逐路径 sha256 信任**（`~/.codex/config.toml [hooks.state]`）才跑；`grep -c` 证实**主 repo 的
+  `.codex/config.toml` 从未进信任表**（只有陈旧 worktree 副本曾被信任）。故模板声明的 Codex 安全地板
+  hook（pre_tool_guard/formatter/identity）在当前表面**全部 inert，Codex 从不调用**——G2(Paseo) 与
+  本次 `codex exec` 探针两个表面都 FAIL，完全一致。**不是脚本 bug，是 hook 未加载/未信任**。改
+  `pre_tool_guard.py` 修不了没被调用的 hook。真修要改**用户机器全局 Codex 信任状态**（bootstrap 注册
+  `[hooks.state]` 或 `~/.codex/hooks.json`）——有安全含义、机器特定、**需 human 拍板**，故本 headless
+  窗口不自动做。**已有真实缓解**：D2 `.githooks/pre-push` 是 git 层 surface-agnostic 地板，Codex push
+  main 也拦（不依赖 Codex hook）。**发版门 P8 建议**：(1) bootstrap 加 Codex hook 信任注册并真机复验，
+  或 (2) 收窄承诺为「Claude+git 层地板，Codex 技术地板依赖用户级 hook 注册」，或 (3) human 豁免。
 - **v1.4.0 剩余**：#78 仅剩 D1/D4（Codex runtime，取证中）→ 发版门 P8。其余开放 issue 多为长周期
   research 目标（#22/#25/#29/#24/#26/#27/#19），非本窗口可收口。
 
