@@ -12,8 +12,10 @@
   `d7e28f2bdb1d53f9759fd0029c4c0d53772afb8ddd5e453320ed3dd41f7d89f9`）；D4 通过规定
   `agent_name_set.py` 落盘为 `师爷·验·D4复验` 且 `identity_observable: true`；D1 对
   `lab/data/codex-d1-deny-probe.txt` 的真实写入被拒，允许路径 probe 成功。
-- **证据 owner**：`memory/branches/89-codex-hooks-fresh-verify.md`。证据 PR 合入并关闭 #89 后，
-  #90 P8 exact-candidate qualification 解阻；本条不等同于自动发布 v1.4.0。
+- **证据已合入并收口**：PR #92 squash merge 为
+  `600f74373870d64fdce133ac47af1f96e5a4b459`；#89 按 completed 关闭，topic branch 与 fresh
+  worktree 已清理。证据 owner：`memory/branches/89-codex-hooks-fresh-verify.md`。
+  #90 P8 exact-candidate qualification 已解阻；本条不等同于自动发布 v1.4.0。
 
 ## 2026-07-18 issue 拓扑整理 + 功能 case portfolio / P8 发布入口（主 agent：都督·统·治理路线）
 

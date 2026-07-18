@@ -94,4 +94,4 @@ git status --short: <empty>
 - [x] D4 身份通过规定脚本落盘且 checker 可观察；
 - [x] D1 保护路径真实拒绝 + 允许路径真实成功；
 - [x] Codex TTY session 已 `/exit` 正常退出；
-- [ ] 本证据经 PR 合入 main、#89 关闭、topic branch/worktree 清理。
+- [x] 本证据经 PR #92 合入 main、#89 关闭、topic branch/worktree 清理。
